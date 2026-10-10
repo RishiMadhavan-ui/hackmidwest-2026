@@ -23,6 +23,8 @@ app.include_router(guardian_router)
 app.include_router(runs_router)
 
 
+# /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
+@app.get("/health")
 @app.get("/healthz")
 def healthz():
   return {"status": "ok", "service": "agents"}

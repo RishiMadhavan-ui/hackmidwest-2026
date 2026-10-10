@@ -258,6 +258,8 @@ async def check_status(payment_id: str) -> dict[str, Any]:
   return await _call_api("GET", f"/payments/{payment_id}")
 
 
+# /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
+@mcp.custom_route("/health", methods=["GET"])
 @mcp.custom_route("/healthz", methods=["GET"])
 async def healthz(_: Request) -> JSONResponse:
   return JSONResponse({"status": "ok", "service": "mcp"})
@@ -270,7 +272,7 @@ class BearerAuthMiddleware:
   this server never needs to know any secrets.
   """
 
-  OPEN_PATHS = frozenset({"/healthz"})
+  OPEN_PATHS = frozenset({"/health", "/healthz"})
 
   def __init__(self, app):
     self.app = app
