@@ -7,4 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.143.0",
     "strands-agents[openai]>=1.59.0",
+    "bcrypt>=4.0.0",
+    "PyJWT>=2.8.0",
+    "psycopg[binary]>=3.2.0",
+    "email-validator>=2.0.0",
 ]

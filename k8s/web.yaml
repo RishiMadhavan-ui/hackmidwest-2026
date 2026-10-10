@@ -1,5 +1,6 @@
-# Next.js frontend. Public traffic lands here; /backend/* is rewritten to the
-# api Service inside the cluster.
+# Next.js frontend. Public traffic lands here; path prefixes are rewritten to
+# in-cluster Services: /backend/* → api, /mcp-leash/* → mcp-leash,
+# /mcp-store/* → mcp-store.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +23,10 @@ spec:
           env:
             - name: API_ORIGIN
               value: http://api:8000
+            - name: MCP_LEASH_ORIGIN
+              value: http://mcp-leash:8002
+            - name: MCP_STORE_ORIGIN
+              value: http://mcp-store:8003
           ports:
             - containerPort: 3000
           readinessProbe:

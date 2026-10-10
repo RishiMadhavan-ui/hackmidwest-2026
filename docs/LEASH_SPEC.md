@@ -1241,16 +1241,16 @@ These are conflicts with prior plans; there is no implemented payment system to 
 | Inferred ASA payload/signature format | Fixture may diverge from actual integration | Current official schemas/SDK and configured HMAC setup; normalize via provider adapter |
 | Stripe or direct Lithic-shaped request fallback | Unverified access and misleading network claim | Labeled local rail executing real domain policy/state transitions with a distinct adapter |
 | `services/api/`, `/healthz` described as existing | Actual backend is `api/` with `/health` | Preserve working starter; choose added paths/routes deliberately |
-| Shared contracts already “frozen” | Files do not exist | Jointly agree initial schemas, then preserve dedicated-PR/all-three-review freeze rule |
+| Shared contracts already “frozen” | Files were absent at initial inspection; Rishi accepted the initial R01 baseline after compatibility review | Preserve dedicated-PR/all-three-review rule for subsequent changes |
 | Finance role interpreted as path reassignment | Conflicts with existing lanes | Cameron validates rail/security; Rishi retains product API/domain/schema ownership |
 | Approving integration stubs | Fake verdict/card mistaken for protection | Label test stubs; never issue demo grants without completed trusted verification |
 | Dashboard/audit assumed complete | UI is a starter | Six views backed by persisted events; distinguish grant, authorization and paid state |
 
-Retain compatible decisions: selected stack, Akamai inference/compute, Lithic sandbox preference, PostgreSQL/API-only durable writes, Valkey fast path/events, human-only authority, integer cents, UTC timestamps, canonical JSON, planned Ed25519, thin stateless MCP, provenance snapshots, merchant/MCC controls, kill switch/revocation, one-use instruments, once-only card delivery, no logged financial secrets, receipts, and simulation labels. These are retained decisions; only the starter stack exists today.
+Retain compatible decisions: selected stack, Akamai inference/compute, Lithic sandbox preference, PostgreSQL/API-only durable writes, Valkey fast path/events, human-only authority, integer cents, UTC timestamps, canonical JSON, planned Ed25519, thin stateless MCP, provenance snapshots, merchant/MCC controls, kill switch/revocation, one-use instruments, once-only card delivery, no logged financial secrets, receipts, and simulation labels. These are retained decisions; current implementation status is recorded in section 23.8; the initial inspection is historical.
 
 ## 23. Adapted implementation contract
 
-This defines requirements for the first joint schema/API review, not code or a newly frozen ABI. Semantic requirements are mandatory; owners agree final names and avoid independently redefining domain contracts in each service.
+This defines requirements for the first joint schema/API review. R01 now implements a concrete initial candidate in the shared models/events, documented in [api/README.md](../api/README.md); Rishi authorized the initial baseline; future contract changes retain coordinated review. Semantic requirements are mandatory; owners review final fields and avoid independently redefining domain contracts in each service.
 
 ### 23.1 Data conventions and field mapping
 
@@ -1270,7 +1270,7 @@ USD MVP money is nonnegative integer cents. Reject floats, booleans masquerading
 | Grant total | `authorized_amount_cents` | Exact verified total, not merely spending ceiling |
 | Proposed Cart / `cart_hash` | Preserve as proposal evidence | Separate trusted CheckoutSnapshot and verified hash |
 | PreApproval | Extend/adapt to AuthorizationGrant | Unique grant, mandate version/hash, checkout ID/hash, instrument/correlation, merchant, exact amount/currency, validity and status |
-| Verdict | Guardian findings/recommendation | Preserve reasons/checks/sources/model; no independent grant authority |
+| Verdict / GuardianFindings | Guardian findings/recommendation | Advisory `block`, `review`, or `no_findings`; evidence/checks and structured nullable model metadata; never approves |
 | PaymentRequest | Proposed purchase lifecycle | Separate grant issuance from actual authorization/paid result |
 | ProvenanceEvent / AuthorizationDecision | Extend with trace/correlation/rail metadata | Preserve source hashes/excerpts, latency, actual decision source and event identity |
 
@@ -1334,7 +1334,7 @@ Audit is append-only; deduplicate ingestion rather than altering history. Link m
 
 ### 23.6 Proposed API and MCP responsibilities
 
-Only `GET /health` exists. This target contract retains familiar legacy names; section 12's `/api/...` routes are suggestions, not required breaking renames. Owners agree final routes/models together.
+The product API implements `/health` and JWT signup/login/me; purchase routes remain pending; agents/MCP routes now exist separately. This target contract retains familiar legacy names; section 12's `/api/...` routes are suggestions, not required breaking renames. Owners agree final routes/models together.
 
 | Operation / proposed route | Authority | Enforcement |
 |---|---|---|
@@ -1343,7 +1343,8 @@ Only `GET /health` exists. This target contract retains familiar legacy names; s
 | `GET /mandates`, `GET /mandates/{id}` | Authorized subject/session/agent | No cross-user/session access |
 | Replacement / `PATCH /mandates/{id}` | Human only | Draft replacement, explicit confirmation, immutable history, serialized old-grant revocation |
 | Revoke / `POST /killswitch` | Human only | Serialized invalidation; instrument pause outside ASA |
-| Runs / planned `POST /runs`, `GET /runs/{id}` | Authorized runner | Actual Strands execution tied to mandate/session, no implied consent |
+| Internal agents `POST /runs`, `GET /runs/{id}` | `AGENTS_SERVICE_TOKEN`, API dispatch | Actual Strands execution tied to mandate/session, no implied consent |
+| API `POST /agent-runs` | Agent bearer, authenticated mandate owner | Persist exact run ID/mode; server supplies owner/version/hash; echo only after commit |
 | `POST /checkouts/verify`, `GET /checkouts/{id}` | Scoped purchase caller/trusted backend | Server retrieval/assertion validation; no arbitrary public grant minting |
 | `POST /payments`, `GET /payments/{id}` | Scoped agent or API/MCP caller | Independent verification, idempotent grant issuance, once-only card details if needed |
 | Payment approve/deny review | Human only | Cannot bypass evidence/checks; changed authority requires confirmation/re-verification |
@@ -1354,9 +1355,7 @@ Only `GET /health` exists. This target contract retains familiar legacy names; s
 
 Keep human/provider/inference credentials server-side behind authenticated web routes or a server-issued scoped session. `NEXT_PUBLIC_*` cannot contain `USER_TOKEN` or provider secrets. Agent bearer credentials never authorize human-only routes. CORS is not authentication. Demo shortcuts must preserve these boundaries and be documented.
 
-The Leash MCP uses the official MCP Python SDK (`MCPServer` in SDK 2.x), Streamable HTTP, `stateless_http=True`, `json_response=True`, forwarded bearer auth and one API operation per thin tool. Preserve `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; adapt payment requests to trusted checkout identity. No grant mutation, approval, limit increase, kill switch or unrestricted provider tool.
-
-A separate store MCP server (same `services/mcp` service, path `/store/mcp`) carries the shopping tools `browse`, `create_checkout` and `complete_checkout` with its own credential (`STORE_MCP_TOKEN` in, a store-scoped credential out); it never receives the Leash token. Browsing reaches only the configured store: other hosts, non-HTTP schemes and redirects off the store are refused, so it can't probe internal services. Raw HTML stays inside it: each page is hashed, inspected for hidden instruction-like text, redacted and snapshotted there, and the agent receives page text plus an evidence record (source hash, findings, redacted snapshot metadata). Everything it returns is agent-observed evidence, never checkout truth; the API still retrieves canonical checkout facts through its own trusted merchant connection.
+MCP uses the official locked SDK's `MCPServer` (FastMCP rename), Streamable HTTP, `stateless_http=True`, `json_response=True`, forwarded bearer auth and one backend operation per thin tool. Preserve `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; payment requests reference trusted checkout identity. No grant mutation, approval, limit increase, kill switch or unrestricted provider tool. Shopping tools belong on a separate Store MCP implemented by Aditya over Cameron's controlled merchant; backend authorization remains mandatory for any calling interface.
 
 ### 23.7 Public documentation checks
 
@@ -1366,6 +1365,16 @@ Checked October 10, 2026. Public documentation validates facts, not this team's 
 - [Strands hooks](https://strandsagents.com/docs/user-guide/sdk/agents/hooks/) documents before/after tool events. Validate registration/event structures against the locked local SDK; online examples alone do not establish compatibility.
 - [Akamai workshop inference](https://github.com/akamai-developers/akamai-workshop-hackmidwest/blob/main/docs/inference.md) describes selected compatible operations. Exercise a genuine Strands tool-call round trip, structured findings, explicit token limits and failure behavior. Centralize setup in planned `make_model()` with provider abstraction and server-side credentials.
 - [Google AP2](https://github.com/google-agentic-commerce/AP2), [AgentsPay](https://agentspay.ai/) and [Skyfire features](https://docs.skyfire.xyz/docs/features) are prior art. AgentsPay describes policy/scoped cards/audit; Skyfire describes spending rules. These references do not establish LEASH integrations or compliance. Do not claim competitors lack semantic protections; demonstrate LEASH's own verified attack-aware chain.
+
+### 23.8 R01 accepted integration baseline
+
+Implemented on `rishi/r01-shared-contracts`: shared Pydantic models, strict cents/quantity/boolean/MCC/UTC validation, immutable authority records, canonical JSON and SHA-256 helpers, verification/grant binding shape, nullable guardian model, sanitized event envelopes and async publishing. `api/tests/test_shared_contracts.py` exercises tamper detection, same-price subscription hash changes, bounded grant expiry, required verification checks, sensitive-data redaction and event write failures. [api/README.md](../api/README.md) is the exact field/hash/wire-format handoff for all three lanes.
+
+The proposal `cart_hash` preserves the original four-field definition. Mandate and trusted checkout hashes are distinct versioned payloads. Payment proposals require `checkout_id`; PreApproval requires the exact nested AuthorizationGrant; a `VERIFIED` record requires all 15 named deterministic checks; stream entries store the canonical envelope in an `event` field with a deduplication `event_id`. Array order is significant. Unknown fields fail validation; adapters must reject unsupported provider facts before normalization.
+
+The candidate incorporates main at `1818a43`, including Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP implementation. [The refreshed handoff](../api/agent-interface-handoff.md) records 52 passing contract tests, captured serializer/evaluator/hook/registration outputs, 33 passing locked MCP tests and 126 passing agents tests with one restart-test failure and two live tests deselected. R01 now includes `AgentRunRegistration`; the API derives owner/version/hash/status after authenticated registration. Its accepted intake contract uses 2xx after durable commit, 409 only for identical committed duplicates, 422 for altered duplicates/validation, and 5xx for outages. Current guardian/source/trace/model and semantic mandate fields remain compatible; stored snapshots carry a separate `stored_sha256`. Aditya's endpoint authentication, semantic forwarding, pre-upload redaction, hash preservation and registration/outbox fixes are present. R02/R06 still implement the API routes and durable ownership/intake. Cameron owns current `k8s/`, `scripts/`, `mise.toml` as deployment paths alongside reserved `infra/`; shared packaging, API image context, persistent trace volume, protected merchant/rail/Valkey and full live acceptance remain pending. Implement the agreed separate Store MCP and the scripted-default demo versus required genuine live injection. Do not silently weaken requirements. Section 21 remains the original historical inspection.
+
+These schemas validate shape and content consistency, not human identity, cryptographic authenticity, source trust, current state or atomic consumption. R02 implements real signing/confirmation/persistence, R03 executes independent verification, and Cameron implements trusted merchant binding and atomic rail enforcement. No purchase route, live integration, Compose boot or end-to-end acceptance is claimed by R01. Cameron's C01 packaging and remaining runtime interface coordination remain pending; the initial absence observations in section 21 are historical snapshots.
 
 ## 24. Team handoffs and unresolved dependencies
 
@@ -1392,10 +1401,10 @@ External/technical dependencies remain **unverified**, not assumed unavailable:
 2. Akamai inference key, endpoint/model compatibility, real Strands tool calling/structured output, latency and outage behavior. Label fallback provider in run/UI metadata; deterministic controls continue during outage.
 3. Akamai compute access, LKE or single-Linode topology, actual public app URL, managed PostgreSQL/Valkey connectivity and durable storage. A local-only app fails the deployment acceptance criterion.
 4. Object Storage access and exact workshop `OBJ_*` names. Cameron confirms these; do not invent credentials. If unavailable, retain durable local evidence and state its storage source.
-5. Joint schemas/routes, merchant authentication/category mapping, checkout freeze rules, scope reservation and atomic Valkey protocol. No frozen files or verifier currently exist.
-6. Compose, Dockerfiles/manifests, CI, root Ruff configuration, migrations, generated types and tests. Relevant owners create them; this documentation update cannot prove boot/security/deployment.
+5. R01 schemas are accepted by Rishi; purchase routes, merchant authentication/category mapping, checkout freeze rules, scope reservation and atomic Valkey protocol remain pending. No independent verifier exists yet.
+6. Compose, Dockerfiles/manifests, CI, root Ruff configuration, migrations, generated types and service/end-to-end tests remain pending. R01's contract suite is present; it does not prove boot/security/deployment of the full application.
 
-Retain planned server variable names `INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, `MODEL_ID`, `DATABASE_URL`, `VALKEY_URL`, `LITHIC_API_KEY`, `LITHIC_ENVIRONMENT`, `LITHIC_ASA_SECRET`, `MANDATE_SIGNING_KEY`, `DEMO_USER_ID`, `USER_TOKEN`, `AGENT_TOKEN_SHOPPER`, `API_URL`, `AGENTS_URL`, `MCP_URL`, `STORE_URL`. Names do not prove configured credentials. Cameron adds any rail-selection, trusted-merchant auth, grant-lifetime or session variables and confirms Object Storage names. Existing `NEXT_PUBLIC_API_URL` contains only a public backend URL.
+Retain planned server variable names `INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, `MODEL_ID`, `DATABASE_URL`, `VALKEY_URL`, `LITHIC_API_KEY`, `LITHIC_ENVIRONMENT`, `LITHIC_ASA_SECRET`, `MANDATE_SIGNING_KEY`, `DEMO_USER_ID`, `USER_TOKEN`, `AGENT_TOKEN_SHOPPER`, `API_URL`, `AGENTS_URL`, `MCP_LEASH_URL`, `MCP_STORE_URL`, `STORE_URL`. Names do not prove configured credentials. Cameron adds any rail-selection, trusted-merchant auth, grant-lifetime or session variables and confirms Object Storage names. Existing `NEXT_PUBLIC_API_URL` contains only a public backend URL.
 
 Proceed by section 16's dependency phases: security core/local rail -> real Strands integration -> verified Lithic -> integrated presentation, integrating interfaces/UI continuously. All security-critical improvements stay MVP scope. Cut attacker swarms, unrelated agents, extra merchants, notifications and consumer-bank features before any required trust boundary/scenario/trace/replay defense. No silent fallback to live funds or assumed Stripe access.
 
@@ -1419,3 +1428,19 @@ Before completion: run service/security/end-to-end tests; boot Compose when avai
 Documentation validation for this update: diff/whitespace, local Markdown links, balanced fences, preservation of all twenty directive sections and nineteen completion criteria, ownership/current-versus-planned consistency, and explicit dependencies. Service/security tests and Compose boot remain pending because their implementations/configurations are absent.
 
 Performed for the initial directive-alignment update: `git diff --check` passed; programmatic checks passed for local Markdown links, fence balance, whitespace, exact retention of the adopted directive with the two documented editorial adaptations, all 25 specification sections, all 19 unchecked MVP criteria, and all 10 prominent invariants. That initial update changed only root `AGENTS.md` and new `docs/LEASH_SPEC.md`. Compose configuration validation failed because no Compose file exists; service/security tests were not run because no test suite or security implementation is present. The subsequent team-plan alignment restores the annotated repository tree, replaces the legacy build plan, and adds synchronized execution responsibilities/references; it changes documentation only.
+
+### R01 merge decision — October 10
+
+Rishi authorized the initial R01 integration baseline after checking peer compatibility.
+Separate approval messages from all three teammates are not claimed. Subsequent
+shared-contract changes retain the dedicated PR and all-three coordination rule.
+Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
+to LEASH's `usr_` identities in R02 before issuing purchase authority.
+
+The agreed MCP direction uses separate Leash financial and Store shopping servers.
+Aditya implements Store MCP over Cameron's merchant; it has landed and no direct
+Python shopping tools remain. Use separate scoped credentials, store-only browsing
+with off-host/internal redirects rejected, server-side original HTML inspection,
+redacted snapshots, and listing text plus evidence references/source hashes in tool
+results. The API independently retrieves canonical checkout facts. Live injection
+remains required; scripted runs are labeled fixtures or fallback.

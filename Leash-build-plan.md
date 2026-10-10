@@ -12,9 +12,9 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-Existing: `api/` FastAPI starter with only `GET /health`; `web/` Next.js/React/TypeScript/Tailwind/shadcn starter, UI primitives and health helper. Strands is declared as a dependency, not integrated. The detailed inspection is in spec section 21. Root contracts, database, services, payment rails, tests, Compose and deployment remain to build.
+Current review: main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. Leash purchase routes remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
 
-Keep the existing product backend in `api/`. `services/api/` is a reserved legacy alternative, not a second implementation or a required move. The complete annotated tree is in [AGENTS.md](AGENTS.md#repository-tree). Planned agents/MCP/webhook/store retain the original separate service boundaries. API port 8000 and web port 3000 are current development conventions; planned agent/MCP/webhook/store ports are 8001/8002/8003/8004, to be wired by Cameron. Preserve `/health`; add agreed `/healthz` probes for new services rather than pretending they exist already.
+Keep the existing backend in `api/`; `services/api/` is a reserved alternative. The annotated tree is in [AGENTS.md](AGENTS.md#repository-tree). Current deployment lives in `k8s/` and `scripts/`. API uses 8000 and web 3000; agents use local 8001 and LKE 8000; MCP uses 8002. Webhook/store 8003/8004 remain proposed. Agents/MCP now have both health paths; API retains `/health`.
 
 No integrations or account credentials are assumed ready. Original and current file-status observations are snapshots; refresh them before starting code. Leave unrelated working-tree changes intact.
 
@@ -23,13 +23,13 @@ No integrations or account credentials are assumed ready. Original and current f
 Each person's coding agent edits only that person's paths. Cross-lane work is an interface handoff; the owner makes the edit. Existing ownership is retained. Shared package metadata/marker files are assigned to Cameron so installability has an explicit owner; domain contracts remain Rishi's.
 | Path | Owner |
 |---|---|
-| `infra/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
+| `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
 | `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
-| `services/agents/`, `services/mcp/` | Aditya |
+| `services/agents/`, `services/mcp-leash/`, `services/mcp-store/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
@@ -48,16 +48,17 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **DRI: Rishi. Reviewers: Cameron and Aditya.** This is the first work now, not a claim that the old 2:30 PM checkpoint was met. Rishi drafts the domain contracts; Cameron reviews trusted checkout/rail/atomicity; Aditya reviews tools/traces/investigation. Each implements only their files after review.
 
-- [ ] Agree fields/enums for PurchaseMandate, proposal Cart, AgentRun/Trace, canonical product/CheckoutSnapshot, CheckoutVerification, AuthorizationGrant, AuthorizationAttempt/PaymentDecision, SecurityIncident, AuditEvent. Use spec section 23's `_cents` mapping, UTC, canonical payload hashing, immutable confirmed versions, exact totals/currency and sanitized evidence.
+- [x] Rishi accepted the R01 baseline fields/enums for PurchaseMandate, proposal Cart, AgentRun/Trace, canonical product/CheckoutSnapshot, CheckoutVerification, AuthorizationGrant, AuthorizationAttempt/PaymentDecision, SecurityIncident, AuditEvent. Use spec section 23's `_cents` mapping, UTC, canonical payload hashing, immutable confirmed versions, exact totals/currency and sanitized evidence.
 - [ ] Confirm human versus agent auth/session boundaries, merchant source authentication, configured source registry, and checkout ownership. CORS or agent claims cannot substitute for auth.
 - [ ] Confirm quantity/purchase cardinality and comparator: the singular request defaults to one successful checkout, quantity one; “under $40” has maximum 3999 cents unless the human confirms otherwise. A block consumes no purchase authority. Live demo sessions/reset behavior must respect consumed scope.
 - [ ] Agree checkout revision freeze, trusted checkout retrieval, grant/instrument binding, protected merchant charge operation and activation order. A grant becomes usable only after all verification and required merchant correlation binding succeed; failed setup revokes any partial grant and never approves.
 - [ ] Agree Valkey schemas/atomic operations for authority revocation, kill switch, scope reservation, grant issuance/consumption, idempotent event identity/fingerprint, cached response retention and audit stream commit. API owns durable writes; webhook network I/O is Valkey only.
-- [ ] Agree route/request/response/error examples in spec section 23.6; choose exact route names without arbitrary renaming. Only `/health` exists today. Agree run API location, SSE event IDs/resume/auth, incident/history queries and receipt format.
+- [ ] Agree route/request/response/error examples in spec section 23.6; choose exact route names without arbitrary renaming. Health and JWT auth routes exist; LEASH purchase routes remain pending. Agree run API location, SSE event IDs/resume/auth, incident/history queries and receipt format.
 - [ ] Agree service packaging/dependencies: Cameron owns root workspace/ruff config and shared package installability; each service owner owns its project dependencies/Dockerfile. Specify how owners install/import the shared package without duplicate models.
 - [ ] Agree fixtures: canonical charger and canonical subscription both total 2999 cents, same merchant/currency; the attack changes only listing text/agent behavior. Add over-budget, missing-evidence, expiry/replay and recovery fixtures. Adversarial listing text cannot edit canonical records.
 - [ ] Agree selected local rail interface first; Cameron reports Lithic/Akamai capability checks without printing secrets. Genuine Strands/Akamai round-trip is separately verified by Aditya.
-- [ ] Review and freeze the first `models.py`/`events.py`; publish matching OpenAPI/examples and confirm every lane can build against them. Record any unresolved choice explicitly with its owner before coding its dependents.
+- [x] Rishi authorized the initial `models.py`/`events.py` baseline after peer compatibility review. Separate all-three approval messages are not claimed.
+- [ ] Publish purchase-route OpenAPI and verify packaged runtime imports; remaining checkout/rail protocols still require owner coordination.
 
 **Exit evidence:** all three have reviewed identical model/event schemas and interface examples; source trust, payment correlation and atomicity are explicit; task owners know the next handoffs. Contracts being documented is not an implemented security mechanism.
 
@@ -70,7 +71,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | ID | Deliverable and paths | Depends on / handoff | Evidence required to finish |
 |---|---|---|---|
 | R01 | Agreed validated domain contracts and canonical JSON/hash helpers in `shared/leash_shared/models.py`; event schemas/publish helper in `events.py` | G0; Cameron packaging, all-three review; everyone consumes | Typed semantic authority, checkout/grant/decision/trace contracts, exact cents/UTC, hash-change vectors, shared import works |
-| R02 | SQL migrations in `db/`; persistence/session/auth wiring in `api/`; mandate propose/confirm/read/replacement/revoke | R01, C01 runtime/data; Aditya consumes mandate routes | Explicit human confirmation/signature association, immutable history, agent forbidden on privileged routes, expiry/cross-session tests |
+| R02 | SQL migrations in `db/`; persistence/session/auth wiring in `api/`; mandate propose/confirm/read/replacement/revoke and registered agent-run context | R01, C01 runtime/data; Aditya consumes mandate and `/agent-runs` routes | Explicit human confirmation/signature association, immutable history, agent forbidden on privileged routes, expiry/cross-session tests; run owner/version/hash/mode bound before traces |
 | R03 | Independent checkout verifier in `api/` and tests in `api/tests/` | R01, C02 canonical merchant interface; hand verified evidence to R04 | Server fetch/auth, trusted typed items/totals/revision, every constraint, unknown/missing evidence fail closed, agent cart never proof |
 | R04 | Payment proposal/status, idempotent grant/instrument issuance, correlation registration in `api/` | R02/R03, C03/C04 grant protocol and C02 binding; MCP/shopper consumes | Only verified current authority issues grant; exact amount/currency/expiry/scope; setup failure unusable; no LLM mint; once-only card delivery if needed |
 | R05 | Replacement/revoke/kill-switch state invalidation plus optional provider pause via Cameron wrapper | R04, C04 atomic protocol, C05 helper when rail selected | Revocation/consumption races serialized, old unused grants rejected, agent cannot toggle; historical approvals preserved |
@@ -79,6 +80,10 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | R08 | Mission Control + explicit mandate confirmation + purchase comparison in `web/` | R07; can build layout with labeled isolated fixtures first | Original instruction stays visible; constraints vs trusted attempted facts; grant/authorization/paid distinction; actual consent and backend results |
 | R09 | Real activity, incident timeline, transaction history and Attack Lab in `web/` | R06/R08, A02/A04, C02 attack scenario API | Actual streamed tool/state events, source inspection, reload persistence, actual provider/source/latency; attack never changes mandate/outcome |
 | R10 | Receipts/evidence chain, empty/error/loading states, service Dockerfile/README and final integration checks | R05–R09, C06 deployment, A07 e2e | Readable signed/hash-linked chain without overstated guarantees, provider failure never success, deployed positive/block/recovery, usable phone/big-screen UI |
+
+**R01 implementation status:** models, hashing, event publishing and contract tests are implemented as the initial accepted integration baseline. The handoff documents the mandatory `checkout_id` on payment proposals, the nested grant on PreApproval, nullable guardian model, the 15 required verification checks, and the `event` stream field. Contract tests pass; C01 shared package/runtime installation remain open. R02 signing/auth/persistence and R03 independent verification are separate work, not completed by parsing a valid record.
+
+**Integrated review:** main includes Cameron's PRs #2/#3 and Aditya's #4 (`2e6f940`). R01 has incorporated main and refreshed actual serializer/hook/evaluator captures: 52 contract tests pass; locked MCP has 33 passes; locked agents has 126 passes, one restart-test failure and two live tests deselected. [The handoff](api/agent-interface-handoff.md) diagnoses the 0.3-second restart-test assumption and records remaining work. Aditya's auth, semantic forwarding, snapshot redaction/hash preservation and registration/outbox are implemented. Rishi accepts `/agent-runs`, service-token guardian auth and durable provenance HTTP semantics. Cameron's shared package/API build context and persistent spool volume remain pending; store/rail and product API routes are not implemented. Implement the agreed separate Store MCP and the scripted-default attack versus required live demonstration before claiming full agreement. Rishi authorized this initial R01 baseline; future contract changes still require coordinated review.
 
 **Rishi agent starting prompt:** “Read AGENTS.md, Leash-build-plan.md and docs/LEASH_SPEC.md. Work as Rishi's coding agent. Inspect current files and Git status, then implement the earliest unfinished R-task with satisfied prerequisites. Stay in the Rishi lane. Lead shared contracts through all-three review; do not treat an agent cart or positive guardian opinion as payment authority. Preserve the current api/ starter and fail closed until independent checkout and correlation are complete. Return task ID, code/tests, handoff and real blockers.”
 
@@ -107,16 +112,16 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **Human responsibilities:** validate Akamai inference/tool calling with actual credentials; review tool permissions, trusted/untrusted evidence and investigation output; tune/rehearse controlled adversarial listing content with Cameron; coordinate the three-minute demo and labeled resets; collect final readiness evidence and handle submission at the team's 7:30 AM Central target. The shopper must remain observable and susceptible enough to demonstrate backend protection.
 
-**Coding agent lane:** `services/agents/`, `services/mcp/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement.
+**Coding agent lane:** `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement.
 
 | ID | Deliverable and paths | Depends on / handoff | Evidence required to finish |
 |---|---|---|---|
 | A01 | Independent `tests/decision_cases.yaml` covering semantic/correlation/rail conditions and reproducible adversarial fixture descriptions | R01/G0; hand YAML to Cameron and scenario IDs to Rishi | Expected outcomes independently specified; duplicates/concurrency assigned to handler tests, not falsely graded by pure function |
 | A02 | `shared/leash_shared/llm.py` factory/provider abstraction, real Akamai Strands smoke test in owned agent tests | C01 shared installability, human inference access | Text-only actual tool-call round trip, explicit `max_tokens`, guardian temperature 0, validated structured findings/fallback and outage metadata |
-| A03 | Shopper and run service/CLI in `services/agents/shopper/`; its store browse/checkout tools come from the store MCP in `services/mcp/` | R02 mandate context, C02 catalog/listing/checkout, R04 payments | Genuine Strands execution, mandate unchanged, actual tool calls; protected checkout delegates enforcement and has no unrestricted provider API |
-| A04 | Supported before/after tool hooks in `services/agents/provenance/`; page inspection, redaction and snapshots inside the store MCP | A02/A03, R01 event schemas/R06 intake; optional C06 snapshot store | Sanitized arguments/results, source hashes/refs/time/trust, real attempt/decision events; direct tool bypass still blocked by backend |
+| A03 | Shopper browse/search/compare/select/checkout tools and run service/CLI in `services/agents/shopper/` | R02 mandate context, C02 catalog/listing/checkout, R04 payments | Genuine Strands execution, mandate unchanged, actual tool calls; protected checkout delegates enforcement and has no unrestricted provider API |
+| A04 | Supported before/after tool hooks and provenance in `services/agents/provenance/` | A02/A03, R01 event schemas/R06 intake; optional C06 snapshot store | Sanitized arguments/results, source hashes/refs/time/trust, real attempt/decision events; direct tool bypass still blocked by backend |
 | A05 | Guardian/investigator in `services/agents/guardian/` | A02/A04, R03 verification/R06 evidence | Structured evidence-linked findings identify instruction versus attempt and suspicious source; recommends block/review, never grants or edits mandate |
-| A06 | Official SDK stateless Streamable HTTP `services/mcp/`: Leash MCP with four thin api tools, plus a store MCP with store-only browse/checkout tools and separate credentials; auth tests | R02/R04 actual API routes/contracts | Bearer forwarded unchanged, one API operation per tool; agent roles cannot confirm/expand/kill-switch; no alternate authorization path |
+| A06 | Official SDK stateless Streamable HTTP `services/mcp-leash/` with four thin tools and auth tests | R02/R04 actual API routes/contracts | Bearer forwarded unchanged, one API operation per tool; agent roles cannot confirm/expand/kill-switch; no alternate authorization path |
 | A07 | `tests/e2e/` six-scenario integration runner with reset/session handling and persistence checks | C02/C03/C04, R02–R06, A03–A06; deployed URLs C06 | Positive, semantic attack, budget, missing evidence, expiry/replay, recovery; unchanged attack/recovery mandate and real results; manipulated-output fixtures separately labeled |
 | A08 | Attack scenario control coordination with Cameron; actual agent trace/guardian report handed to Rishi | C02/A03–A05, R09 UI | Attack changes listing/run selection only; actual subscription attempt observable; no fabricated agent manipulation or forced frontend result |
 | A09 | Agent/MCP tests and Dockerfiles/READMEs; complete e2e matrix and SDK failure checks | A02–A07; hand startup/dependencies to C06 | Tool/hook redaction, direct-call bypass, immutable authority, role checks, model outages, no agent-success spoofing, service probes/startup |
@@ -268,3 +273,19 @@ Known limitation / blocker + responsible human + next action:
 ```
 
 When changing product requirements, ownership, a shared interface or a milestone, update the affected source document and its cross-references in all three direction documents. Human confirmation of purchase authority is application behavior; human review of coding contracts is team coordination. Neither can be faked by an agent.
+
+### R01 merge decision — October 10
+
+Rishi authorized the initial R01 integration baseline after checking peer compatibility.
+Separate approval messages from all three teammates are not claimed. Subsequent
+shared-contract changes retain the dedicated PR and all-three coordination rule.
+Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
+to LEASH's `usr_` identities in R02 before issuing purchase authority.
+
+The agreed MCP direction uses separate Leash financial and Store shopping servers.
+Aditya implements Store MCP over Cameron's merchant; it has landed and no direct
+Python shopping tools remain. Use separate scoped credentials, store-only browsing
+with off-host/internal redirects rejected, server-side original HTML inspection,
+redacted snapshots, and listing text plus evidence references/source hashes in tool
+results. The API independently retrieves canonical checkout facts. Live injection
+remains required; scripted runs are labeled fixtures or fallback.

@@ -37,12 +37,14 @@ IMAGE_REGISTRY=$(echo "${IMAGE_REGISTRY:-$(get_env IMAGE_REGISTRY)}" | tr -d '[:
 API_IMAGE="$IMAGE_REGISTRY/api:$IMAGE_TAG"
 WEB_IMAGE="$IMAGE_REGISTRY/web:$IMAGE_TAG"
 AGENTS_IMAGE="$IMAGE_REGISTRY/agents:$IMAGE_TAG"
-MCP_IMAGE="$IMAGE_REGISTRY/mcp:$IMAGE_TAG"
+MCP_LEASH_IMAGE="$IMAGE_REGISTRY/mcp-leash:$IMAGE_TAG"
+MCP_STORE_IMAGE="$IMAGE_REGISTRY/mcp-store:$IMAGE_TAG"
 
-echo "API image:    $API_IMAGE"
-echo "Web image:    $WEB_IMAGE"
-echo "Agents image: $AGENTS_IMAGE"
-echo "MCP image:    $MCP_IMAGE"
+echo "API image:       $API_IMAGE"
+echo "Web image:       $WEB_IMAGE"
+echo "Agents image:    $AGENTS_IMAGE"
+echo "mcp-leash image: $MCP_LEASH_IMAGE"
+echo "mcp-store image: $MCP_STORE_IMAGE"
 
 # 1. Cluster: one node on the newest Kubernetes version LKE offers.
 cluster_id=$(linode-cli lke clusters-list --label "$LKE_LABEL" --text --no-headers --format id)
@@ -92,11 +94,13 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   # Agents build from the repo root: the image also needs shared/leash_shared.
   "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/agents/Dockerfile" -t "$AGENTS_IMAGE" --load "$REPO"
   docker push "$AGENTS_IMAGE"
-  "$BUILDX" build --platform "$PLATFORM" -t "$MCP_IMAGE" --load "$REPO/services/mcp"
-  docker push "$MCP_IMAGE"
+  "$BUILDX" build --platform "$PLATFORM" -t "$MCP_LEASH_IMAGE" --load "$REPO/services/mcp-leash"
+  docker push "$MCP_LEASH_IMAGE"
+  "$BUILDX" build --platform "$PLATFORM" -t "$MCP_STORE_IMAGE" --load "$REPO/services/mcp-store"
+  docker push "$MCP_STORE_IMAGE"
   echo "$(elapsed): images pushed ($PLATFORM)."
 else
-  echo "SKIP_BUILD=1 — using existing $API_IMAGE, $WEB_IMAGE, $AGENTS_IMAGE, $MCP_IMAGE."
+  echo "SKIP_BUILD=1 — using existing $API_IMAGE, $WEB_IMAGE, $AGENTS_IMAGE, $MCP_LEASH_IMAGE, $MCP_STORE_IMAGE."
 fi
 
 # 5. Namespace + Secret from .env (IMAGE_REGISTRY is not needed inside the pods).
@@ -126,15 +130,17 @@ fi
 # 7. Apply workloads. Restart on rerun so new images/env are picked up.
 existed=$(kubectl -n "$NAMESPACE" get deployment api -o name 2>/dev/null || true)
 render_manifest k8s/agents.yaml | kubectl apply -f -
-render_manifest k8s/mcp.yaml | kubectl apply -f -
+render_manifest k8s/mcp-leash.yaml | kubectl apply -f -
+render_manifest k8s/mcp-store.yaml | kubectl apply -f -
 render_manifest k8s/api.yaml | kubectl apply -f -
 render_manifest k8s/web.yaml | kubectl apply -f -
 kubectl apply -f k8s/service.yaml
 if [[ -n $existed ]]; then
-  kubectl -n "$NAMESPACE" rollout restart deployment/api deployment/web deployment/agents deployment/mcp
+  kubectl -n "$NAMESPACE" rollout restart deployment/api deployment/web deployment/agents deployment/mcp-leash deployment/mcp-store
 fi
 kubectl -n "$NAMESPACE" rollout status deployment/agents --timeout=600s
-kubectl -n "$NAMESPACE" rollout status deployment/mcp --timeout=600s
+kubectl -n "$NAMESPACE" rollout status deployment/mcp-leash --timeout=600s
+kubectl -n "$NAMESPACE" rollout status deployment/mcp-store --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/api --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=600s
 
@@ -170,8 +176,10 @@ echo
 healthy | python3 -m json.tool
 echo
 echo "App is up on LKE after $(elapsed):"
-echo "  Web:     http://$nb_ip"
-echo "  API:     http://$nb_ip/backend/health"
-echo "  Agents:  ClusterIP http://agents:8000/health (in-cluster)"
-echo "  Postgres: managed $DB_LABEL (DATABASE_URL in .env / app-env Secret)"
+echo "  Web:       http://$nb_ip"
+echo "  API:       http://$nb_ip/backend/health"
+echo "  mcp-leash: http://$nb_ip/mcp-leash/mcp  (health: /mcp-leash/health)"
+echo "  mcp-store: http://$nb_ip/mcp-store/mcp  (health: /mcp-store/health)"
+echo "  Agents:    ClusterIP http://agents:8000/health (in-cluster)"
+echo "  Postgres:  managed $DB_LABEL (DATABASE_URL in .env / app-env Secret)"
 echo "kubectl: export KUBECONFIG=$REPO/$KUBECONFIG_FILE"

@@ -27,7 +27,14 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-Inspected on October 10, 2026: `api/main.py` implements only `GET /health`; `api/pyproject.toml` declares FastAPI and Strands with the OpenAI extra. `web/` contains a Next.js/React/TypeScript starter, Tailwind/shadcn configuration, UI primitives, and a health-fetch helper. There is no root README. The service split, shared contracts, tests, persistence, Compose, infrastructure, agents, and payments in the previous plan are **not present**. A dependency declaration is not a working integration.
+October 10 review: main at `1818a43` includes Cameron's LKE/build/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP, guardian, provenance and test scaffolding. R01's review branch incorporates main, resolving the AGENTS.md conflict while preserving auth and agent work and adds shared models/events and contract tests; see [api/README.md](api/README.md). Main now includes Cameron's PR #5 (`1818a43`): API signup/login/me with JWT and a PostgreSQL users table, plus web signup/signin/profile. Leash purchase routes remain pending. Store/webhook, application persistence, Valkey, installable shared packaging and Compose remain pending. The public web/API health respond; a complete payment flow and live inference are not verified. Rishi authorized R01 as the accepted integration baseline after compatibility review; this does not claim separate approval messages from all three teammates.
+
+- **`api/`:** FastAPI with public `GET /health` plus custom email/password auth (`POST /auth/signup`, `POST /auth/login`, `GET /auth/me` Bearer JWT). Modules: `main.py`, `auth.py`, `db.py`. Deps include FastAPI, Strands (OpenAI extra), bcrypt, PyJWT, psycopg. On startup, `CREATE TABLE IF NOT EXISTS users` against `DATABASE_URL` (not Alembic / `db/migrations/` yet). Requires `JWT_SECRET`.
+- **`web/`:** Next.js App Router with signup/signin/profile, top nav + account menu, client `AuthProvider` / Bearer `localStorage`, and shadcn UI primitives. Mission Control / SSE / Attack Lab still planned.
+- **`services/agents/`:** FastAPI agents service (shopper/guardian/provenance present in-tree; wire against real api/store as those land).
+- **`services/mcp-leash/`:** Streamable HTTP MCP thin adapter with four tools forwarding to api (`propose_mandate`, `list_mandates`, `request_payment`, `check_status`). In-cluster `:8002`; public via web rewrite `/mcp-leash/*`.
+- **`services/mcp-store/`:** Store MCP with `browse`, `create_checkout`, `complete_checkout`; its own `STORE_MCP_TOKEN` auth and a separate store credential; store-only browsing with server-side page inspection and redacted snapshots. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
+- **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `MCP_LEASH_URL` / `MCP_STORE_URL` / agent tokens / image registry. Managed Postgres `hackmidwest-db` + LKE path exist. Root README, Compose, Valkey, store/webhook HTTP, and domain migrations remain planned. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -41,11 +48,12 @@ human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
 
 | Component | Inspected or planned path | Owner | Responsibility |
 |---|---|---|---|
-| Product backend | `api/` exists; `services/api/` is planned | Rishi | Mandates, trusted checkout verification, grants, persistence, audit, SSE |
-| Web | `web/` exists | Rishi | Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
-| Agents / MCP | `services/agents/`, `services/mcp/` planned | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter and store MCP server |
+| Product backend | `api/` (health + JWT auth); `services/api/` reserved | Rishi | Mandates, trusted checkout verification, grants, persistence, audit, SSE; owns users/auth foundation |
+| Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
+| Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
+| Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
 | Merchant / payment rail | `services/store/`, `services/webhook/` planned | Cameron | Canonical catalog and checkout API, simulator, Lithic ASA, atomic enforcement |
-| Database / Valkey / deployment | `db/`, `infra/`, Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
+| Database / Valkey / deployment | `k8s/`, `scripts/` exist; `db/`, Valkey and Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
 
 ## Repository tree
 
@@ -57,50 +65,58 @@ hackmidwest-2026/
   Leash-build-plan.md                 [E] shared team execution plan
   README.md                          [P] shared setup/product guide
   docker-compose.yml                 [P] Cameron: integrated local runtime
-  .env.example                       [P] Cameron: configuration names only
+  .env.example                       [E] Cameron: configuration names only
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
-  infra/                             [P] Cameron: Akamai deployment
-    k8s/                             [P] service manifests if using LKE
-  api/                               [E] Rishi: current FastAPI backend
-    main.py                          [E] currently GET /health only
+  scripts/                           [E] Cameron: deploy_lke.sh + lib.sh
+  k8s/                               [E] Cameron: api/web/agents/mcp-leash/mcp-store/service
+  infra/                             [P] Cameron: additional Akamai packaging if needed
+  api/                               [E] Rishi: FastAPI backend
+    main.py                          [E] /health + auth router wiring
+    auth.py                          [E] signup/login/me + JWT helpers
+    db.py                            [E] psycopg + users table ensure-on-startup
     pyproject.toml                   [E] backend dependencies
-    tests/                           [P] Rishi: API/verifier/persistence tests
-    Dockerfile                       [P] Rishi: backend image
+    README.md                        [E] Rishi: R01 contract handoff/test commands
+    tests/                           [E] Rishi: R01 contract tests; service tests planned
+    Dockerfile                       [E] Rishi: auth modules included; shared context pending
   db/migrations/                     [P] Rishi: durable domain/audit schema
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
       __init__.py                    [P] Cameron: package marker
-      models.py                      [P] Rishi: jointly agreed frozen contracts
-      events.py                      [P] Rishi: frozen events/publish helper
+      models.py                      [E] Rishi: R01 accepted integration baseline
+      events.py                      [E] Rishi: R01 sanitized events/publish helper
       lithic.py                      [P] Cameron: official sandbox client wrapper
-      llm.py                         [P] Aditya: centralized model factory
+      llm.py                         [E] Aditya: centralized model factory
   services/
-    agents/                          [P] Aditya: FastAPI agent service
-      shopper/                       [P] real, intentionally gullible Strands agent
-      guardian/                      [P] evidence-linked investigation
-      provenance/                    [P] sanitized hooks/source snapshots
-      attacker/                      [P] optional; outside required MVP scope
-      tests/                         [P] agent/hook/tool tests
-    mcp/                             [P] Aditya: Leash MCP (/mcp) + store MCP (/store/mcp)
+    agents/                          [E] Aditya: shopper/guardian/provenance + image
+      Dockerfile                     [E] amd64; COPY every runtime module when added
+      shopper/                       [E] intentionally gullible Strands agent
+      guardian/                      [E] evidence-linked investigation
+      provenance/                    [E] sanitized hooks/source snapshots
+      tests/                         [E] agent/hook/tool tests
+    mcp-leash/                       [E] Aditya: Streamable HTTP Leash MCP + four tools
+      Dockerfile                     [E] amd64; COPY every runtime module when added
+    mcp-store/                       [E] Aditya: Store MCP (browse/checkout tools)
+      Dockerfile                     [E] amd64; COPY every runtime module when added
     webhook/                         [P] Cameron: rail responders/atomic state
       decide.py                      [P] pure domain payment policy
       tests/                         [P] handler/concurrency/signature tests
     store/                           [P] Cameron: controlled merchant
       tests/                         [P] catalog/checkout/correlation tests
-  web/                               [E] Rishi: Next.js/Tailwind/shadcn starter
-    src/app/                         [E] starter; product views still planned
-    src/components/ui/               [E] reusable UI primitives
-    src/lib/api.ts                   [E] health fetch helper
+  web/                               [E] Rishi: Next.js/Tailwind/shadcn
+    src/app/                         [E] home, signup, signin, profile
+    src/components/                  [E] site-nav + ui primitives
+    src/lib/api.ts                   [E] apiFetch + auth helpers
+    src/lib/auth.tsx                 [E] AuthProvider / Bearer state
     src/lib/api-types.ts             [P] generated from agreed OpenAPI
   tests/
-    decision_cases.yaml              [P] Aditya: independent policy fixtures
+    decision_cases.yaml              [E] Aditya: independent policy fixtures
     test_decision_cases.py            [P] Cameron: policy fixture runner
-    e2e/                             [P] Aditya: all six acceptance scenarios
+    e2e/                             [E] Aditya: six gated scenario tests, not yet live proof
   docs/
     LEASH_SPEC.md                    [E] shared detailed specification
-    demo-script.md                   [P] Aditya: live rehearsal/reset instructions
+    demo-script.md                   [E] Aditya: draft; live attack/port updates pending
 ```
 
 Each new service keeps its own Dockerfile and tests in its owner's directory. The build plan names the exact owner, prerequisites, and evidence for every planned deliverable.
@@ -119,31 +135,36 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 
 | Path | Owner |
 |---|---|
-| `infra/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
+| `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
 | `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
-| `services/agents/`, `services/mcp/` | Aditya |
+| `services/agents/`, `services/mcp-leash/`, `services/mcp-store/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
 
 If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The present documentation update authorizes only the shared direction files. Do not implement new services as part of documentation alignment.
 
-**Contracts:** the formerly described `models.py` and `events.py` do not exist yet. Agree schemas together before implementing them; once frozen, changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec maps old field names to new concepts; do not independently redefine schemas in each service.
+**Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
+
+**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. Separate MCP servers exist as `services/mcp-leash/` and `services/mcp-store/`; the shopper's store tools come from `mcp-store`; no direct Python shopping tools remain. The signature demo still requires live injection; scripted runs remain labeled fixtures/fallback.
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
+
+**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, and `services/mcp-store/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
 
 ## Engineering requirements
 
 - Python 3.12+, FastAPI, Pydantic v2; TypeScript strict mode, Next.js App Router, 2-space indentation for new code. Ruff configuration is planned, not present at root. Do not reformat another owner's files.
+- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, or `services/mcp-store/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
 - Money is integer minor units; the USD MVP uses `_cents` fields, never float dollars. Validate amounts, quantities, supported currencies, required checkout fields, and UTC-aware timestamps. Convert only for display.
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use the planned shared `make_model()` factory and provider abstraction, explicit `max_tokens`, text-only Akamai requests, guardian temperature 0. Validate structured output with Pydantic; plain-text JSON fallback never grants authority. These integrations still need implementation and smoke tests.
-- `services/mcp` runs two MCP servers (official SDK, Streamable HTTP, stateless) with separate credentials. The **Leash MCP** at `/mcp` is a thin adapter over the api with the agent's bearer forwarded unchanged; tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. No privilege escalation tools. The **store MCP** at `/store/mcp` checks its own `STORE_MCP_TOKEN`, calls the store with a store-scoped credential, and never sees the Leash token; tools: `browse`, `create_checkout`, `complete_checkout`. Browsing reaches only the configured store (other hosts and off-store redirects are refused), and raw HTML stays in that server: it hashes, inspects, redacts and snapshots each page and returns text plus evidence. Everything it returns is agent-observed evidence; the api still retrieves canonical checkout facts itself.
+- MCP remains an official SDK, Streamable HTTP, stateless thin adapter with bearer credentials forwarded unchanged. `mcp-leash` tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. `mcp-store` tools: `browse`, `create_checkout`, `complete_checkout`, with its own `STORE_MCP_TOKEN` (never the Leash token). No privilege escalation tools.
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.
@@ -164,17 +185,21 @@ All are MVP requirements, not future roadmap items. Detailed fields, state trans
 
 ## Commands and completion checks
 
-Current starter commands (run in the named directory after installing dependencies):
+Current starter commands (run in the named directory after installing dependencies; API needs env from `.env`, e.g. `set -a && source ../.env && set +a`):
 
 ```text
-api/: python -m uvicorn main:app --reload --port 8000
+api/: uv run uvicorn main:app --reload --port 8000
+services/agents/: uv run uvicorn main:app --reload --port 8001
+services/mcp-leash/: uv run uvicorn main:app --reload --port 8002
+services/mcp-store/: uv run uvicorn main:app --reload --port 8003
 web/: pnpm dev
 web/: pnpm lint
 web/: pnpm build
+deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
 ```
 
-The current health route is `/health`; `/healthz`, payment routes, and the previous plan's ports 8001–8004 are proposed interfaces, not implemented ones. Inspect generated OpenAPI before claiming an endpoint exists. Generate web API types from agreed OpenAPI once available; do not hand-edit generated types.
+Implemented API routes today: `GET /health`, `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`. Agents/mcp-leash/mcp-store: `GET /health` (+ mcp-leash and mcp-store tools). Env: `MCP_LEASH_URL`, `MCP_STORE_URL` (not `MCP_URL`). On LKE, the NodeBalancer serves web at `/` and Next rewrites `/backend/*` → api, `/mcp-leash/*` → mcp-leash:8002, `/mcp-store/*` → mcp-store:8003 — so external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). In-cluster agents keep ClusterIP URLs. Inspect generated OpenAPI before claiming an endpoint exists. Generate web API types from agreed OpenAPI once available; do not hand-edit generated types.
 
-Before completing implementation, run the affected service's tests, the security decision matrix, and end-to-end scenarios, and confirm `docker compose up --build` boots once Cameron supplies Compose. Currently no Compose file or test suite exists; report this gap instead of claiming passing checks. Documentation changes require diff/whitespace, link, and consistency checks. Do not claim that static inspection proves credentials, deployed services, or live integrations work.
+Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.
