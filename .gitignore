@@ -7,3 +7,4 @@
 !**/.env.example
 *.db
 .DS_Store
+*.md
