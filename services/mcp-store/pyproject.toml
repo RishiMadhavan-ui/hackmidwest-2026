@@ -1,7 +1,7 @@
 [project]
-name = "leash-mcp"
+name = "mcp-store"
 version = "0.1.0"
-description = "Leash MCP server: a thin, stateless adapter over the api's REST routes"
+description = "mcp-store: MCP adapter for the controlled merchant (tools TBD)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "mcp>=1.10",
@@ -12,13 +12,10 @@ dependencies = [
 [dependency-groups]
 dev = [
   "pytest>=8",
-  "respx>=0.21",
   "ruff>=0.6",
 ]
 
 [tool.ruff]
-# AGENTS.md asks for 2-space indentation. This lives here until a root
-# pyproject.toml with the shared ruff config lands.
 indent-width = 2
 line-length = 100
 target-version = "py312"

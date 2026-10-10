@@ -23,13 +23,13 @@ No integrations or account credentials are assumed ready. Original and current f
 Each person's coding agent edits only that person's paths. Cross-lane work is an interface handoff; the owner makes the edit. Existing ownership is retained. Shared package metadata/marker files are assigned to Cameron so installability has an explicit owner; domain contracts remain Rishi's.
 | Path | Owner |
 |---|---|
-| `infra/`, `k8s/`, `scripts/`, `mise.toml`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
-| `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
+| `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
+| `services/webhook/`, `services/store/`, `services/mcp-store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
-| `services/agents/`, `services/mcp/` | Aditya |
+| `services/agents/`, `services/mcp-leash/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
@@ -112,7 +112,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **Human responsibilities:** validate Akamai inference/tool calling with actual credentials; review tool permissions, trusted/untrusted evidence and investigation output; tune/rehearse controlled adversarial listing content with Cameron; coordinate the three-minute demo and labeled resets; collect final readiness evidence and handle submission at the team's 7:30 AM Central target. The shopper must remain observable and susceptible enough to demonstrate backend protection.
 
-**Coding agent lane:** `services/agents/`, `services/mcp/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement.
+**Coding agent lane:** `services/agents/`, `services/mcp-leash/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement. (`services/mcp-store/` is Cameron’s store-MCP scaffold.)
 
 | ID | Deliverable and paths | Depends on / handoff | Evidence required to finish |
 |---|---|---|---|
@@ -120,8 +120,8 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | A02 | `shared/leash_shared/llm.py` factory/provider abstraction, real Akamai Strands smoke test in owned agent tests | C01 shared installability, human inference access | Text-only actual tool-call round trip, explicit `max_tokens`, guardian temperature 0, validated structured findings/fallback and outage metadata |
 | A03 | Shopper browse/search/compare/select/checkout tools and run service/CLI in `services/agents/shopper/` | R02 mandate context, C02 catalog/listing/checkout, R04 payments | Genuine Strands execution, mandate unchanged, actual tool calls; protected checkout delegates enforcement and has no unrestricted provider API |
 | A04 | Supported before/after tool hooks and provenance in `services/agents/provenance/` | A02/A03, R01 event schemas/R06 intake; optional C06 snapshot store | Sanitized arguments/results, source hashes/refs/time/trust, real attempt/decision events; direct tool bypass still blocked by backend |
-| A05 | Guardian/investigator in `services/agents/guardian/` | A02/A04, R03 verification/R06 evidence | Authenticated internal findings identify instruction versus attempt and suspicious source; `block`, `review` or `no_findings`, structured nullable model metadata; never approves, grants or edits mandate |
-| A06 | Official SDK stateless Streamable HTTP `services/mcp/` with four thin tools and auth tests | R02/R04 actual API routes/contracts | Bearer forwarded unchanged, one API operation per tool; agent roles cannot confirm/expand/kill-switch; no alternate authorization path |
+| A05 | Guardian/investigator in `services/agents/guardian/` | A02/A04, R03 verification/R06 evidence | Structured evidence-linked findings identify instruction versus attempt and suspicious source; recommends block/review, never grants or edits mandate |
+| A06 | Official SDK stateless Streamable HTTP `services/mcp-leash/` with four thin tools and auth tests | R02/R04 actual API routes/contracts | Bearer forwarded unchanged, one API operation per tool; agent roles cannot confirm/expand/kill-switch; no alternate authorization path |
 | A07 | `tests/e2e/` six-scenario integration runner with reset/session handling and persistence checks | C02/C03/C04, R02–R06, A03–A06; deployed URLs C06 | Positive, semantic attack, budget, missing evidence, expiry/replay, recovery; unchanged attack/recovery mandate and real results; manipulated-output fixtures separately labeled |
 | A08 | Attack scenario control coordination with Cameron; actual agent trace/guardian report handed to Rishi | C02/A03–A05, R09 UI | Attack changes listing/run selection only; actual subscription attempt observable; no fabricated agent manipulation or forced frontend result |
 | A09 | Agent/MCP tests and Dockerfiles/READMEs; complete e2e matrix and SDK failure checks | A02–A07; hand startup/dependencies to C06 | Tool/hook redaction, direct-call bypass, immutable authority, role checks, model outages, no agent-success spoofing, service probes/startup |

@@ -1,0 +1,61 @@
+# mcp-store MCP server. ClusterIP only: agents call it inside the cluster.
+# Tools are not registered yet; this deployment serves /health and the MCP endpoint.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-store
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-store
+  template:
+    metadata:
+      labels:
+        app: mcp-store
+    spec:
+      containers:
+        - name: mcp-store
+          image: ${MCP_STORE_IMAGE}
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: app-env
+          env:
+            - name: STORE_URL
+              value: http://store:8000
+          ports:
+            - containerPort: 8003
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-store
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp-store
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003

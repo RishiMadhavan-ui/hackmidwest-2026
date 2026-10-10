@@ -1,22 +1,22 @@
-# Leash MCP server. ClusterIP only: the agents call it inside the cluster.
+# mcp-leash MCP server. ClusterIP only: the agents call it inside the cluster.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mcp
+  name: mcp-leash
   namespace: hackmidwest
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mcp
+      app: mcp-leash
   template:
     metadata:
       labels:
-        app: mcp
+        app: mcp-leash
     spec:
       containers:
-        - name: mcp
-          image: ${MCP_IMAGE}
+        - name: mcp-leash
+          image: ${MCP_LEASH_IMAGE}
           imagePullPolicy: Always
           envFrom:
             - secretRef:
@@ -48,12 +48,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: mcp
+  name: mcp-leash
   namespace: hackmidwest
 spec:
   type: ClusterIP
   selector:
-    app: mcp
+    app: mcp-leash
   ports:
     - name: http
       port: 8002
