@@ -1,0 +1,231 @@
+# Decision table for services/webhook/decide.py.
+#
+# Every row must pass before merging to main (AGENTS.md). Owner: Aditya.
+# Consumer: tests/test_decision_cases.py (Cameron).
+#
+# Each case gives decide() exactly what it takes:
+#   decide(asa_request, preapproval, killswitch_on, already_used, now) -> Decision
+#
+# Fields
+#   name           unique, snake_case
+#   level          "decide" (pure function) or "handler" (needs the Valkey-backed
+#                  request handler, because decide() has no memory)
+#   asa_request    asa_token, card_token, merchant_descriptor, mcc, amount_cents
+#   preapproval    the PreApproval from AGENTS.md, or null when no Valkey key exists
+#   killswitch_on  bool, the killswitch:{user_id} key
+#   already_used   bool, the used:{card_token} key
+#   now            ISO 8601 UTC, passed in so the function stays pure
+#   expected       result (APPROVED | DECLINED) and reason
+#
+# Reasons are stable snake_case codes so the test can assert on them:
+#   approved, killswitch_on, no_preapproval, already_used, preapproval_expired,
+#   descriptor_mismatch, mcc_mismatch, amount_over_limit
+#
+# Check order, which decides the reason when more than one check fails:
+#   killswitch_on > no_preapproval > already_used > preapproval_expired >
+#   descriptor_mismatch > mcc_mismatch > amount_over_limit
+#
+# Every case except demo_reused_card_at_gift_card_store breaks exactly one rule,
+# so the reason is unambiguous. MCCs are strings because that's how card
+# networks send them (leading zeros matter for some codes).
+#
+# The merchant descriptors are placeholders until Cameron's store fixes the real
+# ones. Change them here and in the store together.
+
+x-hotel-preapproval: &hotel_preapproval
+  payment_id: pay_01KC0HOTEL0001
+  mandate_id: mnd_01KC0HOTEL0001
+  mandate_version: 1
+  user_id: usr_demo
+  card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+  merchant_descriptor: CROSSROADS HOTEL KC
+  mcc: "7011"
+  max_cents: 16500
+  cart_hash: 9d3f2a1b7c6e5d4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f
+  expires_at: "2026-10-10T20:30:00Z"
+
+cases:
+  - name: approve_matching_charge_under_limit
+    level: decide
+    asa_request:
+      asa_token: asa_0001
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: APPROVED, reason: approved}
+
+  - name: approve_amount_exactly_at_limit
+    level: decide
+    asa_request:
+      asa_token: asa_0002
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 16500
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: APPROVED, reason: approved}
+
+  - name: decline_one_cent_over_limit
+    level: decide
+    asa_request:
+      asa_token: asa_0003
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 16501
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: amount_over_limit}
+
+  - name: decline_no_preapproval
+    level: decide
+    asa_request:
+      asa_token: asa_0004
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: null
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: no_preapproval}
+
+  # Same MCC as the hotel on purpose, so only the descriptor is wrong.
+  - name: decline_descriptor_is_gift_card_store
+    level: decide
+    asa_request:
+      asa_token: asa_0005
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: GIFTCARD EXPRESS
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: descriptor_mismatch}
+
+  - name: decline_mcc_mismatch
+    level: decide
+    asa_request:
+      asa_token: asa_0006
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "5947"
+      amount_cents: 15800
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: mcc_mismatch}
+
+  - name: decline_preapproval_expired
+    level: decide
+    asa_request:
+      asa_token: asa_0007
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    # One minute past expires_at. Valkey's TTL normally deletes the key first,
+    # but decide() must not trust the TTL alone.
+    now: "2026-10-10T20:31:00Z"
+    expected: {result: DECLINED, reason: preapproval_expired}
+
+  - name: decline_card_already_used
+    level: decide
+    asa_request:
+      asa_token: asa_0008
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: true
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: already_used}
+
+  - name: decline_killswitch_on
+    level: decide
+    asa_request:
+      asa_token: asa_0009
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: *hotel_preapproval
+    killswitch_on: true
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: killswitch_on}
+
+  # PATCH /mandates/{id} bumps the version and deletes unused pre-approvals from
+  # Valkey, so the webhook sees no key at all. Same input shape as
+  # decline_no_preapproval, kept separate because it's a different demo story.
+  - name: decline_mandate_edited_after_approval
+    level: decide
+    asa_request:
+      asa_token: asa_0010
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: CROSSROADS HOTEL KC
+      mcc: "7011"
+      amount_cents: 15800
+    preapproval: null
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: no_preapproval}
+
+  # The second demo block: the shopper reuses the hotel card at the gift card
+  # store. Descriptor, MCC, and amount are all wrong. The reason is the first
+  # failing check in the order above.
+  - name: demo_reused_card_at_gift_card_store
+    level: decide
+    asa_request:
+      asa_token: asa_0011
+      card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+      merchant_descriptor: GIFTCARD EXPRESS
+      mcc: "5947"
+      amount_cents: 40000
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
+    expected: {result: DECLINED, reason: descriptor_mismatch}
+
+  # Handler-level: decide() has no memory, so this runs against the request
+  # handler with a real or fake Valkey. Lithic retries the same ASA request;
+  # the handler must return the stored asa:{asa_token} answer. If it called
+  # decide() again, the used:{card_token} key set by the first call would turn
+  # the retry into an already_used decline.
+  - name: duplicate_asa_token_returns_same_answer
+    level: handler
+    requests:
+      - asa_request: &dup_request
+          asa_token: asa_0012
+          card_token: 4f6a1c2e-8b3d-4e5f-9a7b-1c2d3e4f5a6b
+          merchant_descriptor: CROSSROADS HOTEL KC
+          mcc: "7011"
+          amount_cents: 15800
+        expected: {result: APPROVED, reason: approved}
+      - asa_request: *dup_request
+        expected: {result: APPROVED, reason: approved}
+    preapproval: *hotel_preapproval
+    killswitch_on: false
+    already_used: false
+    now: "2026-10-10T20:05:00Z"
