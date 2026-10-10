@@ -1,6 +1,7 @@
-"""Local wiring: agents -> real MCP service (subprocess) -> stub api and store.
+"""Local wiring: agents -> both real MCP services (subprocesses) -> stub api and store.
 
-The MCP service runs both servers: Leash at /mcp and the store at /store/mcp.
+The Leash MCP service (services/mcp-leash) and the store MCP service
+(services/mcp-store) run as separate processes, as they do on LKE.
 
 STUB API AND STORE. These stand in for Rishi's api and Cameron's store so the
 pieces in this lane can be tested over real HTTP: Strands' MCP clients against
@@ -29,8 +30,12 @@ from provenance.outbox import shared_outbox
 from shopper.runs import RunManager, StartRun, run_shopper
 
 AGENTS_DIR = Path(__file__).parents[1]
-MCP_DIR = AGENTS_DIR.parent / "mcp"
-POISONED = (MCP_DIR / "tests/fixtures/listings/charger_poisoned.html").read_text()
+LEASH_DIR = AGENTS_DIR.parent / "mcp-leash"
+STORE_DIR = AGENTS_DIR.parent / "mcp-store"
+POISONED = (STORE_DIR / "tests/fixtures/listings/charger_poisoned.html").read_text()
+# Credentials each MCP service must NOT be given: the store service never
+# holds the Leash token, and the Leash service never holds store secrets.
+_SECRETS = {"AGENT_TOKEN_SHOPPER", "STORE_MCP_TOKEN", "STORE_API_TOKEN", "API_URL", "STORE_URL"}
 TOKEN = "agent-wiring-token"
 STORE_MCP_TOKEN = "store-mcp-wiring-token"
 PAN = "4111111111111111"
@@ -51,6 +56,28 @@ def kill_tree(proc: subprocess.Popen) -> None:
   else:
     os.killpg(proc.pid, 9)
   proc.wait(timeout=10)
+
+
+def start_mcp(directory: Path, env: dict[str, str]) -> tuple[subprocess.Popen, str]:
+  port = free_port()
+  proc = subprocess.Popen(
+    ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+    cwd=directory,
+    env={**{k: v for k, v in os.environ.items() if k not in _SECRETS}, **env},
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=os.name != "nt",
+  )
+  url = f"http://127.0.0.1:{port}"
+  for _ in range(120):
+    try:
+      if httpx.get(f"{url}/health", timeout=1).status_code == 200:
+        return proc, url
+    except httpx.HTTPError:
+      pass
+    time.sleep(0.25)
+  kill_tree(proc)
+  pytest.fail(f"{directory.name} did not start")
 
 
 def free_port() -> int:
@@ -138,32 +165,19 @@ def stack():
   }
   api_url, api_server = serve(make_stub_api(log))
   store_url, store_server = serve(make_stub_store(log))
-  mcp_port = free_port()
-  mcp = subprocess.Popen(
-    ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(mcp_port)],
-    cwd=MCP_DIR,
-    env={
-      **os.environ,
-      "API_URL": api_url,
-      "STORE_URL": store_url,
-      "STORE_MCP_TOKEN": STORE_MCP_TOKEN,
-    },
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-    start_new_session=os.name != "nt",
+  leash, leash_url = start_mcp(LEASH_DIR, {"API_URL": api_url})
+  store, store_mcp_url = start_mcp(
+    STORE_DIR, {"STORE_URL": store_url, "STORE_MCP_TOKEN": STORE_MCP_TOKEN}
   )
-  mcp_url = f"http://127.0.0.1:{mcp_port}"
-  for _ in range(120):
-    try:
-      if httpx.get(f"{mcp_url}/healthz", timeout=1).status_code == 200:
-        break
-    except httpx.HTTPError:
-      time.sleep(0.25)
-  else:
-    kill_tree(mcp)
-    pytest.fail("MCP server did not start")
-  yield {"api": api_url, "store": store_url, "mcp": f"{mcp_url}/mcp", "log": log}
-  kill_tree(mcp)
+  yield {
+    "api": api_url,
+    "store": store_url,
+    "leash_mcp": f"{leash_url}/mcp",
+    "store_mcp": f"{store_mcp_url}/mcp",
+    "log": log,
+  }
+  kill_tree(leash)
+  kill_tree(store)
   api_server.should_exit = True
   store_server.should_exit = True
 
@@ -172,7 +186,8 @@ def stack():
 def env(stack, monkeypatch):
   monkeypatch.setenv("API_URL", stack["api"])
   monkeypatch.setenv("STORE_URL", stack["store"])
-  monkeypatch.setenv("MCP_URL", stack["mcp"])
+  monkeypatch.setenv("MCP_LEASH_URL", stack["leash_mcp"])
+  monkeypatch.setenv("MCP_STORE_URL", stack["store_mcp"])
   monkeypatch.setenv("AGENT_TOKEN_SHOPPER", TOKEN)
   monkeypatch.setenv("STORE_MCP_TOKEN", STORE_MCP_TOKEN)
   for key in ("payments", "payment_auth", "trace", "registrations", "order", "store_auth"):

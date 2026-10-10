@@ -2,7 +2,7 @@
 
 FIXTURE ONLY. They return what the real Store MCP returns (page text for the
 model plus an evidence record, never raw HTML) so the hooks and the scripted
-shopper can be tested without a server. services/mcp tests cover the real
+shopper can be tested without a server. services/mcp-store tests cover the real
 server; tests/test_wiring_local.py runs the real thing over HTTP.
 """
 
@@ -13,7 +13,7 @@ from typing import Any
 
 from strands import tool
 
-LISTINGS = Path(__file__).parents[2] / "mcp" / "tests" / "fixtures" / "listings"
+LISTINGS = Path(__file__).parents[2] / "mcp-store" / "tests" / "fixtures" / "listings"
 POISONED_HTML = (LISTINGS / "charger_poisoned.html").read_text()
 LISTING_URL = "http://store.test/products/chg-65w"
 

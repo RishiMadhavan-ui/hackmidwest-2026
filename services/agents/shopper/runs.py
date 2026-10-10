@@ -76,10 +76,13 @@ def make_model_for(req: StartRun):
 
 
 def mcp_urls() -> tuple[str, str]:
-  """(Leash MCP url, Store MCP url). The store server sits next to Leash's."""
-  leash = os.environ.get("MCP_URL", "http://localhost:8002/mcp")
-  default_store = leash.removesuffix("/mcp") + "/store/mcp"
-  return leash, os.environ.get("STORE_MCP_URL", default_store)
+  """(Leash MCP url, store MCP url): two separate services.
+
+  On LKE these are http://mcp-leash:8002/mcp and http://mcp-store:8003/mcp,
+  set in k8s/agents.yaml. MCP_URL is the older name for the Leash one.
+  """
+  leash = os.environ.get("MCP_LEASH_URL") or os.environ.get("MCP_URL", "http://localhost:8002/mcp")
+  return leash, os.environ.get("MCP_STORE_URL", "http://localhost:8003/mcp")
 
 
 def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
