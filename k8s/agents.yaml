@@ -26,6 +26,8 @@ spec:
               value: http://api:8000
             - name: AGENTS_URL
               value: http://agents:8000
+            - name: MCP_URL
+              value: http://mcp:8002/mcp
           ports:
             - containerPort: 8000
           readinessProbe:
