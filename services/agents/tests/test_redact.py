@@ -54,3 +54,20 @@ def test_credentials_masked():
 def test_ordinary_values_untouched():
   value = {"total_cents": 2999, "sku": "CHG-USB-C-65W", "id": "pay_01ABC", "qty": 1}
   assert redact(value) == value
+
+
+def test_hashes_and_ids_with_long_digit_runs_survive():
+  # Rishi's repro: a valid SHA-256 with 16 consecutive digits was corrupted.
+  sha = "a" + "1234567890123456" + "b" * 47
+  digits_first = "1234567890123456" + "c" * 48
+  values = [sha, digits_first, "9" * 64, "pay_1234567890123456", "evt_4111111111111111abc"]
+  for value in values:
+    assert redact_text(value) == value
+    assert redact({"sha256": value}) == {"sha256": value}
+  event = {"source_reference": f"source:{sha}", "excerpt": f"hash {sha} ok"}
+  assert redact(event) == event
+
+
+def test_pan_next_to_punctuation_still_masked():
+  for text in (f'"{PAN}"', f"({PAN})", f"card:{PAN},", f"{PAN}."):
+    assert PAN not in redact_text(text), text

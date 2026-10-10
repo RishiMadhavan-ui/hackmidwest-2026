@@ -29,9 +29,11 @@ _SECRET_KEYS = {
 _PAN_KEYS = {"pan", "card_number", "cardnumber", "number"}
 
 # 13-19 digits, optionally grouped by spaces or dashes: every card brand's PAN
-# length. This also catches some non-card numbers (like epoch milliseconds);
-# that's the safe direction to be wrong in.
-_PAN_RE = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+# length. A run touching a letter, digit, or underscore is part of a larger
+# token (a SHA-256, an id like pay_123...), not a card number, so it's left
+# alone; the same boundary rule as leash_shared.events. Standalone non-card
+# numbers like epoch milliseconds still get masked, the safe way to be wrong.
+_PAN_RE = re.compile(r"(?<![A-Za-z0-9_])(?:\d[ -]?){12,18}\d(?![A-Za-z0-9_])")
 _CVV_RE = re.compile(
   r"(?i)\b(cvv2?|cvc2?|security[ _-]?code)\b([\"']?\s*[:=]?\s*[\"']?)(\d{3,4})(?!\d)"
 )
