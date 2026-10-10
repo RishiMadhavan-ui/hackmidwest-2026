@@ -19,9 +19,19 @@ PYTHONPATH=../../shared uv run python -m shopper "Buy a USB-C laptop charger for
 
 In PowerShell, set `$env:PYTHONPATH="../../shared"` first. To keep settings in a file, put them in `services/agents/.env` (gitignored) and use `uv run --env-file .env ...`.
 
+## On LKE
+
+Deployment `agents`, reached in-cluster at `http://agents:8000` (container port 8000, ClusterIP only). The image builds from the repo root because it copies in `shared/leash_shared`:
+
+```
+docker build -f services/agents/Dockerfile .
+```
+
+`scripts/deploy_lke.sh` does this, and also deploys the MCP server as `mcp` at `http://mcp:8002/mcp`. Settings come from the `app-env` secret (the team `.env`), with `API_URL` and `MCP_URL` set in `k8s/agents.yaml`.
+
 ## Routes
 
-`GET /healthz` is open. Everything else needs `Authorization: Bearer $AGENTS_SERVICE_TOKEN`; with no token configured those routes refuse every call (503). Keep the service off the public ingress too, but that alone isn't authentication.
+`GET /health` and `GET /healthz` are open. Everything else needs `Authorization: Bearer $AGENTS_SERVICE_TOKEN`; with no token configured those routes refuse every call (503). Keep the service off the public ingress too, but that alone isn't authentication.
 
 - `POST /runs` with `{task, mandate_id, start_url?, agent_mode?, sku?, claim_sku?}` returns `run_id`.
 - `GET /runs/{run_id}` returns status, whether the run registered with the api, redacted output, and trace events.
