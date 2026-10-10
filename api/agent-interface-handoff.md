@@ -184,11 +184,11 @@ These are contract choices for later route work, not implemented API endpoints.
 
 | Owner | Concrete remaining action |
 |---|---|
-| Rishi | Implement registered ownership/mandate/mode persistence and intake acknowledgment above in R02/R06; guardian calls now require `AGENTS_SERVICE_TOKEN`. Aditya's registration and retry/spooling code is present. |
+| Rishi | R02 implements registered ownership/mandate/mode persistence; R06 intake acknowledgment remains pending; guardian calls now require `AGENTS_SERVICE_TOKEN`. Aditya's registration and retry/spooling code is present. |
 | Aditya | Fix the restart test's scheduling assumption; wait for a delivery attempt and synchronize old worker shutdown instead of requiring an attempt within 0.3 seconds. Consider joining on `OutboxSink.stop()`. Require the mode echo rather than accepting null in registration responses. |
-| Aditya | After C01/freeze, consume shared validators, including numeric/string constraint validation. Align the live attack demo and move shopping tools to the agreed separate Store MCP. |
+| Aditya | After C01, consume the accepted shared validators, including numeric/string constraint validation. Align the live attack demo and move shopping tools to the agreed Store `/store/mcp` endpoint. |
 | Cameron | Mount persistent storage at `/app/trace-spool`. `k8s/agents.yaml` has no volumes/mounts, so image-local spooling does not survive pod replacement. Supply exact OBJ names, configured STORE_URL/token, service tokens and documented MCP hosts. |
-| Cameron + Rishi | C01 installable shared package/runtime; API image currently copies `main.py`, `auth.py`, and `db.py` from an `api/` build context. It cannot import R01. Rishi owns the API Dockerfile; Cameron owns the matching deploy build context. Change these together before product API deployment. |
+| Cameron + Rishi | C01 installable shared package/runtime; R02 API image includes all API modules, shared sources and migrations using root context; Cameron must update the current `api/`-context deployment command before deploying it. Rishi owns the API Dockerfile; Cameron owns the matching deploy build context. Change these together before product API deployment. |
 | Cameron + Rishi | Agree authenticated canonical retrieval, session/owner assignment, revision/expiry, protected grant/instrument binding and atomic Valkey protocol. CheckoutSnapshot binds session ID; product billing interval is preserved/hash-bound. |
 
 Aditya has already replaced the hotel YAML with charger/subscription cases and
@@ -235,9 +235,9 @@ text, not canonical facts. No edits were made in Aditya's or Cameron's lanes.
   This validates the frontend build, not an authenticated purchase flow.
 
 The MCP decision is resolved: keep Leash's four financial tools on Leash MCP;
-Aditya implements a separate Store MCP for browse/create_checkout/complete_checkout
+Aditya implements Store `/store/mcp` alongside Leash `/mcp` in the same service for browse/create_checkout/complete_checkout
 over Cameron's merchant. The shopper loads both clients. Restrict browsing to the
-controlled store, reject off-host/internal redirects and separate scoped credentials.
+controlled store, reject off-host/internal redirects and separate credential handling.
 Inspect original HTML server-side, redact stored snapshots and return listing text
 plus source hash/evidence references rather than raw HTML. API verification still
 retrieves canonical checkout independently. Current direct Python shopping tools
@@ -261,12 +261,23 @@ shared-contract changes retain the dedicated PR and all-three coordination rule.
 Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
 to LEASH's `usr_` identities in R02 before issuing purchase authority.
 
-The agreed MCP direction uses separate Leash financial and Store shopping servers.
+The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` in one MCP service.
 Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate scoped credentials, store-only browsing
+direct Python until that lands. Use separate credential handling, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection
 remains required; scripted runs are labeled fixtures or fallback.
 
 Merge integration also fixes the no-token auth restoration branch in web/src/lib/auth.tsx: it completes asynchronously through the existing cancellation-aware promise chain instead of synchronously setting state inside an effect.
+
+## R02 API implementation update
+
+The mandate and `/agent-runs` contracts above are implemented on the R02 branch.
+[The R02 handoff](r02-handoff.md) is the current route/provisioning guide: assigned
+agent bearer, server-derived owner/version/hash, one operator-selected live/scripted
+mode, durable commit before 201 and identical retry echo. Mandates now have proposal,
+read/list, exact human approval, replacement/revocation and owner history routes.
+Cameron must update the API build context and provision the intended human/agent
+binding. R06 `/provenance` remains pending; a successful registration does not yet
+mean traces or payment requests can be accepted. No teammate-owned code was edited.

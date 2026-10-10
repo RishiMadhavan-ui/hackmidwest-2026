@@ -12,7 +12,7 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-Current review: main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. Leash purchase routes remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
+R01 baseline review: incorporated main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. R02 now implements mandate/run routes on its branch; payments remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
 
 Keep the existing backend in `api/`; `services/api/` is a reserved alternative. The annotated tree is in [AGENTS.md](AGENTS.md#repository-tree). Current deployment lives in `k8s/` and `scripts/`. API uses 8000 and web 3000; agents use local 8001 and LKE 8000; MCP uses 8002. Webhook/store 8003/8004 remain proposed. Agents/MCP now have both health paths; API retains `/health`.
 
@@ -83,7 +83,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **R01 implementation status:** models, hashing, event publishing and contract tests are implemented as the initial accepted integration baseline. The handoff documents the mandatory `checkout_id` on payment proposals, the nested grant on PreApproval, nullable guardian model, the 15 required verification checks, and the `event` stream field. Contract tests pass; C01 shared package/runtime installation remain open. R02 signing/auth/persistence and R03 independent verification are separate work, not completed by parsing a valid record.
 
-**Integrated review:** main includes Cameron's PRs #2/#3 and Aditya's #4 (`2e6f940`). R01 has incorporated main and refreshed actual serializer/hook/evaluator captures: 52 contract tests pass; locked MCP has 33 passes; locked agents has 126 passes, one restart-test failure and two live tests deselected. [The handoff](api/agent-interface-handoff.md) diagnoses the 0.3-second restart-test assumption and records remaining work. Aditya's auth, semantic forwarding, snapshot redaction/hash preservation and registration/outbox are implemented. Rishi accepts `/agent-runs`, service-token guardian auth and durable provenance HTTP semantics. Cameron's shared package/API build context and persistent spool volume remain pending; store/rail and product API routes are not implemented. Implement the agreed separate Store MCP and the scripted-default attack versus required live demonstration before claiming full agreement. Rishi authorized this initial R01 baseline; future contract changes still require coordinated review.
+**Integrated review:** main includes Cameron's PRs #2/#3 and Aditya's #4 (`2e6f940`). R01 has incorporated main and refreshed actual serializer/hook/evaluator captures: 52 contract tests pass; locked MCP has 33 passes; locked agents has 126 passes, one restart-test failure and two live tests deselected. [The handoff](api/agent-interface-handoff.md) diagnoses the 0.3-second restart-test assumption and records remaining work. Aditya's auth, semantic forwarding, snapshot redaction/hash preservation and registration/outbox are implemented. Rishi accepts `/agent-runs`, service-token guardian auth and durable provenance HTTP semantics. Cameron's shared package/API build context and persistent spool volume remain pending; store/rail and product API routes are not implemented. Implement the agreed Store MCP endpoint at `/store/mcp` in the existing MCP service and the scripted-default attack versus required live demonstration before claiming full agreement. Rishi authorized this initial R01 baseline; future contract changes still require coordinated review.
 
 **Rishi agent starting prompt:** “Read AGENTS.md, Leash-build-plan.md and docs/LEASH_SPEC.md. Work as Rishi's coding agent. Inspect current files and Git status, then implement the earliest unfinished R-task with satisfied prerequisites. Stay in the Rishi lane. Lead shared contracts through all-three review; do not treat an agent cart or positive guardian opinion as payment authority. Preserve the current api/ starter and fail closed until independent checkout and correlation are complete. Return task ID, code/tests, handoff and real blockers.”
 
@@ -282,10 +282,26 @@ shared-contract changes retain the dedicated PR and all-three coordination rule.
 Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
 to LEASH's `usr_` identities in R02 before issuing purchase authority.
 
-The agreed MCP direction uses separate Leash financial and Store shopping servers.
-Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate scoped credentials, store-only browsing
+The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` endpoints in the same service.
+Aditya implements Store MCP over Cameron's merchant in the existing MCP deployment; current shopping tools remain
+direct Python until that lands. Use separate credential handling, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection
 remains required; scripted runs are labeled fixtures or fallback.
+
+## R02 implementation handoff
+
+R02 is ready for handoff on `codex/r02-mandate-authority`: migrations adopt existing
+UUID auth, LEASH identity/agent ownership, exact signed human confirmation, immutable
+versions, replacement/revocation/history and committed `/agent-runs` registration.
+The 81-test API suite passes, including 19 real PostgreSQL tests for ownership,
+expiry, mode authorization, retries, rollback and concurrency; correctness lint
+passes. Frozen shared files are unchanged. See [api/r02-handoff.md](api/r02-handoff.md).
+
+Cameron must update the API build to repo-root context and readiness to `/readyz`,
+configure the existing signing/auth variables and provision the shopper binding.
+Rishi must complete independent checkout verification, payments and R06 provenance/
+stream delivery. Authority mutations are atomic in SQL; R04/R05 and Cameron must
+add coordinated Valkey grant invalidation before issuing any rail grant. Hosted
+deployment, shared database migration and complete Compose boot remain unverified.

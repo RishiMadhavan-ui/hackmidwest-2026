@@ -105,6 +105,10 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
+    try:
+        user_id = str(uuid.UUID(str(user_id)))
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
     row = get_user_by_id(str(user_id))
     if row is None:
         raise HTTPException(
@@ -124,12 +128,15 @@ def _token_for_user(user_id: uuid.UUID | str, email: str) -> TokenResponse:
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(body: AuthCredentials) -> TokenResponse:
+    _require_jwt_secret()
     email = body.email.lower().strip()
     if len(body.password) < MIN_PASSWORD_LEN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Password must be at least {MIN_PASSWORD_LEN} characters",
         )
+    if len(body.password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=400, detail="Password exceeds bcrypt's 72-byte limit")
     if get_user_by_email(email) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

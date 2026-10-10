@@ -1,8 +1,11 @@
-# LEASH backend and R01 contract handoff
+# LEASH backend and contract handoffs
 
-The backend exposes `GET /health` and `/auth/signup`, `/auth/login`, `/auth/me` from Cameron's PR #5. R01 adds shared Python contracts,
-canonical hashing, and sanitized event publishing; it does not implement purchase
-routes, signing, database writes, a verifier, or a payment rail.
+R01 supplies the frozen shared contracts, hashes and sanitized event envelopes.
+R02 adds PostgreSQL identity/agent bindings, migrations, signed mandate approval,
+immutable history/replacement/revocation and run registration while preserving
+Cameron's signup/login/me API. Read [the R02 handoff](r02-handoff.md) for current
+routes, exact approval bodies, provisioning, deployment requirements and limits.
+Checkout verification, payments, rail enforcement and provenance intake remain pending.
 
 Run the contract suite from the repository root using Python 3.12+ with Pydantic v2:
 
@@ -11,6 +14,8 @@ Run the contract suite from the repository root using Python 3.12+ with Pydantic
 ```
 
 No Redis server, provider credentials, inference, or pytest installation is needed.
+R02 SQL tests need an explicitly selected disposable localhost `leash_test*`
+database through `LEASH_TEST_DATABASE_URL`; otherwise they are visibly skipped.
 The async tests use the normal Windows event loop, which needs local loopback.
 The existing API runs from `api/` with `python -m uvicorn main:app --port 8000`.
 Compose boot remains pending Cameron's configuration.
@@ -203,10 +208,14 @@ shared-contract changes retain the dedicated PR and all-three coordination rule.
 Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
 to LEASH's `usr_` identities in R02 before issuing purchase authority.
 
-The agreed MCP direction uses separate Leash financial and Store shopping servers.
+The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` in one MCP service.
 Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
 direct Python until that lands. Use separate scoped credentials, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection
 remains required; scripted runs are labeled fixtures or fallback.
+
+R02 validation: 81 API tests pass including 19 real PostgreSQL tests; correctness
+lint passes. Its API Dockerfile now needs root context; Cameron owns the deployment
+script/probe updates described in [the R02 handoff](r02-handoff.md).

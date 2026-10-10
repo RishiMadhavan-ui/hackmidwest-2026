@@ -27,7 +27,7 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-October 10 review: main at `1818a43` includes Cameron's LKE/build/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP, guardian, provenance and test scaffolding. R01's review branch incorporates main, resolving the AGENTS.md conflict while preserving auth and agent work and adds shared models/events and contract tests; see [api/README.md](api/README.md). Main now includes Cameron's PR #5 (`1818a43`): API signup/login/me with JWT and a PostgreSQL users table, plus web signup/signin/profile. Leash purchase routes remain pending. Store/webhook, application persistence, Valkey, installable shared packaging and Compose remain pending. The public web/API health respond; a complete payment flow and live inference are not verified. Rishi authorized R01 as the accepted integration baseline after compatibility review; this does not claim separate approval messages from all three teammates.
+October 10 review: main at `916e01b` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's `2e6f940` agents/MCP. This R02 branch adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron must update the API deployment build context before this branch is deployable. No shared database or deployed service was changed.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -65,14 +65,19 @@ hackmidwest-2026/
   scripts/                           [E] Cameron: build/deploy/PostgreSQL provisioning
   mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
-    main.py                          [E] /health and /auth/signup, /auth/login, /auth/me
+    main.py                          [E] health/readiness, auth and mandate/run routes
+    mandate_routes.py                [E] Rishi: scoped R02 REST routes
+    mandate_service.py               [E] Rishi: transactional authority lifecycle
+    principals.py                    [E] Rishi: human/agent ownership
+    signing.py                       [E] Rishi: Ed25519 confirmation
+    manage.py                        [E] Rishi: migrations and operator provisioning
     auth.py                          [E] JWT signup/login/me
-    db.py                            [E] PostgreSQL users table and connections
+    db.py                            [E] checksummed PostgreSQL migrations and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
-    tests/                           [E] Rishi: R01 contract tests; service tests planned
-    Dockerfile                       [E] Rishi: auth modules included; shared context pending
-  db/migrations/                     [P] Rishi: durable domain/audit schema
+    tests/                           [E] Rishi: R01 and R02 signature/HTTP/PostgreSQL tests
+    Dockerfile                       [E] Rishi: API/shared/migrations included; root build context required
+  db/migrations/                     [E] Rishi: users and R02 authority/audit schema
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
@@ -140,7 +145,7 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 **Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. The agreed direction is separate Leash and Store MCP servers; Aditya still needs to move the direct shopping tools. The signature demo still requires live injection; scripted runs remain labeled fixtures/fallback.
+**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding, payments and provenance intake remain pending. R02 mandate/run routes are implemented on this branch. The agreed direction is two MCP endpoints in one service (`/mcp` and `/store/mcp`); Aditya still needs to move the direct shopping tools. The signature demo still requires live injection; scripted runs remain labeled fixtures/fallback.
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
@@ -154,7 +159,7 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use shared `make_model()` with explicit `max_tokens`, text-only Akamai requests and guardian temperature 0. Both matched INFERENCE_* and workshop OPENAI_* environment pairs work. Structured findings/fallback remain advisory; genuine inference smoke evidence is pending.
-- MCP uses the official locked SDK's `MCPServer` (the FastMCP rename), Streamable HTTP, stateless thin adaptation and forwarded bearer credentials. Tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; API validates identity/permissions. No privilege escalation tools. Shopper currently uses direct Python shopping tools; Aditya will expose browse/create_checkout/complete_checkout through a separate Store MCP. Cameron owns its underlying merchant service. The shopper loads both MCP clients; failure closes operations. Store browsing is restricted to configured store pages and rejects off-host/internal redirects, with separate scoped credentials. Inspect original HTML server-side, redact snapshots, and return listing text plus source hash/evidence references rather than raw HTML. Store MCP cannot create payment authority; the API independently retrieves canonical checkout facts.
+- MCP uses the official locked SDK's `MCPServer` (the FastMCP rename), Streamable HTTP, stateless thin adaptation and forwarded bearer credentials. Tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; API validates identity/permissions. No privilege escalation tools. Shopper currently uses direct Python shopping tools; Aditya will expose browse/create_checkout/complete_checkout through Store MCP at `/store/mcp` alongside Leash `/mcp` in the same deployment. Cameron owns its underlying merchant service. The shopper loads both MCP clients; failure closes operations. Store browsing is restricted to configured store pages and rejects off-host/internal redirects, with separate credential handling; shared deployment is not process/network isolation. Inspect original HTML server-side, redact snapshots, and return listing text plus source hash/evidence references rather than raw HTML. Store MCP cannot create payment authority; the API independently retrieves canonical checkout facts.
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.
@@ -186,8 +191,20 @@ web/: pnpm build
 deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
 ```
 
-API has `/health` and `/auth/signup`, `/auth/login`, `/auth/me`; agents/MCP expose both health paths and their implemented routes. Agents use local port 8001 but LKE Service/container port 8000; MCP uses 8002. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
+API has health/readiness, existing auth, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose both health paths and their implemented routes. Agents use local port 8001 but LKE Service/container port 8000; MCP uses 8002. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
 Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 tests run with `api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v`; they need Python 3.12+ and Pydantic v2. Agents/MCP have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.
+
+## R02 status and deployment handoff
+
+R02 is ready for handoff on its own branch; frozen R01 files are unchanged. The full
+API suite passes 81 tests including 19 real PostgreSQL integration tests; correctness
+lint passes. The local test database is disposable; no shared migration/deployment
+was run. Cameron must switch the API image build to repo-root context and use
+`/readyz` for readiness, supply existing signing/auth settings and bind the agent
+to the intended human/mode. Exact commands and request bodies are in the
+[R02 handoff](api/r02-handoff.md). SQL changes commit with audit records; R06 still
+relays those records. R04/R05 and Cameron must implement atomic rail-grant
+invalidation before issuing grants; pending audit delivery is not enforcement.

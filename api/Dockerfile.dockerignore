@@ -1,0 +1,12 @@
+# Build from the repository root with -f api/Dockerfile.
+**
+!api/
+!api/*.py
+!api/pyproject.toml
+!api/uv.lock
+!shared/
+!shared/leash_shared/
+!shared/leash_shared/*.py
+!db/
+!db/migrations/
+!db/migrations/*.sql

@@ -1334,7 +1334,7 @@ Audit is append-only; deduplicate ingestion rather than altering history. Link m
 
 ### 23.6 Proposed API and MCP responsibilities
 
-The product API implements `/health` and JWT signup/login/me; purchase routes remain pending; agents/MCP routes now exist separately. This target contract retains familiar legacy names; section 12's `/api/...` routes are suggestions, not required breaking renames. Owners agree final routes/models together.
+The product API implements health/readiness and JWT signup/login/me; R02 adds mandate lifecycle/identity/run routes on its branch; payments remain pending; agents/MCP routes now exist separately. This target contract retains familiar legacy names; section 12's `/api/...` routes are suggestions, not required breaking renames. Owners agree final routes/models together.
 
 | Operation / proposed route | Authority | Enforcement |
 |---|---|---|
@@ -1355,7 +1355,7 @@ The product API implements `/health` and JWT signup/login/me; purchase routes re
 
 Keep human/provider/inference credentials server-side behind authenticated web routes or a server-issued scoped session. `NEXT_PUBLIC_*` cannot contain `USER_TOKEN` or provider secrets. Agent bearer credentials never authorize human-only routes. CORS is not authentication. Demo shortcuts must preserve these boundaries and be documented.
 
-MCP uses the official locked SDK's `MCPServer` (FastMCP rename), Streamable HTTP, `stateless_http=True`, `json_response=True`, forwarded bearer auth and one backend operation per thin tool. Preserve `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; payment requests reference trusted checkout identity. No grant mutation, approval, limit increase, kill switch or unrestricted provider tool. Shopping tools belong on a separate Store MCP implemented by Aditya over Cameron's controlled merchant; backend authorization remains mandatory for any calling interface.
+MCP uses the official locked SDK's `MCPServer` (FastMCP rename), Streamable HTTP, `stateless_http=True`, `json_response=True`, forwarded bearer auth and one backend operation per thin tool. Preserve `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; payment requests reference trusted checkout identity. No grant mutation, approval, limit increase, kill switch or unrestricted provider tool. Shopping tools belong on Store `/store/mcp` alongside Leash `/mcp` in the same MCP deployment, implemented by Aditya over Cameron's controlled merchant; shared deployment does not provide process/network isolation; backend authorization remains mandatory for any calling interface.
 
 ### 23.7 Public documentation checks
 
@@ -1372,7 +1372,7 @@ Implemented on `rishi/r01-shared-contracts`: shared Pydantic models, strict cent
 
 The proposal `cart_hash` preserves the original four-field definition. Mandate and trusted checkout hashes are distinct versioned payloads. Payment proposals require `checkout_id`; PreApproval requires the exact nested AuthorizationGrant; a `VERIFIED` record requires all 15 named deterministic checks; stream entries store the canonical envelope in an `event` field with a deduplication `event_id`. Array order is significant. Unknown fields fail validation; adapters must reject unsupported provider facts before normalization.
 
-The candidate incorporates main at `1818a43`, including Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP implementation. [The refreshed handoff](../api/agent-interface-handoff.md) records 52 passing contract tests, captured serializer/evaluator/hook/registration outputs, 33 passing locked MCP tests and 126 passing agents tests with one restart-test failure and two live tests deselected. R01 now includes `AgentRunRegistration`; the API derives owner/version/hash/status after authenticated registration. Its accepted intake contract uses 2xx after durable commit, 409 only for identical committed duplicates, 422 for altered duplicates/validation, and 5xx for outages. Current guardian/source/trace/model and semantic mandate fields remain compatible; stored snapshots carry a separate `stored_sha256`. Aditya's endpoint authentication, semantic forwarding, pre-upload redaction, hash preservation and registration/outbox fixes are present. R02/R06 still implement the API routes and durable ownership/intake. Cameron owns current `k8s/`, `scripts/`, `mise.toml` as deployment paths alongside reserved `infra/`; shared packaging, API image context, persistent trace volume, protected merchant/rail/Valkey and full live acceptance remain pending. Implement the agreed separate Store MCP and the scripted-default demo versus required genuine live injection. Do not silently weaken requirements. Section 21 remains the original historical inspection.
+The candidate incorporates main at `1818a43`, including Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP implementation. [The refreshed handoff](../api/agent-interface-handoff.md) records 52 passing contract tests, captured serializer/evaluator/hook/registration outputs, 33 passing locked MCP tests and 126 passing agents tests with one restart-test failure and two live tests deselected. R01 now includes `AgentRunRegistration`; the API derives owner/version/hash/status after authenticated registration. Its accepted intake contract uses 2xx after durable commit, 409 only for identical committed duplicates, 422 for altered duplicates/validation, and 5xx for outages. Current guardian/source/trace/model and semantic mandate fields remain compatible; stored snapshots carry a separate `stored_sha256`. Aditya's endpoint authentication, semantic forwarding, pre-upload redaction, hash preservation and registration/outbox fixes are present. R02 implements mandate routes and durable ownership on its branch; R06 provenance intake remains pending. Cameron owns current `k8s/`, `scripts/`, `mise.toml` as deployment paths alongside reserved `infra/`; shared packaging, API image context, persistent trace volume, protected merchant/rail/Valkey and full live acceptance remain pending. Implement the agreed Store `/store/mcp` endpoint and the scripted-default demo versus required genuine live injection. Do not silently weaken requirements. Section 21 remains the original historical inspection.
 
 These schemas validate shape and content consistency, not human identity, cryptographic authenticity, source trust, current state or atomic consumption. R02 implements real signing/confirmation/persistence, R03 executes independent verification, and Cameron implements trusted merchant binding and atomic rail enforcement. No purchase route, live integration, Compose boot or end-to-end acceptance is claimed by R01. Cameron's C01 packaging and remaining runtime interface coordination remain pending; the initial absence observations in section 21 are historical snapshots.
 
@@ -1437,10 +1437,24 @@ shared-contract changes retain the dedicated PR and all-three coordination rule.
 Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
 to LEASH's `usr_` identities in R02 before issuing purchase authority.
 
-The agreed MCP direction uses separate Leash financial and Store shopping servers.
+The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` endpoints in one service.
 Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate scoped credentials, store-only browsing
+direct Python until that lands. Use separate credential handling, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection
 remains required; scripted runs are labeled fixtures or fallback.
+
+### R02 implementation boundary
+
+[R02](../api/r02-handoff.md) implements persisted human authority and registered
+agent context on its review branch: checked migrations, UUID-to-LEASH identity
+mapping, explicit agent ownership/mode binding, proposal/read/list, exact version/
+hash confirmation with real Ed25519, immutable history, replacement and revocation,
+and `/agent-runs` commit/echo. Its SQL authority/audit mutations are transactional;
+81 API tests pass including 19 real PostgreSQL tests. Frozen shared contracts stay
+unchanged. It is not independent checkout verification, grant issuance, rail
+invalidation, provenance ingestion, hosted deployment or live acceptance. Cameron
+must coordinate root-context API builds, readiness, configured secrets and operator
+provisioning. Future grants require the atomic SQL/Valkey invalidation protocol;
+audit delivery cannot substitute for it. Earlier inspection sections are historical.
