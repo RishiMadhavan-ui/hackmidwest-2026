@@ -12,7 +12,7 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-Current review: main at `fae667b` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main without conflicts, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API still exposes only `GET /health`; web remains a starter. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Joint freeze, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
+Current review: main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. Leash purchase routes remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
 
 Keep the existing backend in `api/`; `services/api/` is a reserved alternative. The annotated tree is in [AGENTS.md](AGENTS.md#repository-tree). Current deployment lives in `k8s/` and `scripts/`. API uses 8000 and web 3000; agents use local 8001 and LKE 8000; MCP uses 8002. Webhook/store 8003/8004 remain proposed. Agents/MCP now have both health paths; API retains `/health`.
 
@@ -48,16 +48,17 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **DRI: Rishi. Reviewers: Cameron and Aditya.** This is the first work now, not a claim that the old 2:30 PM checkpoint was met. Rishi drafts the domain contracts; Cameron reviews trusted checkout/rail/atomicity; Aditya reviews tools/traces/investigation. Each implements only their files after review.
 
-- [ ] Agree fields/enums for PurchaseMandate, proposal Cart, AgentRun/Trace, canonical product/CheckoutSnapshot, CheckoutVerification, AuthorizationGrant, AuthorizationAttempt/PaymentDecision, SecurityIncident, AuditEvent. Use spec section 23's `_cents` mapping, UTC, canonical payload hashing, immutable confirmed versions, exact totals/currency and sanitized evidence.
+- [x] Rishi accepted the R01 baseline fields/enums for PurchaseMandate, proposal Cart, AgentRun/Trace, canonical product/CheckoutSnapshot, CheckoutVerification, AuthorizationGrant, AuthorizationAttempt/PaymentDecision, SecurityIncident, AuditEvent. Use spec section 23's `_cents` mapping, UTC, canonical payload hashing, immutable confirmed versions, exact totals/currency and sanitized evidence.
 - [ ] Confirm human versus agent auth/session boundaries, merchant source authentication, configured source registry, and checkout ownership. CORS or agent claims cannot substitute for auth.
 - [ ] Confirm quantity/purchase cardinality and comparator: the singular request defaults to one successful checkout, quantity one; “under $40” has maximum 3999 cents unless the human confirms otherwise. A block consumes no purchase authority. Live demo sessions/reset behavior must respect consumed scope.
 - [ ] Agree checkout revision freeze, trusted checkout retrieval, grant/instrument binding, protected merchant charge operation and activation order. A grant becomes usable only after all verification and required merchant correlation binding succeed; failed setup revokes any partial grant and never approves.
 - [ ] Agree Valkey schemas/atomic operations for authority revocation, kill switch, scope reservation, grant issuance/consumption, idempotent event identity/fingerprint, cached response retention and audit stream commit. API owns durable writes; webhook network I/O is Valkey only.
-- [ ] Agree route/request/response/error examples in spec section 23.6; choose exact route names without arbitrary renaming. Only `/health` exists today. Agree run API location, SSE event IDs/resume/auth, incident/history queries and receipt format.
+- [ ] Agree route/request/response/error examples in spec section 23.6; choose exact route names without arbitrary renaming. Health and JWT auth routes exist; LEASH purchase routes remain pending. Agree run API location, SSE event IDs/resume/auth, incident/history queries and receipt format.
 - [ ] Agree service packaging/dependencies: Cameron owns root workspace/ruff config and shared package installability; each service owner owns its project dependencies/Dockerfile. Specify how owners install/import the shared package without duplicate models.
 - [ ] Agree fixtures: canonical charger and canonical subscription both total 2999 cents, same merchant/currency; the attack changes only listing text/agent behavior. Add over-budget, missing-evidence, expiry/replay and recovery fixtures. Adversarial listing text cannot edit canonical records.
 - [ ] Agree selected local rail interface first; Cameron reports Lithic/Akamai capability checks without printing secrets. Genuine Strands/Akamai round-trip is separately verified by Aditya.
-- [ ] Review and freeze the first `models.py`/`events.py`; publish matching OpenAPI/examples and confirm every lane can build against them. Record any unresolved choice explicitly with its owner before coding its dependents.
+- [x] Rishi authorized the initial `models.py`/`events.py` baseline after peer compatibility review. Separate all-three approval messages are not claimed.
+- [ ] Publish purchase-route OpenAPI and verify packaged runtime imports; remaining checkout/rail protocols still require owner coordination.
 
 **Exit evidence:** all three have reviewed identical model/event schemas and interface examples; source trust, payment correlation and atomicity are explicit; task owners know the next handoffs. Contracts being documented is not an implemented security mechanism.
 
@@ -80,9 +81,9 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | R09 | Real activity, incident timeline, transaction history and Attack Lab in `web/` | R06/R08, A02/A04, C02 attack scenario API | Actual streamed tool/state events, source inspection, reload persistence, actual provider/source/latency; attack never changes mandate/outcome |
 | R10 | Receipts/evidence chain, empty/error/loading states, service Dockerfile/README and final integration checks | R05–R09, C06 deployment, A07 e2e | Readable signed/hash-linked chain without overstated guarantees, provider failure never success, deployed positive/block/recovery, usable phone/big-screen UI |
 
-**R01 implementation status:** models, hashing, event publishing and contract tests are implemented as the initial review candidate. The handoff documents the mandatory `checkout_id` on payment proposals, the nested grant on PreApproval, nullable guardian model, the 15 required verification checks, and the `event` stream field. Contract tests pass; joint review/freeze and C01 shared package/runtime installation remain open. R02 signing/auth/persistence and R03 independent verification are separate work, not completed by parsing a valid record.
+**R01 implementation status:** models, hashing, event publishing and contract tests are implemented as the initial accepted integration baseline. The handoff documents the mandatory `checkout_id` on payment proposals, the nested grant on PreApproval, nullable guardian model, the 15 required verification checks, and the `event` stream field. Contract tests pass; C01 shared package/runtime installation remain open. R02 signing/auth/persistence and R03 independent verification are separate work, not completed by parsing a valid record.
 
-**Integrated review:** main includes Cameron's PRs #2/#3 and Aditya's #4 (`2e6f940`). R01 has incorporated main and refreshed actual serializer/hook/evaluator captures: 52 contract tests pass; locked MCP has 33 passes; locked agents has 126 passes, one restart-test failure and two live tests deselected. [The handoff](api/agent-interface-handoff.md) diagnoses the 0.3-second restart-test assumption and records remaining work. Aditya's auth, semantic forwarding, snapshot redaction/hash preservation and registration/outbox are implemented. Rishi accepts `/agent-runs`, service-token guardian auth and durable provenance HTTP semantics. Cameron's shared package/API build context and persistent spool volume remain pending; store/rail and product API routes are not implemented. Reconcile direct shopping tools versus MCP wording and the scripted-default attack versus required live demonstration before claiming full agreement. All-three contract review/freeze remains open.
+**Integrated review:** main includes Cameron's PRs #2/#3 and Aditya's #4 (`2e6f940`). R01 has incorporated main and refreshed actual serializer/hook/evaluator captures: 52 contract tests pass; locked MCP has 33 passes; locked agents has 126 passes, one restart-test failure and two live tests deselected. [The handoff](api/agent-interface-handoff.md) diagnoses the 0.3-second restart-test assumption and records remaining work. Aditya's auth, semantic forwarding, snapshot redaction/hash preservation and registration/outbox are implemented. Rishi accepts `/agent-runs`, service-token guardian auth and durable provenance HTTP semantics. Cameron's shared package/API build context and persistent spool volume remain pending; store/rail and product API routes are not implemented. Implement the agreed separate Store MCP and the scripted-default attack versus required live demonstration before claiming full agreement. Rishi authorized this initial R01 baseline; future contract changes still require coordinated review.
 
 **Rishi agent starting prompt:** “Read AGENTS.md, Leash-build-plan.md and docs/LEASH_SPEC.md. Work as Rishi's coding agent. Inspect current files and Git status, then implement the earliest unfinished R-task with satisfied prerequisites. Stay in the Rishi lane. Lead shared contracts through all-three review; do not treat an agent cart or positive guardian opinion as payment authority. Preserve the current api/ starter and fail closed until independent checkout and correlation are complete. Return task ID, code/tests, handoff and real blockers.”
 
@@ -272,3 +273,19 @@ Known limitation / blocker + responsible human + next action:
 ```
 
 When changing product requirements, ownership, a shared interface or a milestone, update the affected source document and its cross-references in all three direction documents. Human confirmation of purchase authority is application behavior; human review of coding contracts is team coordination. Neither can be faked by an agent.
+
+### R01 merge decision — October 10
+
+Rishi authorized the initial R01 integration baseline after checking peer compatibility.
+Separate approval messages from all three teammates are not claimed. Subsequent
+shared-contract changes retain the dedicated PR and all-three coordination rule.
+Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
+to LEASH's `usr_` identities in R02 before issuing purchase authority.
+
+The agreed MCP direction uses separate Leash financial and Store shopping servers.
+Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
+direct Python until that lands. Use separate scoped credentials, store-only browsing
+with off-host/internal redirects rejected, server-side original HTML inspection,
+redacted snapshots, and listing text plus evidence references/source hashes in tool
+results. The API independently retrieves canonical checkout facts. Live injection
+remains required; scripted runs are labeled fixtures or fallback.

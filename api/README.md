@@ -1,6 +1,6 @@
 # LEASH backend and R01 contract handoff
 
-The backend still exposes only `GET /health`. R01 adds shared Python contracts,
+The backend exposes `GET /health` and `/auth/signup`, `/auth/login`, `/auth/me` from Cameron's PR #5. R01 adds shared Python contracts,
 canonical hashing, and sanitized event publishing; it does not implement purchase
 routes, signing, database writes, a verifier, or a payment rail.
 
@@ -27,9 +27,9 @@ from leash_shared.models import Mandate, CheckoutSnapshot, cart_hash
 from leash_shared.events import AuditEvent, publish
 ```
 
-These are the initial R01 review candidate on `rishi/r01-shared-contracts`.
-Cameron and Aditya review the concrete fields before all three freeze them. Future
-frozen-contract changes follow AGENTS.md's dedicated PR rule.
+Rishi authorized these initial R01 contracts as the accepted integration baseline.
+This does not claim separate all-three approval messages. Future contract changes
+follow AGENTS.md's dedicated PR and coordinated review rule.
 
 ## Records and authority boundaries
 
@@ -178,9 +178,9 @@ Strands, merchant, Lithic, database, concurrent consumption, or end-to-end accep
 
 ## Integrated branch review
 
-Main at `fae667b` includes Cameron's build/deployment PRs and Aditya's `2e6f940`
-agents/MCP branch. R01 has incorporated it without conflicts. The API is still
-health-only; PostgreSQL provisioning is not application persistence. Current
+Main at `1818a43` includes Cameron's build/deployment PRs and Aditya's `2e6f940`
+agents/MCP branch. R01 incorporates it with the AGENTS.md conflict resolved. API JWT auth and a
+PostgreSQL users table are present; LEASH domain persistence remains pending. Current
 payloads, run registration, 52 passing contract tests, peer-suite results, deployment
 gaps and architecture decisions are recorded in [the handoff](agent-interface-handoff.md).
 
@@ -194,3 +194,19 @@ The utility invokes current serializers/evaluator/hooks with fixture inputs and
 substituted HTTP, model, and S3 calls, then names the capture after the inspected
 peer commit. It does not start a live model or upload data. Consume the matching
 capture in the contract tests when reviewing a new peer revision.
+
+### R01 merge decision — October 10
+
+Rishi authorized the initial R01 integration baseline after checking peer compatibility.
+Separate approval messages from all three teammates are not claimed. Subsequent
+shared-contract changes retain the dedicated PR and all-three coordination rule.
+Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
+to LEASH's `usr_` identities in R02 before issuing purchase authority.
+
+The agreed MCP direction uses separate Leash financial and Store shopping servers.
+Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
+direct Python until that lands. Use separate scoped credentials, store-only browsing
+with off-host/internal redirects rejected, server-side original HTML inspection,
+redacted snapshots, and listing text plus evidence references/source hashes in tool
+results. The API independently retrieves canonical checkout facts. Live injection
+remains required; scripted runs are labeled fixtures or fallback.

@@ -27,7 +27,7 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-October 10 review: main at `fae667b` includes Cameron's LKE/build/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP, guardian, provenance and test scaffolding. R01's review branch incorporates main without conflicts and adds shared models/events and contract tests; see [api/README.md](api/README.md). API application routes remain absent (`GET /health` only); web is still a starter. Store/webhook, application persistence, Valkey, installable shared packaging and Compose remain pending. The public web/API health respond; a complete payment flow and live inference are not verified. Contracts remain an unfrozen review candidate.
+October 10 review: main at `1818a43` includes Cameron's LKE/build/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP, guardian, provenance and test scaffolding. R01's review branch incorporates main, resolving the AGENTS.md conflict while preserving auth and agent work and adds shared models/events and contract tests; see [api/README.md](api/README.md). Main now includes Cameron's PR #5 (`1818a43`): API signup/login/me with JWT and a PostgreSQL users table, plus web signup/signin/profile. Leash purchase routes remain pending. Store/webhook, application persistence, Valkey, installable shared packaging and Compose remain pending. The public web/API health respond; a complete payment flow and live inference are not verified. Rishi authorized R01 as the accepted integration baseline after compatibility review; this does not claim separate approval messages from all three teammates.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -65,17 +65,19 @@ hackmidwest-2026/
   scripts/                           [E] Cameron: build/deploy/PostgreSQL provisioning
   mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
-    main.py                          [E] currently GET /health only
+    main.py                          [E] /health and /auth/signup, /auth/login, /auth/me
+    auth.py                          [E] JWT signup/login/me
+    db.py                            [E] PostgreSQL users table and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
     tests/                           [E] Rishi: R01 contract tests; service tests planned
-    Dockerfile                       [E] Rishi: health-only image; shared context pending
+    Dockerfile                       [E] Rishi: auth modules included; shared context pending
   db/migrations/                     [P] Rishi: durable domain/audit schema
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
       __init__.py                    [P] Cameron: package marker
-      models.py                      [E] Rishi: R01 initial contract review candidate
+      models.py                      [E] Rishi: R01 accepted integration baseline
       events.py                      [E] Rishi: R01 sanitized events/publish helper
       lithic.py                      [P] Cameron: official sandbox client wrapper
       llm.py                         [E] Aditya: centralized model factory
@@ -92,10 +94,11 @@ hackmidwest-2026/
       tests/                         [P] handler/concurrency/signature tests
     store/                           [P] Cameron: controlled merchant
       tests/                         [P] catalog/checkout/correlation tests
-  web/                               [E] Rishi: Next.js/Tailwind/shadcn starter
-    src/app/                         [E] starter; product views still planned
-    src/components/ui/               [E] reusable UI primitives
-    src/lib/api.ts                   [E] health fetch helper
+  web/                               [E] Rishi: Next.js/Tailwind/shadcn
+    src/app/                         [E] home, signup, signin, profile
+    src/components/                  [E] site-nav + ui primitives
+    src/lib/api.ts                   [E] apiFetch + auth helpers
+    src/lib/auth.tsx                 [E] AuthProvider / Bearer state
     src/lib/api-types.ts             [P] generated from agreed OpenAPI
   tests/
     decision_cases.yaml              [E] Aditya: independent policy fixtures
@@ -135,20 +138,23 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 
 If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The present documentation update authorizes only the shared direction files. Do not implement new services as part of documentation alignment.
 
-**Contracts:** R01's initial `models.py` and `events.py` are implemented as a review candidate, with validation/hash/event tests in `api/tests/`. Review the concrete fields together before freezing and integrating dependent lanes. Once frozen, changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
+**Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. Reconcile direct Python shopping tools versus Rishi's MCP clarification and scripted versus live signature demo before claiming agreement; do not change those requirements silently.
+**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. The agreed direction is separate Leash and Store MCP servers; Aditya still needs to move the direct shopping tools. The signature demo still requires live injection; scripted runs remain labeled fixtures/fallback.
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
+
+**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile` and `services/agents/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new API (or agents) module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
 
 ## Engineering requirements
 
 - Python 3.12+, FastAPI, Pydantic v2; TypeScript strict mode, Next.js App Router, 2-space indentation for new code. Ruff configuration is planned, not present at root. Do not reformat another owner's files.
+- When adding or renaming runtime modules under `api/` or `services/agents/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
 - Money is integer minor units; the USD MVP uses `_cents` fields, never float dollars. Validate amounts, quantities, supported currencies, required checkout fields, and UTC-aware timestamps. Convert only for display.
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use shared `make_model()` with explicit `max_tokens`, text-only Akamai requests and guardian temperature 0. Both matched INFERENCE_* and workshop OPENAI_* environment pairs work. Structured findings/fallback remain advisory; genuine inference smoke evidence is pending.
-- MCP uses the official locked SDK's `MCPServer` (the FastMCP rename), Streamable HTTP, stateless thin adaptation and forwarded bearer credentials. Tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; API validates identity/permissions. No privilege escalation tools. Shopper currently uses direct Python browse/store tools alongside MCP; reconcile that scope with the requested MCP primary interface.
+- MCP uses the official locked SDK's `MCPServer` (the FastMCP rename), Streamable HTTP, stateless thin adaptation and forwarded bearer credentials. Tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; API validates identity/permissions. No privilege escalation tools. Shopper currently uses direct Python shopping tools; Aditya will expose browse/create_checkout/complete_checkout through a separate Store MCP. Cameron owns its underlying merchant service. The shopper loads both MCP clients; failure closes operations. Store browsing is restricted to configured store pages and rejects off-host/internal redirects, with separate scoped credentials. Inspect original HTML server-side, redact snapshots, and return listing text plus source hash/evidence references rather than raw HTML. Store MCP cannot create payment authority; the API independently retrieves canonical checkout facts.
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.
@@ -169,16 +175,18 @@ All are MVP requirements, not future roadmap items. Detailed fields, state trans
 
 ## Commands and completion checks
 
-Current starter commands (run in the named directory after installing dependencies):
+Current starter commands (run in the named directory after installing dependencies; API needs env from `.env`, e.g. `set -a && source ../.env && set +a`):
 
 ```text
-api/: python -m uvicorn main:app --reload --port 8000
+api/: uv run uvicorn main:app --reload --port 8000
+services/agents/: uv run uvicorn main:app --reload --port 8001
 web/: pnpm dev
 web/: pnpm lint
 web/: pnpm build
+deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
 ```
 
-API currently has `/health` only; agents/MCP expose both health paths and their implemented routes. Agents use local port 8001 but LKE Service/container port 8000; MCP uses 8002. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
+API has `/health` and `/auth/signup`, `/auth/login`, `/auth/me`; agents/MCP expose both health paths and their implemented routes. Agents use local port 8001 but LKE Service/container port 8000; MCP uses 8002. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
 Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 tests run with `api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v`; they need Python 3.12+ and Pydantic v2. Agents/MCP have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 

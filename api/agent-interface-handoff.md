@@ -1,20 +1,18 @@
 # Rishi / Aditya / Cameron interface alignment
 
-Inspected `origin/main` at `fae667b` and `origin/aditya-mcp` at `2e6f940` on
-October 10. Main already contains Cameron's PRs #2/#3 and Aditya's PR #4;
-neither teammate's branch has commits outside main. Rishi merged this main into
-the R01 branch without conflicts. The refreshed `aditya-2e6f940-wire.json` capture
+Inspected `origin/main` at `1818a43` and `origin/aditya-mcp` at `2e6f940` on
+October 10. Main contains Cameron's PRs #2/#3/#5 and Aditya's PR #4. Rishi incorporated
+this main, resolving the AGENTS.md conflict while preserving both lanes. The refreshed `aditya-2e6f940-wire.json` capture
 contains three actual MCP bodies, run registration, seven guardian outputs, and
 five hook/source events generated with fixture inputs. HTTP, S3 and models are
 substituted; this is not live inference or real Object Storage. All 52 API contract
 tests pass. `capture_peer_wire.py` makes the refresh reproducible.
 
-This is on `rishi/r01-shared-contracts` / draft PR #1, pending joint freeze. Rishi's
-API still exposes only `/health`. Aditya's services and Cameron's deployment
-code now exist in this checkout. The public web and `/backend/health` respond 200;
-deployed OpenAPI lists only `/health`. Store, webhook, API application routes,
-Valkey, shared packaging, and Compose remain absent. PostgreSQL provisioning
-scripts do not implement application persistence. No complete payment stack is claimed.
+Rishi authorized PR #1 as the accepted R01 baseline after compatibility review.
+Cameron's PR #5 adds JWT auth and a PostgreSQL users table; its code is preserved.
+Leash purchase routes, store, webhook, Valkey, shared packaging and Compose remain
+pending. The earlier public health-only deployment check is historical; this merge
+does not deploy or prove an authenticated payment flow.
 
 ## Rishi's accepted wire contracts
 
@@ -188,9 +186,9 @@ These are contract choices for later route work, not implemented API endpoints.
 |---|---|
 | Rishi | Implement registered ownership/mandate/mode persistence and intake acknowledgment above in R02/R06; guardian calls now require `AGENTS_SERVICE_TOKEN`. Aditya's registration and retry/spooling code is present. |
 | Aditya | Fix the restart test's scheduling assumption; wait for a delivery attempt and synchronize old worker shutdown instead of requiring an attempt within 0.3 seconds. Consider joining on `OutboxSink.stop()`. Require the mode echo rather than accepting null in registration responses. |
-| Aditya | After C01/freeze, consume shared validators, including numeric/string constraint validation. Align the live attack demo and resolve direct shopping tools versus the requested MCP interface with Rishi. |
+| Aditya | After C01/freeze, consume shared validators, including numeric/string constraint validation. Align the live attack demo and move shopping tools to the agreed separate Store MCP. |
 | Cameron | Mount persistent storage at `/app/trace-spool`. `k8s/agents.yaml` has no volumes/mounts, so image-local spooling does not survive pod replacement. Supply exact OBJ names, configured STORE_URL/token, service tokens and documented MCP hosts. |
-| Cameron + Rishi | C01 installable shared package/runtime; API image currently copies only `main.py` from an `api/` build context. It cannot import R01. Rishi owns the API Dockerfile; Cameron owns the matching deploy build context. Change these together before product API deployment. |
+| Cameron + Rishi | C01 installable shared package/runtime; API image currently copies `main.py`, `auth.py`, and `db.py` from an `api/` build context. It cannot import R01. Rishi owns the API Dockerfile; Cameron owns the matching deploy build context. Change these together before product API deployment. |
 | Cameron + Rishi | Agree authenticated canonical retrieval, session/owner assignment, revision/expiry, protected grant/instrument binding and atomic Valkey protocol. CheckoutSnapshot binds session ID; product billing interval is preserved/hash-bound. |
 
 Aditya has already replaced the hotel YAML with charger/subscription cases and
@@ -236,13 +234,14 @@ text, not canonical facts. No edits were made in Aditya's or Cameron's lanes.
 - Web lint and Next.js production build passed with the merged configuration.
   This validates the frontend build, not an authenticated purchase flow.
 
-Two architecture differences need an explicit team decision, not a silent model
-change. The current shopper obtains the four Leash financial tools through MCP,
-but `browse`, `create_checkout`, and `complete_checkout` are local Python Strands
-tools calling the store directly. Rishi's latest clarification describes shopping
-and guarded financial operations through MCP; if that includes these tools, Aditya
-must move/adapt them into MCP while keeping backend enforcement. MCP connection
-failure already prevents this shopper loop from starting.
+The MCP decision is resolved: keep Leash's four financial tools on Leash MCP;
+Aditya implements a separate Store MCP for browse/create_checkout/complete_checkout
+over Cameron's merchant. The shopper loads both clients. Restrict browsing to the
+controlled store, reject off-host/internal redirects and separate scoped credentials.
+Inspect original HTML server-side, redact stored snapshots and return listing text
+plus source hash/evidence references rather than raw HTML. API verification still
+retrieves canonical checkout independently. Current direct Python shopping tools
+remain until Aditya implements this change; no new server is claimed here.
 
 `docs/demo-script.md` makes the attack scripted by default and labels it honestly.
 The spec still requires a real live shopper encountering the injected listing for
@@ -250,7 +249,24 @@ the signature demonstration; scripted runs are repeatable security fixtures or
 an explicit fallback. The same script uses remote agent port 8001, but LKE Service
 port is now 8000: port-forward must be `8001:8000`. Aditya owns that correction.
 
-R01 is ready for shared contract review after these adjustments. Schema compatibility
-does not depend on pretending unfinished services work; do not mark G0 frozen or
-merge on the team's behalf before the three humans agree. Keep R01's PR draft while
-Rishi reconciles the architecture differences and Cameron reviews checkout/grant shape.
+Rishi authorized merging this compatible R01 baseline. Future shared-contract
+changes retain the dedicated PR/all-three coordination rule. Unfinished runtime
+services and live acceptance remain separate tasks, not schema completion claims.
+
+### R01 merge decision — October 10
+
+Rishi authorized the initial R01 integration baseline after checking peer compatibility.
+Separate approval messages from all three teammates are not claimed. Subsequent
+shared-contract changes retain the dedicated PR and all-three coordination rule.
+Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
+to LEASH's `usr_` identities in R02 before issuing purchase authority.
+
+The agreed MCP direction uses separate Leash financial and Store shopping servers.
+Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
+direct Python until that lands. Use separate scoped credentials, store-only browsing
+with off-host/internal redirects rejected, server-side original HTML inspection,
+redacted snapshots, and listing text plus evidence references/source hashes in tool
+results. The API independently retrieves canonical checkout facts. Live injection
+remains required; scripted runs are labeled fixtures or fallback.
+
+Merge integration also fixes the no-token auth restoration branch in web/src/lib/auth.tsx: it completes asynchronously through the existing cancellation-aware promise chain instead of synchronously setting state inside an effect.
