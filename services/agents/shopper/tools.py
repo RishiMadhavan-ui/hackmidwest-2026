@@ -36,9 +36,17 @@ def _error(reason: str, **extra: Any) -> str:
   return json.dumps({"status": "error", "reason": reason, **extra})
 
 
+def _store_headers() -> dict[str, str]:
+  # TODO(C02/H05): replace with the scoped caller/session credential agreed
+  # with Cameron. Only the configured store's checkout API ever gets it;
+  # browse() can be pointed anywhere by a page, so it never sends credentials.
+  token = os.environ.get("STORE_API_TOKEN")
+  return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _store_post(path: str, body: dict[str, Any]) -> str:
   try:
-    res = httpx.post(_store_url() + path, json=body, timeout=HTTP_TIMEOUT)
+    res = httpx.post(_store_url() + path, json=body, headers=_store_headers(), timeout=HTTP_TIMEOUT)
   except httpx.HTTPError as exc:
     return _error(f"store unreachable ({type(exc).__name__})")
   try:
