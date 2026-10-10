@@ -1,4 +1,4 @@
-# Builds from its own folder; the MCP server needs nothing outside it.
+# Builds from its own folder; the Leash MCP server needs nothing outside it.
 #   docker build services/mcp-leash
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 

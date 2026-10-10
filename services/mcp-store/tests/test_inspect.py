@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from provenance.html_text import extract
-from provenance.inspect import inspect_page
+from evidence.html_text import extract
+from evidence.inspect import inspect_page
 
 FIXTURES = Path(__file__).parent / "fixtures" / "listings"
 CLEAN = (FIXTURES / "charger_clean.html").read_text()

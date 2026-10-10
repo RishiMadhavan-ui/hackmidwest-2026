@@ -1,4 +1,4 @@
-# Builds from its own folder; the MCP server needs nothing outside it.
+# Builds from its own folder; the store MCP server needs nothing outside it.
 #   docker build services/mcp-store
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 

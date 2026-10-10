@@ -1,12 +1,16 @@
-"""Local wiring: agents service -> real MCP server (subprocess) -> stub api.
+"""Local wiring: agents -> both real MCP services (subprocesses) -> stub api and store.
+
+The Leash MCP service (services/mcp-leash) and the store MCP service
+(services/mcp-store) run as separate processes, as they do on LKE.
 
 STUB API AND STORE. These stand in for Rishi's api and Cameron's store so the
-pieces in this lane can be tested over real HTTP: Strands' MCP client against
-our MCP server, bearer passthrough, run_id correlation, trace intake, and the
-scripted shopper. Their decisions are canned and prove nothing about Leash's
-enforcement; that's what tests/e2e is for.
+pieces in this lane can be tested over real HTTP: Strands' MCP clients against
+both servers, separate credentials, run_id correlation, store-side page
+evidence, trace intake, and the scripted shopper. Their decisions are canned
+and prove nothing about Leash's enforcement; that's what tests/e2e is for.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -26,9 +30,14 @@ from provenance.outbox import shared_outbox
 from shopper.runs import RunManager, StartRun, run_shopper
 
 AGENTS_DIR = Path(__file__).parents[1]
-MCP_DIR = AGENTS_DIR.parent / "mcp-leash"
-POISONED = (Path(__file__).parent / "fixtures/listings/charger_poisoned.html").read_text()
+LEASH_DIR = AGENTS_DIR.parent / "mcp-leash"
+STORE_DIR = AGENTS_DIR.parent / "mcp-store"
+POISONED = (STORE_DIR / "tests/fixtures/listings/charger_poisoned.html").read_text()
+# Credentials each MCP service must NOT be given: the store service never
+# holds the Leash token, and the Leash service never holds store secrets.
+_SECRETS = {"AGENT_TOKEN_SHOPPER", "STORE_MCP_TOKEN", "STORE_API_TOKEN", "API_URL", "STORE_URL"}
 TOKEN = "agent-wiring-token"
+STORE_MCP_TOKEN = "store-mcp-wiring-token"
 PAN = "4111111111111111"
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to start MCP server")
@@ -47,6 +56,28 @@ def kill_tree(proc: subprocess.Popen) -> None:
   else:
     os.killpg(proc.pid, 9)
   proc.wait(timeout=10)
+
+
+def start_mcp(directory: Path, env: dict[str, str]) -> tuple[subprocess.Popen, str]:
+  port = free_port()
+  proc = subprocess.Popen(
+    ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
+    cwd=directory,
+    env={**{k: v for k, v in os.environ.items() if k not in _SECRETS}, **env},
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    start_new_session=os.name != "nt",
+  )
+  url = f"http://127.0.0.1:{port}"
+  for _ in range(120):
+    try:
+      if httpx.get(f"{url}/health", timeout=1).status_code == 200:
+        return proc, url
+    except httpx.HTTPError:
+      pass
+    time.sleep(0.25)
+  kill_tree(proc)
+  pytest.fail(f"{directory.name} did not start")
 
 
 def free_port() -> int:
@@ -96,8 +127,13 @@ def make_stub_api(log: dict) -> FastAPI:
   return app
 
 
-def make_stub_store() -> FastAPI:
+def make_stub_store(log: dict) -> FastAPI:
   app = FastAPI()
+
+  @app.middleware("http")
+  async def record_auth(request: Request, call_next):
+    log["store_auth"].append(request.headers.get("authorization"))
+    return await call_next(request)
 
   @app.get("/products/chg-65w")
   def listing():
@@ -125,30 +161,23 @@ def stack():
     "trace_auth": set(),
     "registrations": [],
     "order": [],
+    "store_auth": [],
   }
   api_url, api_server = serve(make_stub_api(log))
-  store_url, store_server = serve(make_stub_store())
-  mcp_port = free_port()
-  mcp = subprocess.Popen(
-    ["uv", "run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(mcp_port)],
-    cwd=MCP_DIR,
-    env={**os.environ, "API_URL": api_url},
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-    start_new_session=os.name != "nt",
+  store_url, store_server = serve(make_stub_store(log))
+  leash, leash_url = start_mcp(LEASH_DIR, {"API_URL": api_url})
+  store, store_mcp_url = start_mcp(
+    STORE_DIR, {"STORE_URL": store_url, "STORE_MCP_TOKEN": STORE_MCP_TOKEN}
   )
-  mcp_url = f"http://127.0.0.1:{mcp_port}"
-  for _ in range(120):
-    try:
-      if httpx.get(f"{mcp_url}/healthz", timeout=1).status_code == 200:
-        break
-    except httpx.HTTPError:
-      time.sleep(0.25)
-  else:
-    kill_tree(mcp)
-    pytest.fail("MCP server did not start")
-  yield {"api": api_url, "store": store_url, "mcp": f"{mcp_url}/mcp", "log": log}
-  kill_tree(mcp)
+  yield {
+    "api": api_url,
+    "store": store_url,
+    "leash_mcp": f"{leash_url}/mcp",
+    "store_mcp": f"{store_mcp_url}/mcp",
+    "log": log,
+  }
+  kill_tree(leash)
+  kill_tree(store)
   api_server.should_exit = True
   store_server.should_exit = True
 
@@ -157,9 +186,11 @@ def stack():
 def env(stack, monkeypatch):
   monkeypatch.setenv("API_URL", stack["api"])
   monkeypatch.setenv("STORE_URL", stack["store"])
-  monkeypatch.setenv("MCP_LEASH_URL", stack["mcp"])
+  monkeypatch.setenv("MCP_LEASH_URL", stack["leash_mcp"])
+  monkeypatch.setenv("MCP_STORE_URL", stack["store_mcp"])
   monkeypatch.setenv("AGENT_TOKEN_SHOPPER", TOKEN)
-  for key in ("payments", "payment_auth", "trace", "registrations", "order"):
+  monkeypatch.setenv("STORE_MCP_TOKEN", STORE_MCP_TOKEN)
+  for key in ("payments", "payment_auth", "trace", "registrations", "order", "store_auth"):
     stack["log"][key].clear()
   return stack
 
@@ -217,6 +248,17 @@ def test_scripted_attack_over_real_mcp(env):
     if e["type"] == "agent.tool.after" and e["tool_name"] == "request_payment"
   ]
   assert decisions == ["blocked"]
+
+  # The page was inspected inside the Store MCP; only its evidence came back.
+  [source] = [e for e in log["trace"] if e["type"] == "provenance.source"]
+  assert source["sha256"] == hashlib.sha256(POISONED.encode()).hexdigest()
+  assert source["hidden_text_detected"] is True
+  assert "SUB-CARE-MO" in source["excerpt"]
+  assert "<div" not in json.dumps(log["trace"])
+
+  # Separate credentials: the store never saw the Leash token or the Store MCP token.
+  assert log["store_auth"]
+  assert not any(TOKEN in (a or "") or STORE_MCP_TOKEN in (a or "") for a in log["store_auth"])
 
 
 def test_scripted_legit_purchase_never_leaks_card_into_trace(env):

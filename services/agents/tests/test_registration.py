@@ -43,7 +43,7 @@ def scripted(mandate_id="mnd_1"):
 def drain():
   box = shared_outbox(API, "agent-token")
   box.flush(timeout=5)
-  box.stop()
+  assert box.stop(timeout=5)
 
 
 def test_registers_before_any_trace(api_env):
@@ -87,7 +87,7 @@ def test_registers_before_any_trace(api_env):
   [
     ({"status_code": 403, "json": {"detail": "Mandate is not yours"}}, "Mandate is not yours"),
     ({"status_code": 201, "json": {"id": "run_someone_else"}}, "different run id"),
-    ({"status_code": 201, "json": {"id": None, "agent_mode": "live"}}, "different"),
+    ({"status_code": 201, "json": {"id": None, "agent_mode": "scripted"}}, "different run id"),
   ],
 )
 def test_failed_registration_stops_the_run_before_any_trace(api_env, response, message):
@@ -100,6 +100,32 @@ def test_failed_registration_stops_the_run_before_any_trace(api_env, response, m
     drain()
   assert record["status"] == "failed"
   assert message in record["error"]
+  assert calls == []
+  assert not intake.called
+
+
+@pytest.mark.parametrize(
+  "echo",
+  [
+    {},  # no agent_mode at all
+    {"agent_mode": None},
+    {"agent_mode": "live"},  # the run is scripted
+    {"agent_mode": "SCRIPTED"},
+  ],
+)
+def test_registration_must_echo_the_exact_mode(api_env, echo):
+  def register(request):
+    return respx.MockResponse(201, json={"id": _json(request)["id"], **echo})
+
+  with respx.mock(assert_all_called=False) as mock:
+    mock.post(f"{API}/agent-runs").mock(side_effect=register)
+    intake = mock.post(f"{API}/provenance").respond(202)
+    calls = []
+    manager = RunManager(runner=emitting_runner(calls))
+    record = wait_done(manager, manager.start(scripted())["id"])
+    drain()
+  assert record["status"] == "failed"
+  assert "agent mode" in record["error"]
   assert calls == []
   assert not intake.called
 

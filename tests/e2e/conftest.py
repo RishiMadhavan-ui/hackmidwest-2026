@@ -11,8 +11,21 @@ Agent mode (E2E_AGENT_MODE):
 
   LEASH_E2E=1 uv run --project services/agents pytest tests/e2e -v
 
-Route and field names follow spec section 23.6 and are pending
-R01/R02/R04/H07. Each TODO marks a spot to re-check once agreed.
+Scripted runs here test enforcement repeatably; they are labeled fixtures and
+never evidence that a live model fell for the injection. Passing these is
+payment-security acceptance only when every service below is the real one:
+none of them may be replaced by an approving stub.
+
+Prerequisites still missing as of Oct 10 (owner):
+  - api: mandate propose/confirm/read, POST /payments with independent
+    checkout verification and grants, GET /payments/{id}, POST /agent-runs,
+    POST /provenance (Rishi, R02-R06). Field names follow R01 models.
+  - store: catalog, listing pages, checkout API, protected charge bound to the
+    verified checkout, attack toggle (Cameron, C02).
+  - rail and Valkey grant/idempotency protocol (Cameron, C03/C04).
+  - agents + mcp deployed with their tokens (Cameron, C06).
+  - USER_TOKEN: a human session credential the api accepts for confirmation
+    (Cameron's JWT login exists; which credential R02 accepts is Rishi's call).
 """
 
 import os

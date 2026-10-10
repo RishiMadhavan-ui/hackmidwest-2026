@@ -3,8 +3,8 @@
 import hashlib
 from typing import Any
 
-from provenance.html_text import extract
-from provenance.redact import redact_text
+from evidence.html_text import extract
+from evidence.redact import redact_text
 
 # Phrases that read like instructions aimed at an AI agent rather than product
 # copy for a person. Matched case-insensitively.

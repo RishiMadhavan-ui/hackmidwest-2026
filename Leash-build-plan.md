@@ -24,12 +24,12 @@ Each person's coding agent edits only that person's paths. Cross-lane work is an
 | Path | Owner |
 |---|---|
 | `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
-| `services/webhook/`, `services/store/`, `services/mcp-store/`, `tests/test_decision_cases.py` | Cameron |
+| `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
-| `services/agents/`, `services/mcp-leash/` | Aditya |
+| `services/agents/`, `services/mcp-leash/`, `services/mcp-store/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
@@ -112,7 +112,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **Human responsibilities:** validate Akamai inference/tool calling with actual credentials; review tool permissions, trusted/untrusted evidence and investigation output; tune/rehearse controlled adversarial listing content with Cameron; coordinate the three-minute demo and labeled resets; collect final readiness evidence and handle submission at the team's 7:30 AM Central target. The shopper must remain observable and susceptible enough to demonstrate backend protection.
 
-**Coding agent lane:** `services/agents/`, `services/mcp-leash/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement. (`services/mcp-store/` is Cameron’s store-MCP scaffold.)
+**Coding agent lane:** `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement.
 
 | ID | Deliverable and paths | Depends on / handoff | Evidence required to finish |
 |---|---|---|---|
@@ -283,8 +283,8 @@ Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mappi
 to LEASH's `usr_` identities in R02 before issuing purchase authority.
 
 The agreed MCP direction uses separate Leash financial and Store shopping servers.
-Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate scoped credentials, store-only browsing
+Aditya implements Store MCP over Cameron's merchant; it has landed and no direct
+Python shopping tools remain. Use separate scoped credentials, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection

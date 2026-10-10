@@ -6,8 +6,7 @@ from main import app
 
 @pytest.mark.parametrize("path", ["/health", "/healthz"])
 def test_health(path):
+  # No auth header: probes from Kubernetes must get through.
   res = TestClient(app).get(path)
   assert res.status_code == 200
-  body = res.json()
-  assert body["status"] == "ok"
-  assert body["service"] == "mcp-store"
+  assert res.json() == {"status": "ok", "service": "mcp-store"}

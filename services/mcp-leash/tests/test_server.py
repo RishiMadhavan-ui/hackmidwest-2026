@@ -3,9 +3,6 @@ import json
 import httpx
 import pytest
 import respx
-from starlette.testclient import TestClient
-
-from main import app
 
 API = "http://api.test"
 INSTRUCTION = "Buy a USB-C laptop charger for under $40. No subscriptions."
@@ -29,14 +26,6 @@ PAYMENT_ARGS = {
 @pytest.fixture(autouse=True)
 def api_url(monkeypatch):
   monkeypatch.setenv("API_URL", API)
-
-
-# The MCP session manager can only be started once per process, so every test
-# shares one client (and one app lifespan).
-@pytest.fixture(scope="module")
-def client():
-  with TestClient(app, base_url="http://localhost:8002") as c:
-    yield c
 
 
 @pytest.fixture

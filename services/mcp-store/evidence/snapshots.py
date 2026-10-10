@@ -15,7 +15,7 @@ import logging
 import os
 from typing import Any
 
-from provenance.redact import redact_text
+from evidence.redact import redact_text
 
 log = logging.getLogger("leash.provenance")
 

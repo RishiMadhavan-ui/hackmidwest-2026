@@ -33,7 +33,7 @@ October 10 review: main at `1818a43` includes Cameron's LKE/build/PostgreSQL pro
 - **`web/`:** Next.js App Router with signup/signin/profile, top nav + account menu, client `AuthProvider` / Bearer `localStorage`, and shadcn UI primitives. Mission Control / SSE / Attack Lab still planned.
 - **`services/agents/`:** FastAPI agents service (shopper/guardian/provenance present in-tree; wire against real api/store as those land).
 - **`services/mcp-leash/`:** Streamable HTTP MCP thin adapter with four tools forwarding to api (`propose_mandate`, `list_mandates`, `request_payment`, `check_status`). In-cluster `:8002`; public via web rewrite `/mcp-leash/*`.
-- **`services/mcp-store/`:** same MCP shape (bearer + `/health`); **no tools yet**. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
+- **`services/mcp-store/`:** Store MCP with `browse`, `create_checkout`, `complete_checkout`; its own `STORE_MCP_TOKEN` auth and a separate store credential; store-only browsing with server-side page inspection and redacted snapshots. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
 - **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `MCP_LEASH_URL` / `MCP_STORE_URL` / agent tokens / image registry. Managed Postgres `hackmidwest-db` + LKE path exist. Root README, Compose, Valkey, store/webhook HTTP, and domain migrations remain planned. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
 
 Preserve the selected stack and planned service responsibilities:
@@ -51,7 +51,7 @@ human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
 | Product backend | `api/` (health + JWT auth); `services/api/` reserved | Rishi | Mandates, trusted checkout verification, grants, persistence, audit, SSE; owns users/auth foundation |
 | Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
-| Store MCP | `services/mcp-store/` (scaffold; tools TBD) | Cameron | Merchant-facing MCP; tools forward to controlled store when ready |
+| Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
 | Merchant / payment rail | `services/store/`, `services/webhook/` planned | Cameron | Canonical catalog and checkout API, simulator, Lithic ASA, atomic enforcement |
 | Database / Valkey / deployment | `k8s/`, `scripts/` exist; `db/`, Valkey and Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
 
@@ -97,7 +97,7 @@ hackmidwest-2026/
       tests/                         [E] agent/hook/tool tests
     mcp-leash/                       [E] Aditya: Streamable HTTP Leash MCP + four tools
       Dockerfile                     [E] amd64; COPY every runtime module when added
-    mcp-store/                       [E] Cameron: Store MCP scaffold (no tools yet)
+    mcp-store/                       [E] Aditya: Store MCP (browse/checkout tools)
       Dockerfile                     [E] amd64; COPY every runtime module when added
     webhook/                         [P] Cameron: rail responders/atomic state
       decide.py                      [P] pure domain payment policy
@@ -136,12 +136,12 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 | Path | Owner |
 |---|---|
 | `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
-| `services/webhook/`, `services/store/`, `services/mcp-store/`, `tests/test_decision_cases.py` | Cameron |
+| `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
-| `services/agents/`, `services/mcp-leash/` | Aditya |
+| `services/agents/`, `services/mcp-leash/`, `services/mcp-store/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
@@ -150,7 +150,7 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 **Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. Separate MCP servers exist as `services/mcp-leash/` and `services/mcp-store/`; store catalog/checkout tools still need to move onto `mcp-store` (scaffold only today). The signature demo still requires live injection; scripted runs remain labeled fixtures/fallback.
+**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. Separate MCP servers exist as `services/mcp-leash/` and `services/mcp-store/`; the shopper's store tools come from `mcp-store`; no direct Python shopping tools remain. The signature demo still requires live injection; scripted runs remain labeled fixtures/fallback.
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
@@ -164,7 +164,7 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use the planned shared `make_model()` factory and provider abstraction, explicit `max_tokens`, text-only Akamai requests, guardian temperature 0. Validate structured output with Pydantic; plain-text JSON fallback never grants authority. These integrations still need implementation and smoke tests.
-- MCP remains an official SDK, Streamable HTTP, stateless thin adapter with bearer credentials forwarded unchanged. `mcp-leash` tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. `mcp-store` has the same server shape with tools TBD. No privilege escalation tools.
+- MCP remains an official SDK, Streamable HTTP, stateless thin adapter with bearer credentials forwarded unchanged. `mcp-leash` tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. `mcp-store` tools: `browse`, `create_checkout`, `complete_checkout`, with its own `STORE_MCP_TOKEN` (never the Leash token). No privilege escalation tools.
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.
@@ -198,7 +198,7 @@ web/: pnpm build
 deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
 ```
 
-Implemented API routes today: `GET /health`, `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`. Agents/mcp-leash/mcp-store: `GET /health` (+ mcp-leash tools). Env: `MCP_LEASH_URL`, `MCP_STORE_URL` (not `MCP_URL`). On LKE, the NodeBalancer serves web at `/` and Next rewrites `/backend/*` → api, `/mcp-leash/*` → mcp-leash:8002, `/mcp-store/*` → mcp-store:8003 — so external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). In-cluster agents keep ClusterIP URLs. Inspect generated OpenAPI before claiming an endpoint exists. Generate web API types from agreed OpenAPI once available; do not hand-edit generated types.
+Implemented API routes today: `GET /health`, `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`. Agents/mcp-leash/mcp-store: `GET /health` (+ mcp-leash and mcp-store tools). Env: `MCP_LEASH_URL`, `MCP_STORE_URL` (not `MCP_URL`). On LKE, the NodeBalancer serves web at `/` and Next rewrites `/backend/*` → api, `/mcp-leash/*` → mcp-leash:8002, `/mcp-store/*` → mcp-store:8003 — so external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). In-cluster agents keep ClusterIP URLs. Inspect generated OpenAPI before claiming an endpoint exists. Generate web API types from agreed OpenAPI once available; do not hand-edit generated types.
 
 Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 

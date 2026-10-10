@@ -1438,8 +1438,8 @@ Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mappi
 to LEASH's `usr_` identities in R02 before issuing purchase authority.
 
 The agreed MCP direction uses separate Leash financial and Store shopping servers.
-Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate scoped credentials, store-only browsing
+Aditya implements Store MCP over Cameron's merchant; it has landed and no direct
+Python shopping tools remain. Use separate scoped credentials, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection

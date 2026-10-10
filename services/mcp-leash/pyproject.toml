@@ -1,7 +1,7 @@
 [project]
-name = "mcp-leash"
+name = "leash-mcp"
 version = "0.1.0"
-description = "mcp-leash: thin, stateless MCP adapter over the api's REST routes"
+description = "Leash MCP server: a thin, stateless adapter over the api's REST routes"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "mcp>=1.10",
