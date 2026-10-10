@@ -16,6 +16,6 @@ COPY services/agents/ ./
 # app where Python finds it. TODO: install it as a package once C01 lands.
 COPY shared/leash_shared/ ./leash_shared/
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \n  TRACE_SPOOL_DIR=/app/trace-spool
 EXPOSE 8001
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
