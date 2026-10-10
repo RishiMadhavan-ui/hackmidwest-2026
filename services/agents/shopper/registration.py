@@ -56,8 +56,10 @@ def register_run(
   if not res.is_success:
     detail = payload.get("detail") if isinstance(payload, dict) else None
     raise RegistrationError(detail or f"Leash api returned HTTP {res.status_code}")
+  # The api must echo exactly what it committed. A missing or null mode is not
+  # a yes: a scripted run must never end up recorded as live, or the reverse.
   if not isinstance(payload, dict) or payload.get("id") != run_id:
     raise RegistrationError("Leash api registered a different run id")
-  if payload.get("agent_mode") not in (None, agent_mode):
-    raise RegistrationError("Leash api registered a different agent mode")
+  if payload.get("agent_mode") != agent_mode:
+    raise RegistrationError("Leash api did not confirm this run's agent mode")
   return payload
