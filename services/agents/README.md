@@ -2,8 +2,8 @@
 
 Owner: Aditya. Port 8001.
 
-- `shopper/`: the demo shopper, a real Strands agent that is **gullible on purpose**. Don't add prompt-injection defenses to it; Leash's protection lives in the api, the store, and the rail.
-- `provenance/`: before/after tool hooks that emit sanitized trace events, plus a source record for every page the shopper reads (sha256, hidden text, suspicious phrases, redacted snapshot). Events reach the api through a durable outbox.
+- `shopper/`: the demo shopper, a real Strands agent that is **gullible on purpose**. Don't add prompt-injection defenses to it; Leash's protection lives in the api, the store, and the rail. All its tools come from two MCP servers in `services/mcp`: the store's (`browse`, `create_checkout`, `complete_checkout`) and Leash's (mandates and payments).
+- `provenance/`: before/after tool hooks that emit sanitized trace events, plus a source record for every page the shopper reads, built from the store MCP's evidence (sha256, hidden text, suspicious phrases, redacted snapshot). Raw HTML never enters this service. Events reach the api through a durable outbox.
 - `guardian/`: advisory investigation. It recommends `block` or `review`, or reports `no_findings`; it never approves a payment.
 
 ## Run
@@ -27,7 +27,7 @@ Deployment `agents`, reached in-cluster at `http://agents:8000` (container port 
 docker build -f services/agents/Dockerfile .
 ```
 
-`scripts/deploy_lke.sh` does this, and also deploys the MCP server as `mcp` at `http://mcp:8002/mcp`. Settings come from the `app-env` secret (the team `.env`), with `API_URL` and `MCP_URL` set in `k8s/agents.yaml`.
+`scripts/deploy_lke.sh` does this, and also deploys the MCP service as `mcp`: Leash at `http://mcp:8002/mcp`, the store at `http://mcp:8002/store/mcp`. Settings come from the `app-env` secret (the team `.env`), with `API_URL` and `MCP_URL` set in `k8s/agents.yaml`.
 
 ## Routes
 
@@ -58,11 +58,10 @@ Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST 
 | `AGENTS_SERVICE_TOKEN` | Required bearer for `/runs` and `/guardian/evaluate` |
 | `AGENT_TOKEN_SHOPPER` | Shopper's bearer for MCP, run registration, and trace intake |
 | `API_URL` | Run registration and trace intake; without it, local-only mode |
-| `MCP_URL` | Leash tools for the shopper (default `http://localhost:8002/mcp`) |
-| `STORE_URL` | Store checkout API (default `http://localhost:8004`) |
-| `STORE_API_TOKEN` | Optional bearer for the store's checkout API only, pending the scheme agreed with Cameron |
+| `MCP_URL` | Leash MCP server (default `http://localhost:8002/mcp`) |
+| `STORE_MCP_URL` | Store MCP server (default: `MCP_URL` with `/store/mcp`) |
+| `STORE_MCP_TOKEN` | Bearer for the store MCP; never the Leash token |
 | `TRACE_SPOOL_DIR` | Trace outbox (default `./trace-spool`; `/app/trace-spool` in the image). Mount a volume to survive pod restarts |
-| `OBJ_ENDPOINT`, `OBJ_BUCKET`, `OBJ_ACCESS_KEY`, `OBJ_SECRET_KEY` | Redacted page snapshots (same names as the Akamai workshop starter) |
 
 ## Test
 
@@ -70,6 +69,6 @@ Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST 
 uv run pytest
 ```
 
-- `tests/test_wiring_local.py` starts the real MCP server as a subprocess with stub api/store servers and runs the scripted shopper over HTTP. The stubs' decisions are canned.
+- `tests/test_wiring_local.py` starts the real MCP service (both servers) as a subprocess with stub api/store servers and runs the scripted shopper over HTTP. The stubs' decisions are canned.
 - `tests/test_shopper_loop.py` drives the real Strands event loop with a **scripted fixture model**. It proves the hooks, redaction, and correlation; it is not a live agent run.
 - The two live inference tests in `tests/test_llm.py` run only when an inference endpoint is configured. Every other test has inference, api, and storage settings cleared, even if your shell has them.

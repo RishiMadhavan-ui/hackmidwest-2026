@@ -3,27 +3,43 @@
 Hooks are observability and correlation, not enforcement. The api, the store's
 protected charge, and the rail enforce authorization on their own even if a
 tool is called with no hook attached (AGENTS.md invariant 7).
+
+Pages are read through the Store MCP server, which keeps the raw HTML: it
+hashes, inspects, redacts, and snapshots each page and returns only text plus
+an evidence record. The source events here are built from that record, so raw
+HTML never enters this process.
 """
 
 import json
 import time
 import uuid
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry
 
-from provenance.inspect import inspect_page
 from provenance.redact import redact, redact_text
 from provenance.sink import Sink, emit_all
-from provenance.snapshots import upload_snapshot
-
-# Where browse() leaves the raw HTML for the after-hook, keyed by toolUseId.
-# The model only ever sees extracted text; provenance needs the exact bytes.
-FETCHES_KEY = "leash_fetches"
 
 SUMMARY_CHARS = 400
+
+# The Store MCP's evidence fields that make up a provenance.source event. Only
+# these are forwarded: the shared event contract rejects anything else.
+SOURCE_FIELDS = (
+  "url",
+  "sha256",
+  "http_status",
+  "fetched_at",
+  "hidden_text_detected",
+  "hidden_reasons",
+  "suspicious_phrases",
+  "hidden_suspicious_phrases",
+  "excerpt",
+  "snapshot",
+)
+# Tools whose input should carry this run's id: payment requests for the
+# api's provenance lookup, page reads for snapshot filing.
+RUN_ID_TOOLS = {"request_payment", "browse"}
 
 # How much to trust each tool's output. Nothing an agent reads or reports is
 # merchant truth; only the Leash api's own responses are authenticated.
@@ -97,7 +113,6 @@ class ProvenanceHooks(HookProvider):
     run_id: str,
     agent_id: str,
     sinks: list[Sink],
-    upload: Callable[[str, str, str], dict[str, Any]] = upload_snapshot,
     agent_mode: str = "live",
   ) -> None:
     self.run_id = run_id
@@ -106,7 +121,6 @@ class ProvenanceHooks(HookProvider):
     self.agent_mode = agent_mode
     self.agent_id = agent_id
     self.sinks = sinks
-    self.upload = upload
     self._started: dict[str, float] = {}
 
   def register_hooks(self, registry: HookRegistry, **_: Any) -> None:
@@ -133,9 +147,9 @@ class ProvenanceHooks(HookProvider):
 
   def before_tool(self, event: BeforeToolCallEvent) -> None:
     tool_use = event.tool_use
-    # Tie every payment request to this run so the api and guardian can pull
-    # the pages this run read. Correlation only; it grants nothing.
-    if tool_use["name"] == "request_payment" and isinstance(tool_use.get("input"), dict):
+    # Tie payment requests and page reads to this run so the api and guardian
+    # can pull the pages this run read. Correlation only; it grants nothing.
+    if tool_use["name"] in RUN_ID_TOOLS and isinstance(tool_use.get("input"), dict):
       tool_use["input"]["run_id"] = self.run_id
     self._started[tool_use["toolUseId"]] = time.monotonic()
     emit_all(self.sinks, self._base("agent.tool.before", tool_use))
@@ -165,12 +179,9 @@ class ProvenanceHooks(HookProvider):
       self._record_source(event, tool_use)
 
   def _record_source(self, event: AfterToolCallEvent, tool_use: dict[str, Any]) -> None:
-    fetches = event.invocation_state.get(FETCHES_KEY, {})
-    fetch = fetches.pop(tool_use["toolUseId"], None)
-    if not fetch:
-      return  # the fetch failed before any content arrived; the after event says why
-    page = inspect_page(fetch["html"])
-    snapshot = self.upload(self.run_id, page["sha256"], fetch["html"])
+    evidence = (event.result or {}).get("structuredContent")
+    if not isinstance(evidence, dict) or not evidence.get("sha256"):
+      return  # the page wasn't read; the after event says why
     emit_all(
       self.sinks,
       {
@@ -181,11 +192,8 @@ class ProvenanceHooks(HookProvider):
         "agent_mode": self.agent_mode,
         "timestamp": _now(),
         "tool_use_id": tool_use["toolUseId"],
-        "url": fetch["url"],
-        "http_status": fetch["status_code"],
-        "fetched_at": fetch["fetched_at"],
+        # Whatever the store server says, a page is untrusted evidence.
         "trust_classification": "untrusted_web_content",
-        "snapshot": snapshot,
-        **page,
+        **{field: evidence.get(field) for field in SOURCE_FIELDS if field in evidence},
       },
     )
