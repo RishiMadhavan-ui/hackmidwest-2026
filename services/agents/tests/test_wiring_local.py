@@ -22,6 +22,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from provenance.outbox import shared_outbox
 from shopper.runs import RunManager, StartRun, run_shopper
 
 AGENTS_DIR = Path(__file__).parents[1]
@@ -78,8 +79,16 @@ def make_stub_api(log: dict) -> FastAPI:
     card = {"number": PAN, "exp_month": 12, "exp_year": 2028, "cvv": "321"}
     return JSONResponse({"id": "pay_1", "status": "approved", "card": card}, 201)
 
+  @app.post("/agent-runs")
+  async def register_run(request: Request):
+    body = await request.json()
+    log["order"].append("register")
+    log["registrations"].append({"auth": request.headers.get("authorization"), **body})
+    return JSONResponse({"id": body["id"], "agent_mode": body["agent_mode"]}, 201)
+
   @app.post("/provenance")
   async def provenance(request: Request):
+    log["order"].append("trace")
     log["trace_auth"].add(request.headers.get("authorization"))
     log["trace"].append(await request.json())
     return JSONResponse({"ok": True}, 202)
@@ -109,7 +118,14 @@ def make_stub_store() -> FastAPI:
 
 @pytest.fixture(scope="module")
 def stack():
-  log = {"payments": [], "payment_auth": [], "trace": [], "trace_auth": set()}
+  log = {
+    "payments": [],
+    "payment_auth": [],
+    "trace": [],
+    "trace_auth": set(),
+    "registrations": [],
+    "order": [],
+  }
   api_url, api_server = serve(make_stub_api(log))
   store_url, store_server = serve(make_stub_store())
   mcp_port = free_port()
@@ -143,7 +159,7 @@ def env(stack, monkeypatch):
   monkeypatch.setenv("STORE_URL", stack["store"])
   monkeypatch.setenv("MCP_URL", stack["mcp"])
   monkeypatch.setenv("AGENT_TOKEN_SHOPPER", TOKEN)
-  for key in ("payments", "payment_auth", "trace"):
+  for key in ("payments", "payment_auth", "trace", "registrations", "order"):
     stack["log"][key].clear()
   return stack
 
@@ -154,8 +170,10 @@ def run(req: StartRun) -> dict:
   for _ in range(300):
     record = manager.get(run_id)
     if record["status"] in ("completed", "failed"):
-      return record
+      break
     time.sleep(0.1)
+  # Traces go through the durable outbox; wait for them to land.
+  assert shared_outbox(os.environ["API_URL"], TOKEN).flush(timeout=10)
   return record
 
 
@@ -172,6 +190,14 @@ def test_scripted_attack_over_real_mcp(env):
   )
   assert record["status"] == "completed", record["error"]
   log = env["log"]
+
+  # Registered with the agent's token before the first trace event.
+  assert record["registered"] is True
+  [registration] = log["registrations"]
+  assert registration["auth"] == f"Bearer {TOKEN}"
+  assert registration["id"] == record["id"]
+  assert registration["agent_mode"] == "scripted"
+  assert log["order"][0] == "register"
 
   # The MCP server forwarded the agent's bearer unchanged and the run id.
   assert log["payment_auth"] == [f"Bearer {TOKEN}"]
