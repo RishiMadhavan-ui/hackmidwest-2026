@@ -7,3 +7,7 @@
 !**/.env.example
 *.db
 .DS_Store
+
+# LKE kubeconfig is a credential
+hackmidwest-kubeconfig.yaml
+*.kubeconfig.yaml

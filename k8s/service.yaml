@@ -1,0 +1,15 @@
+# Public front door. On LKE, type LoadBalancer provisions a NodeBalancer.
+# scripts/deploy_lke.sh renames it to hackmidwest-nb for easier cleanup.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: hackmidwest
+spec:
+  type: LoadBalancer
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
