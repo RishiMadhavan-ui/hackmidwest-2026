@@ -9,12 +9,12 @@ the recommendation stricter. If the model fails, the recommendation is never
 more permissive than "review".
 """
 
-import os
 from datetime import UTC, datetime
 from typing import Any
 
 from guardian.checks import run_checks, suspicious_sources
 from guardian.investigator import ModelRunner, build_prompt, investigate, run_strands
+from leash_shared.llm import model_id
 
 # TODO: switch to the agreed guardian findings model in leash_shared.models.
 Findings = dict[str, Any]
@@ -68,9 +68,7 @@ def evaluate(
       # No model and no deterministic findings: ask a human rather than stay quiet.
       recommendation = "review"
       reasons.append("Investigation model unavailable; a person should review this attempt.")
-    model_meta.update(
-      {"provider": "akamai-inference", "model_id": os.environ.get("MODEL_ID", "hackathon-chat")}
-    )
+    model_meta.update({"provider": "akamai-inference", "model_id": model_id()})
 
   if not reasons:
     reasons = ["No findings."]

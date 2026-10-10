@@ -30,6 +30,7 @@ known-first-party = ["leash_shared", "guardian", "provenance", "shopper"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live_inference: calls the real inference endpoint when configured"]
 # shared/ has no package metadata yet, so put it on the path for tests.
 # TODO: switch to a uv path dependency once shared/pyproject.toml exists.
 pythonpath = [".", "../../shared"]

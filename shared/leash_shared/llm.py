@@ -21,6 +21,32 @@ ROLE_SETTINGS: dict[str, dict[str, Any]] = {
 
 DEFAULT_MODEL_ID = "hackathon-chat"
 
+# The spec names (INFERENCE_*) come first. Cameron's .env.example uses the
+# Akamai workshop starter's names (OPENAI_*), so those work too, but only as a
+# matched pair: a stray OPENAI_API_KEY for some other provider must never be
+# sent to an INFERENCE_BASE_URL endpoint, or the reverse.
+_ENV_PAIRS = (
+  ("INFERENCE_BASE_URL", "INFERENCE_API_KEY"),
+  ("OPENAI_BASE_URL", "OPENAI_API_KEY"),
+)
+
+
+def model_id() -> str:
+  return os.environ.get("MODEL_ID") or os.environ.get("CHAT_MODEL") or DEFAULT_MODEL_ID
+
+
+def _endpoint() -> tuple[str, str]:
+  for url_name, key_name in _ENV_PAIRS:
+    base_url, api_key = os.environ.get(url_name), os.environ.get(key_name)
+    if base_url or api_key:
+      # Name the missing variable but never echo a value, so secrets stay out of logs.
+      if not base_url:
+        raise RuntimeError(f"{url_name} is not set")
+      if not api_key:
+        raise RuntimeError(f"{key_name} is not set")
+      return base_url, api_key
+  raise RuntimeError("INFERENCE_BASE_URL is not set")
+
 
 def make_model(role: Role) -> OpenAIModel:
   """Return a Strands OpenAIModel pointed at Akamai inference for this role.
@@ -30,16 +56,9 @@ def make_model(role: Role) -> OpenAIModel:
   if role not in ROLE_SETTINGS:
     raise ValueError(f"unknown model role {role!r}, expected one of {sorted(ROLE_SETTINGS)}")
 
-  base_url = os.environ.get("INFERENCE_BASE_URL")
-  api_key = os.environ.get("INFERENCE_API_KEY")
-  # Name the missing variable but never echo a value, so secrets stay out of logs.
-  if not base_url:
-    raise RuntimeError("INFERENCE_BASE_URL is not set")
-  if not api_key:
-    raise RuntimeError("INFERENCE_API_KEY is not set")
-
+  base_url, api_key = _endpoint()
   return OpenAIModel(
     client_args={"base_url": base_url, "api_key": api_key},
-    model_id=os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
+    model_id=model_id(),
     params=dict(ROLE_SETTINGS[role]),
   )

@@ -49,8 +49,6 @@ def test_fallback_with_garbage_is_invalid_output(monkeypatch):
 
 
 def test_no_inference_config_is_unavailable(monkeypatch):
-  monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
-  monkeypatch.delenv("INFERENCE_BASE_URL", raising=False)
   found, meta = investigator_mod.investigate("prompt", runner=run_strands)
   assert found is None
   assert meta == {"status": "unavailable", "error": "RuntimeError"}

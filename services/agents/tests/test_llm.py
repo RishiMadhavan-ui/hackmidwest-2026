@@ -6,12 +6,19 @@ from strands import Agent, tool
 
 from leash_shared.llm import ROLE_SETTINGS, make_model
 
+ALL_ENV = ("INFERENCE_BASE_URL", "INFERENCE_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_KEY")
+
 
 @pytest.fixture
-def inference_env(monkeypatch):
+def clean_env(monkeypatch):
+  for name in (*ALL_ENV, "MODEL_ID", "CHAT_MODEL"):
+    monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def inference_env(clean_env, monkeypatch):
   monkeypatch.setenv("INFERENCE_BASE_URL", "https://inference.invalid/v1")
   monkeypatch.setenv("INFERENCE_API_KEY", "test-key")
-  monkeypatch.delenv("MODEL_ID", raising=False)
 
 
 @pytest.mark.parametrize("role", ["guardian", "shopper"])
@@ -30,10 +37,31 @@ def test_model_id_comes_from_env(inference_env, monkeypatch):
   assert make_model("shopper").get_config()["model_id"] == "other-model"
 
 
-def test_missing_key_fails_without_echoing_secrets(monkeypatch):
+def test_missing_key_fails_without_echoing_secrets(clean_env, monkeypatch):
   monkeypatch.setenv("INFERENCE_BASE_URL", "https://inference.invalid/v1")
-  monkeypatch.delenv("INFERENCE_API_KEY", raising=False)
   with pytest.raises(RuntimeError, match="INFERENCE_API_KEY is not set"):
+    make_model("guardian")
+
+
+def test_workshop_starter_names_work_as_a_pair(clean_env, monkeypatch):
+  monkeypatch.setenv("OPENAI_BASE_URL", "https://ws.invalid/v1")
+  monkeypatch.setenv("OPENAI_API_KEY", "starter-key")
+  monkeypatch.setenv("CHAT_MODEL", "hackathon-chat")
+  model = make_model("shopper")
+  assert model.client_args == {"base_url": "https://ws.invalid/v1", "api_key": "starter-key"}
+  assert model.get_config()["model_id"] == "hackathon-chat"
+
+
+def test_names_are_never_mixed_across_providers(clean_env, monkeypatch):
+  # An unrelated OpenAI key must not be sent to the Akamai endpoint.
+  monkeypatch.setenv("INFERENCE_BASE_URL", "https://ws.invalid/v1")
+  monkeypatch.setenv("OPENAI_API_KEY", "someone-elses-key")
+  with pytest.raises(RuntimeError, match="INFERENCE_API_KEY is not set"):
+    make_model("guardian")
+
+
+def test_nothing_configured(clean_env):
+  with pytest.raises(RuntimeError, match="INFERENCE_BASE_URL is not set"):
     make_model("guardian")
 
 
@@ -45,10 +73,18 @@ def test_unknown_role_rejected(inference_env):
 # Live smoke test against Akamai inference: one tool call plus one structured
 # output, the two things the shopper and guardian depend on.
 
-live = pytest.mark.skipif(
-  not (os.environ.get("INFERENCE_API_KEY") and os.environ.get("INFERENCE_BASE_URL")),
-  reason="INFERENCE_API_KEY and INFERENCE_BASE_URL not set",
+_live_skip = pytest.mark.skipif(
+  not (
+    (os.environ.get("INFERENCE_API_KEY") and os.environ.get("INFERENCE_BASE_URL"))
+    or (os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_BASE_URL"))
+  ),
+  reason="no inference endpoint configured (INFERENCE_* or OPENAI_* pair)",
 )
+
+
+def live(test):
+  # live_inference lets conftest leave the real endpoint settings in place.
+  return pytest.mark.live_inference(_live_skip(test))
 
 
 @tool
