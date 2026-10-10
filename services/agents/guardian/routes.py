@@ -1,11 +1,12 @@
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from guardian import evaluate
+from service_auth import require_service_token
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_service_token)])
 
 
 # TODO: switch to leash_shared.models once R01 is frozen. Dicts for now so this

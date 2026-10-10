@@ -4,9 +4,10 @@ import argparse
 import json
 import logging
 
+from provenance.outbox import OutboxSink
 from provenance.redact import redact_text
 from provenance.sink import MemorySink, default_sinks
-from shopper.runs import StartRun, new_run_id, run_shopper
+from shopper.runs import StartRun, new_run_id, register, run_shopper
 
 
 def main() -> None:
@@ -34,7 +35,13 @@ def main() -> None:
   trace = MemorySink()
   label = "SCRIPTED FIXTURE (simulated agent)" if req.agent_mode == "scripted" else "live model"
   print(f"run {run_id} [{label}]")
-  output = run_shopper(run_id, req, [trace, *default_sinks()])
+  if register(run_id, req) is None:
+    print("  (local-only: API_URL not set, traces go to logs and are not registered)")
+  sinks = [trace, *default_sinks()]
+  output = run_shopper(run_id, req, sinks)
+  for sink in sinks:
+    if isinstance(sink, OutboxSink) and not sink.flush(timeout=15):
+      print(f"  {sink.pending_count()} trace events still spooled; they'll be sent on next start")
 
   # Everything printed here already went through redact().
   for event in trace.events:

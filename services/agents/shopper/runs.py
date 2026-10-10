@@ -14,12 +14,15 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, model_validator
 
+from leash_shared.llm import model_id
 from provenance.redact import redact, redact_text
-from provenance.sink import MemorySink, Sink, default_sinks
+from provenance.sink import MemorySink, Sink, api_configured, default_sinks
+from service_auth import require_service_token
 from shopper.agent import build_agent, task_prompt
+from shopper.registration import register_run
 from shopper.scripted import ScriptedShopper
 
 log = logging.getLogger("leash.shopper")
@@ -49,6 +52,21 @@ class StartRun(BaseModel):
     if self.agent_mode == "scripted" and not (self.sku and self.mandate_id):
       raise ValueError("scripted runs need sku and mandate_id")
     return self
+
+
+def model_identity(req: StartRun) -> tuple[str, str]:
+  """What drives this run, for registration and labels: (model, provider)."""
+  if req.agent_mode == "scripted":
+    return "scripted-shopper", "fixture"
+  return model_id(), "akamai-inference"
+
+
+def register(run_id: str, req: StartRun) -> dict[str, Any] | None:
+  """Register with the api before any trace goes out. None in local-only mode."""
+  if not api_configured():
+    return None
+  model, provider = model_identity(req)
+  return register_run(run_id, req.mandate_id, req.agent_mode, model=model, provider=provider)
 
 
 def make_model_for(req: StartRun):
@@ -106,6 +124,9 @@ class RunManager:
         else "Live Strands shopper"
       ),
       "created_at": _now(),
+      # True once the api has bound this run to its user and mandate. False
+      # means local-only mode (no API_URL): traces go to logs, nowhere else.
+      "registered": False,
       "finished_at": None,
       "output": None,
       "error": None,
@@ -120,6 +141,8 @@ class RunManager:
     record = self.runs[run_id]
     record["status"] = "running"
     try:
+      if register(run_id, req) is not None:
+        record["registered"] = True
       output = self.runner(run_id, req, sinks)
       # The model has seen card details, so its final words are redacted too.
       record["output"] = redact_text(output)
@@ -138,7 +161,7 @@ class RunManager:
     return redact({**record, "events": list(self._traces[run_id].events)})
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_service_token)])
 manager = RunManager()
 
 
