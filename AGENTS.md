@@ -27,7 +27,7 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-Inspected on October 10, 2026: `api/main.py` implements only `GET /health`; `api/pyproject.toml` declares FastAPI and Strands with the OpenAI extra. `web/` contains a Next.js/React/TypeScript starter, Tailwind/shadcn configuration, UI primitives, and a health-fetch helper. There is no root README. The service split, shared contracts, tests, persistence, Compose, infrastructure, agents, and payments in the previous plan are **not present**. A dependency declaration is not a working integration.
+Initial inspection on October 10, 2026: `api/main.py` implements only `GET /health`; `api/pyproject.toml` declares FastAPI and Strands with the OpenAI extra. `web/` contains a Next.js/React/TypeScript starter, Tailwind/shadcn configuration, UI primitives, and a health-fetch helper. R01 now adds shared models/events and contract tests on `rishi/r01-shared-contracts`; see [api/README.md](api/README.md) for exact fields, hash payloads, event wire format, and owner handoffs. This is a review candidate, not jointly frozen contracts or an integrated payment flow. Root README, service implementations, persistence, Compose, infrastructure, agents, and payments remain absent. A dependency declaration is not a working integration.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -65,15 +65,16 @@ hackmidwest-2026/
   api/                               [E] Rishi: current FastAPI backend
     main.py                          [E] currently GET /health only
     pyproject.toml                   [E] backend dependencies
-    tests/                           [P] Rishi: API/verifier/persistence tests
+    README.md                        [E] Rishi: R01 contract handoff/test commands
+    tests/                           [E] Rishi: R01 contract tests; service tests planned
     Dockerfile                       [P] Rishi: backend image
   db/migrations/                     [P] Rishi: durable domain/audit schema
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
       __init__.py                    [P] Cameron: package marker
-      models.py                      [P] Rishi: jointly agreed frozen contracts
-      events.py                      [P] Rishi: frozen events/publish helper
+      models.py                      [E] Rishi: R01 initial contract review candidate
+      events.py                      [E] Rishi: R01 sanitized events/publish helper
       lithic.py                      [P] Cameron: official sandbox client wrapper
       llm.py                         [P] Aditya: centralized model factory
   services/
@@ -132,7 +133,7 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 
 If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The present documentation update authorizes only the shared direction files. Do not implement new services as part of documentation alignment.
 
-**Contracts:** the formerly described `models.py` and `events.py` do not exist yet. Agree schemas together before implementing them; once frozen, changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec maps old field names to new concepts; do not independently redefine schemas in each service.
+**Contracts:** R01's initial `models.py` and `events.py` are implemented as a review candidate, with validation/hash/event tests in `api/tests/`. Review the concrete fields together before freezing and integrating dependent lanes. Once frozen, changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
@@ -175,6 +176,6 @@ web/: pnpm build
 
 The current health route is `/health`; `/healthz`, payment routes, and the previous plan's ports 8001–8004 are proposed interfaces, not implemented ones. Inspect generated OpenAPI before claiming an endpoint exists. Generate web API types from agreed OpenAPI once available; do not hand-edit generated types.
 
-Before completing implementation, run the affected service's tests, the security decision matrix, and end-to-end scenarios, and confirm `docker compose up --build` boots once Cameron supplies Compose. Currently no Compose file or test suite exists; report this gap instead of claiming passing checks. Documentation changes require diff/whitespace, link, and consistency checks. Do not claim that static inspection proves credentials, deployed services, or live integrations work.
+Before completing implementation, run the affected service's tests, the security decision matrix, and end-to-end scenarios, and confirm `docker compose up --build` boots once Cameron supplies Compose. R01 contract tests run from the root with `api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v`; they need Python 3.12+ and Pydantic v2. Compose, the payment decision matrix runner, and end-to-end implementation remain absent; report these gaps instead of claiming passing checks. Documentation changes require diff/whitespace, link, and consistency checks. Do not claim that static inspection proves credentials, deployed services, or live integrations work.
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.

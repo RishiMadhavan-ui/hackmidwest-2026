@@ -1241,7 +1241,7 @@ These are conflicts with prior plans; there is no implemented payment system to 
 | Inferred ASA payload/signature format | Fixture may diverge from actual integration | Current official schemas/SDK and configured HMAC setup; normalize via provider adapter |
 | Stripe or direct Lithic-shaped request fallback | Unverified access and misleading network claim | Labeled local rail executing real domain policy/state transitions with a distinct adapter |
 | `services/api/`, `/healthz` described as existing | Actual backend is `api/` with `/health` | Preserve working starter; choose added paths/routes deliberately |
-| Shared contracts already “frozen” | Files do not exist | Jointly agree initial schemas, then preserve dedicated-PR/all-three-review freeze rule |
+| Shared contracts already “frozen” | Files were absent at initial inspection; R01 now supplies a review candidate | Jointly agree initial schemas, then preserve dedicated-PR/all-three-review freeze rule |
 | Finance role interpreted as path reassignment | Conflicts with existing lanes | Cameron validates rail/security; Rishi retains product API/domain/schema ownership |
 | Approving integration stubs | Fake verdict/card mistaken for protection | Label test stubs; never issue demo grants without completed trusted verification |
 | Dashboard/audit assumed complete | UI is a starter | Six views backed by persisted events; distinguish grant, authorization and paid state |
@@ -1250,7 +1250,7 @@ Retain compatible decisions: selected stack, Akamai inference/compute, Lithic sa
 
 ## 23. Adapted implementation contract
 
-This defines requirements for the first joint schema/API review, not code or a newly frozen ABI. Semantic requirements are mandatory; owners agree final names and avoid independently redefining domain contracts in each service.
+This defines requirements for the first joint schema/API review. R01 now implements a concrete initial candidate in the shared models/events, documented in [api/README.md](../api/README.md); joint freeze remains pending. Semantic requirements are mandatory; owners review final fields and avoid independently redefining domain contracts in each service.
 
 ### 23.1 Data conventions and field mapping
 
@@ -1365,6 +1365,14 @@ Checked October 10, 2026. Public documentation validates facts, not this team's 
 - [Akamai workshop inference](https://github.com/akamai-developers/akamai-workshop-hackmidwest/blob/main/docs/inference.md) describes selected compatible operations. Exercise a genuine Strands tool-call round trip, structured findings, explicit token limits and failure behavior. Centralize setup in planned `make_model()` with provider abstraction and server-side credentials.
 - [Google AP2](https://github.com/google-agentic-commerce/AP2), [AgentsPay](https://agentspay.ai/) and [Skyfire features](https://docs.skyfire.xyz/docs/features) are prior art. AgentsPay describes policy/scoped cards/audit; Skyfire describes spending rules. These references do not establish LEASH integrations or compliance. Do not claim competitors lack semantic protections; demonstrate LEASH's own verified attack-aware chain.
 
+### 23.8 R01 implementation and review candidate
+
+Implemented on `rishi/r01-shared-contracts`: shared Pydantic models, strict cents/quantity/boolean/MCC/UTC validation, immutable authority records, canonical JSON and SHA-256 helpers, verification/grant binding shape, nullable guardian model, sanitized event envelopes and async publishing. `api/tests/test_shared_contracts.py` exercises tamper detection, same-price subscription hash changes, bounded grant expiry, required verification checks, sensitive-data redaction and event write failures. [api/README.md](../api/README.md) is the exact field/hash/wire-format handoff for all three lanes.
+
+The proposal `cart_hash` preserves the original four-field definition. Mandate and trusted checkout hashes are distinct versioned payloads. Payment proposals require `checkout_id`; PreApproval requires the exact nested AuthorizationGrant; a `VERIFIED` record requires all 15 named deterministic checks; stream entries store the canonical envelope in an `event` field with a deduplication `event_id`. Array order is significant. Unknown fields fail validation; adapters must reject unsupported provider facts before normalization.
+
+These schemas validate shape and content consistency, not human identity, cryptographic authenticity, source trust, current state or atomic consumption. R02 implements real signing/confirmation/persistence, R03 executes independent verification, and Cameron implements trusted merchant binding and atomic rail enforcement. No purchase route, live integration, Compose boot or end-to-end acceptance is claimed by R01. Cameron's C01 packaging and the all-three review/freeze remain pending; the initial absence observations in section 21 are historical snapshots.
+
 ## 24. Team handoffs and unresolved dependencies
 
 Section 15 assigns role responsibilities; `AGENTS.md` controls path edits. Rishi owns current `api/`, product backend and persistence; Cameron owns trusted merchant, payment rail and infrastructure; Aditya owns agents/tools/MCP/provenance and adversarial fixtures. All three agree shared contracts before freezing.
@@ -1390,8 +1398,8 @@ External/technical dependencies remain **unverified**, not assumed unavailable:
 2. Akamai inference key, endpoint/model compatibility, real Strands tool calling/structured output, latency and outage behavior. Label fallback provider in run/UI metadata; deterministic controls continue during outage.
 3. Akamai compute access, LKE or single-Linode topology, actual public app URL, managed PostgreSQL/Valkey connectivity and durable storage. A local-only app fails the deployment acceptance criterion.
 4. Object Storage access and exact workshop `OBJ_*` names. Cameron confirms these; do not invent credentials. If unavailable, retain durable local evidence and state its storage source.
-5. Joint schemas/routes, merchant authentication/category mapping, checkout freeze rules, scope reservation and atomic Valkey protocol. No frozen files or verifier currently exist.
-6. Compose, Dockerfiles/manifests, CI, root Ruff configuration, migrations, generated types and tests. Relevant owners create them; this documentation update cannot prove boot/security/deployment.
+5. R01 schemas now exist as a review candidate; joint freeze/routes, merchant authentication/category mapping, checkout freeze rules, scope reservation and atomic Valkey protocol remain pending. No independent verifier exists yet.
+6. Compose, Dockerfiles/manifests, CI, root Ruff configuration, migrations, generated types and service/end-to-end tests remain pending. R01's contract suite is present; it does not prove boot/security/deployment of the full application.
 
 Retain planned server variable names `INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, `MODEL_ID`, `DATABASE_URL`, `VALKEY_URL`, `LITHIC_API_KEY`, `LITHIC_ENVIRONMENT`, `LITHIC_ASA_SECRET`, `MANDATE_SIGNING_KEY`, `DEMO_USER_ID`, `USER_TOKEN`, `AGENT_TOKEN_SHOPPER`, `API_URL`, `AGENTS_URL`, `MCP_URL`, `STORE_URL`. Names do not prove configured credentials. Cameron adds any rail-selection, trusted-merchant auth, grant-lifetime or session variables and confirms Object Storage names. Existing `NEXT_PUBLIC_API_URL` contains only a public backend URL.
 
