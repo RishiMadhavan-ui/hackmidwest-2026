@@ -43,7 +43,7 @@ human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
 |---|---|---|---|
 | Product backend | `api/` exists; `services/api/` is planned | Rishi | Mandates, trusted checkout verification, grants, persistence, audit, SSE |
 | Web | `web/` exists | Rishi | Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
-| Agents / MCP | `services/agents/`, `services/mcp/` planned | Aditya | Strands shopper/investigator, protected tools, hooks, thin MCP adapter |
+| Agents / MCP | `services/agents/`, `services/mcp/` planned | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter and store MCP server |
 | Merchant / payment rail | `services/store/`, `services/webhook/` planned | Cameron | Canonical catalog and checkout API, simulator, Lithic ASA, atomic enforcement |
 | Database / Valkey / deployment | `db/`, `infra/`, Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
 
@@ -83,7 +83,7 @@ hackmidwest-2026/
       provenance/                    [P] sanitized hooks/source snapshots
       attacker/                      [P] optional; outside required MVP scope
       tests/                         [P] agent/hook/tool tests
-    mcp/                             [P] Aditya: authenticated thin adapter
+    mcp/                             [P] Aditya: Leash MCP (/mcp) + store MCP (/store/mcp)
     webhook/                         [P] Cameron: rail responders/atomic state
       decide.py                      [P] pure domain payment policy
       tests/                         [P] handler/concurrency/signature tests
@@ -143,7 +143,7 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use the planned shared `make_model()` factory and provider abstraction, explicit `max_tokens`, text-only Akamai requests, guardian temperature 0. Validate structured output with Pydantic; plain-text JSON fallback never grants authority. These integrations still need implementation and smoke tests.
-- MCP remains an official SDK, Streamable HTTP, stateless thin adapter with bearer credentials forwarded unchanged. Planned tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. No privilege escalation tools.
+- `services/mcp` runs two MCP servers (official SDK, Streamable HTTP, stateless) with separate credentials. The **Leash MCP** at `/mcp` is a thin adapter over the api with the agent's bearer forwarded unchanged; tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. No privilege escalation tools. The **store MCP** at `/store/mcp` checks its own `STORE_MCP_TOKEN`, calls the store with a store-scoped credential, and never sees the Leash token; tools: `browse`, `create_checkout`, `complete_checkout`. Browsing reaches only the configured store (other hosts and off-store redirects are refused), and raw HTML stays in that server: it hashes, inspects, redacts and snapshots each page and returns text plus evidence. Everything it returns is agent-observed evidence; the api still retrieves canonical checkout facts itself.
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.

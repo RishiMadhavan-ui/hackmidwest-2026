@@ -1354,7 +1354,9 @@ Only `GET /health` exists. This target contract retains familiar legacy names; s
 
 Keep human/provider/inference credentials server-side behind authenticated web routes or a server-issued scoped session. `NEXT_PUBLIC_*` cannot contain `USER_TOKEN` or provider secrets. Agent bearer credentials never authorize human-only routes. CORS is not authentication. Demo shortcuts must preserve these boundaries and be documented.
 
-Planned MCP remains official `mcp.server.fastmcp`, Streamable HTTP, `stateless_http=True`, `json_response=True`, forwarded bearer auth and one API operation per thin tool. Preserve `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; adapt payment requests to trusted checkout identity. No grant mutation, approval, limit increase, kill switch or unrestricted provider tool.
+The Leash MCP uses the official MCP Python SDK (`MCPServer` in SDK 2.x), Streamable HTTP, `stateless_http=True`, `json_response=True`, forwarded bearer auth and one API operation per thin tool. Preserve `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; adapt payment requests to trusted checkout identity. No grant mutation, approval, limit increase, kill switch or unrestricted provider tool.
+
+A separate store MCP server (same `services/mcp` service, path `/store/mcp`) carries the shopping tools `browse`, `create_checkout` and `complete_checkout` with its own credential (`STORE_MCP_TOKEN` in, a store-scoped credential out); it never receives the Leash token. Browsing reaches only the configured store: other hosts, non-HTTP schemes and redirects off the store are refused, so it can't probe internal services. Raw HTML stays inside it: each page is hashed, inspected for hidden instruction-like text, redacted and snapshotted there, and the agent receives page text plus an evidence record (source hash, findings, redacted snapshot metadata). Everything it returns is agent-observed evidence, never checkout truth; the API still retrieves canonical checkout facts through its own trusted merchant connection.
 
 ### 23.7 Public documentation checks
 
