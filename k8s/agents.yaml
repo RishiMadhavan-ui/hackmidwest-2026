@@ -1,0 +1,64 @@
+# Strands agents service. ClusterIP only — called by api (and tools) inside the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agents
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agents
+  template:
+    metadata:
+      labels:
+        app: agents
+    spec:
+      containers:
+        - name: agents
+          image: ${AGENTS_IMAGE}
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: app-env
+          env:
+            - name: API_URL
+              value: http://api:8000
+            - name: AGENTS_URL
+              value: http://agents:8000
+            - name: MCP_URL
+              value: http://mcp:8002/mcp
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agents
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: agents
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

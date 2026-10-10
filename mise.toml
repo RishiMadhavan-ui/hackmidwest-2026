@@ -1,0 +1,9 @@
+# Tool versions for local development (https://mise.jdx.dev)
+# Install/activate from the repo root: mise install && mise trust
+
+[tools]
+node = "22"
+pnpm = "10.12.4"
+# Optional: API tooling (matches api/ requires-python >=3.12)
+# python = "3.12"
+# uv = "latest"

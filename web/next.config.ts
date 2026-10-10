@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
+const apiOrigin = process.env.API_ORIGIN ?? "http://api:8000";
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
@@ -11,6 +13,14 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/backend/:path*",
+        destination: `${apiOrigin}/:path*`,
+      },
+    ];
   },
 };
 

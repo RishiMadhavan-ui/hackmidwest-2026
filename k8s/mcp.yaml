@@ -1,0 +1,60 @@
+# Leash MCP server. ClusterIP only: the agents call it inside the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp
+  template:
+    metadata:
+      labels:
+        app: mcp
+    spec:
+      containers:
+        - name: mcp
+          image: ${MCP_IMAGE}
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: app-env
+          env:
+            - name: API_URL
+              value: http://api:8000
+          ports:
+            - containerPort: 8002
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
