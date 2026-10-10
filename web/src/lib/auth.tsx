@@ -34,12 +34,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
-    apiMe(token)
+    // Complete session restoration asynchronously even when no token is stored.
+    const restoredUser = token ? apiMe(token) : Promise.resolve(null);
+    restoredUser
       .then((u) => {
         if (!cancelled) setUser(u);
       })
