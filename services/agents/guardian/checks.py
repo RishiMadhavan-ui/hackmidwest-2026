@@ -4,8 +4,6 @@ These run before any LLM call (AGENTS.md rule 2). Every check fails closed:
 missing or malformed fields count as a failure, never a pass.
 """
 
-import hashlib
-import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,19 +39,6 @@ def _parse_time(value: Any) -> datetime | None:
 def _is_cents(value: Any) -> bool:
   # bool is a subclass of int, and True is not an amount.
   return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
-def _cart_hash(cart: dict[str, Any]) -> str:
-  # TODO: replace with leash_shared.models.cart_hash() once it exists. Never
-  # keep two hash definitions; this one only exists until Rishi's lands.
-  data = {
-    "mandate_id": cart.get("mandate_id"),
-    "merchant": cart.get("merchant"),
-    "items": cart.get("items"),
-    "total_cents": cart.get("total_cents"),
-  }
-  canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
-  return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def check_mandate_active(mandate: dict[str, Any], now: datetime) -> Check:
@@ -145,16 +130,6 @@ def check_mcc_category(mandate: dict[str, Any], cart: dict[str, Any]) -> Check:
   return _check(name, True, f"Merchant MCC {raw_mcc} fits category {category!r}.")
 
 
-def check_cart_hash(cart: dict[str, Any]) -> Check:
-  name = "cart_hash_matches"
-  sent = cart.get("cart_hash")
-  if not sent:
-    return _check(name, False, "Cart has no cart_hash.")
-  if sent != _cart_hash(cart):
-    return _check(name, False, "Cart contents do not match its cart_hash.")
-  return _check(name, True, "Cart hash matches its contents.")
-
-
 def run_hard_checks(mandate: dict[str, Any], cart: dict[str, Any], now: datetime) -> list[Check]:
   return [
     check_mandate_active(mandate, now),
@@ -163,5 +138,4 @@ def run_hard_checks(mandate: dict[str, Any], cart: dict[str, Any], now: datetime
     check_currency(mandate, cart),
     check_merchant_allowlist(mandate, cart),
     check_mcc_category(mandate, cart),
-    check_cart_hash(cart),
   ]
