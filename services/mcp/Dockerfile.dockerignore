@@ -1,0 +1,10 @@
+# BuildKit reads this because it sits next to the Dockerfile; paths are
+# relative to the repo root build context.
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.env
+**/.env.*
+web/
+.git/
