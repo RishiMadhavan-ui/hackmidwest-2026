@@ -71,7 +71,15 @@ def test_s5_replayed_grant_declined(api_as_agent, api_as_user, agents, store):
     json={
       "mandate_id": mandate["id"],
       "checkout_id": checkout_id,
-      "proposal": {"items": [], "total_cents": 2999},
+      "proposal": {
+        "items": [
+          {"name": "VoltPro 65W charger", "sku": "CHG-65W", "quantity": 1, "unit_cents": 2999}
+        ],
+        "total_cents": 2999,
+      },
     },
   )
+  # A well-formed request that's refused, not a validation error.
+  assert res.status_code < 500 and res.status_code != 422, res.text
   assert res.json().get("status") in NOT_APPROVED | {None}, res.text
+  assert not res.json().get("card")

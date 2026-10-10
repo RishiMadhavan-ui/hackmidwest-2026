@@ -30,6 +30,7 @@ REQUIRED_ENV = [
   "STORE_URL",
   "USER_TOKEN",
   "AGENT_TOKEN_SHOPPER",
+  "AGENTS_SERVICE_TOKEN",
   "E2E_CHARGER_URL",
 ]
 
@@ -78,7 +79,8 @@ def api_as_user() -> httpx.Client:
 
 @pytest.fixture(scope="session")
 def agents() -> httpx.Client:
-  return _client("AGENTS_URL")
+  # The agents service only takes calls carrying the service token.
+  return _client("AGENTS_URL", "AGENTS_SERVICE_TOKEN")
 
 
 @pytest.fixture(scope="session")
@@ -97,10 +99,19 @@ def wait_for(fetch: Callable[[], dict[str, Any]], done: Callable[[dict], bool], 
 
 def propose_and_confirm(api_as_agent: httpx.Client, api_as_user: httpx.Client) -> dict:
   """A fresh, human-confirmed mandate: a new demo session."""
-  # TODO(R01/R02): send the agreed semantic constraints (no subscriptions, qty 1).
+  # Same body the MCP propose_mandate tool sends (MandateProposal in R01).
   res = api_as_agent.post(
     "/mandates/propose",
-    json={"description": INSTRUCTION, "category": "laptop_charger", "max_cents": 3999},
+    json={
+      "description": INSTRUCTION,
+      "category": "laptop_charger",
+      "max_cents": 3999,
+      "product_constraints": [{"name": "connector", "operator": "equals", "value": "USB-C"}],
+      "max_quantity": 1,
+      "maximum_purchases": 1,
+      "allow_subscription": False,
+      "allow_recurring": False,
+    },
   )
   assert res.status_code in (200, 201), res.text
   mandate_id = res.json()["id"]
@@ -157,8 +168,15 @@ def payment_id(event: dict) -> str:
 
 def assert_mandate_unchanged(api_as_user: httpx.Client, before: dict) -> None:
   after = api_as_user.get(f"/mandates/{before['id']}").json()
-  for field in ("version", "description", "max_cents", "category"):
+  for field in (
+    "version",
+    "description",
+    "max_cents",
+    "category",
+    "product_constraints",
+    "allow_subscription",
+    "allow_recurring",
+    "maximum_purchases",
+  ):
     assert after.get(field) == before.get(field), field
-  # TODO(R01): also compare the canonical payload hash once it exists.
-  if "canonical_payload_hash" in before:
-    assert after["canonical_payload_hash"] == before["canonical_payload_hash"]
+  assert after.get("canonical_payload_hash") == before.get("canonical_payload_hash")
