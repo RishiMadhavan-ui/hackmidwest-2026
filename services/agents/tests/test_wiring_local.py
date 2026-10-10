@@ -26,7 +26,7 @@ from provenance.outbox import shared_outbox
 from shopper.runs import RunManager, StartRun, run_shopper
 
 AGENTS_DIR = Path(__file__).parents[1]
-MCP_DIR = AGENTS_DIR.parent / "mcp"
+MCP_DIR = AGENTS_DIR.parent / "mcp-leash"
 POISONED = (Path(__file__).parent / "fixtures/listings/charger_poisoned.html").read_text()
 TOKEN = "agent-wiring-token"
 PAN = "4111111111111111"
@@ -157,7 +157,7 @@ def stack():
 def env(stack, monkeypatch):
   monkeypatch.setenv("API_URL", stack["api"])
   monkeypatch.setenv("STORE_URL", stack["store"])
-  monkeypatch.setenv("MCP_URL", stack["mcp"])
+  monkeypatch.setenv("MCP_LEASH_URL", stack["mcp"])
   monkeypatch.setenv("AGENT_TOKEN_SHOPPER", TOKEN)
   for key in ("payments", "payment_auth", "trace", "registrations", "order"):
     stack["log"][key].clear()

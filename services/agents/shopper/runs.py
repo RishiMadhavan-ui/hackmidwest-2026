@@ -79,7 +79,7 @@ def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
   """Run the shopper with the Leash tools loaded from the MCP server."""
   from strands.tools.mcp import MCPClient
 
-  mcp_url = os.environ.get("MCP_URL", "http://localhost:8002/mcp")
+  mcp_url = os.environ.get("MCP_LEASH_URL", "http://localhost:8002/mcp")
   token = os.environ.get("AGENT_TOKEN_SHOPPER")
   if not token:
     raise RuntimeError("AGENT_TOKEN_SHOPPER is not set")

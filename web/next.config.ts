@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
+// In-cluster defaults (LKE). For local Next → local MCP/api, override at `pnpm dev`:
+//   API_ORIGIN=http://127.0.0.1:8000
+//   MCP_LEASH_ORIGIN=http://127.0.0.1:8002
+//   MCP_STORE_ORIGIN=http://127.0.0.1:8003
 const apiOrigin = process.env.API_ORIGIN ?? "http://api:8000";
+const mcpLeashOrigin = process.env.MCP_LEASH_ORIGIN ?? "http://mcp-leash:8002";
+const mcpStoreOrigin = process.env.MCP_STORE_ORIGIN ?? "http://mcp-store:8003";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -19,6 +25,14 @@ const nextConfig: NextConfig = {
       {
         source: "/backend/:path*",
         destination: `${apiOrigin}/:path*`,
+      },
+      {
+        source: "/mcp-leash/:path*",
+        destination: `${mcpLeashOrigin}/:path*`,
+      },
+      {
+        source: "/mcp-store/:path*",
+        destination: `${mcpStoreOrigin}/:path*`,
       },
     ];
   },

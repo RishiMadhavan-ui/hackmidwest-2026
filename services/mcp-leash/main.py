@@ -262,7 +262,7 @@ async def check_status(payment_id: str) -> dict[str, Any]:
 @mcp.custom_route("/health", methods=["GET"])
 @mcp.custom_route("/healthz", methods=["GET"])
 async def healthz(_: Request) -> JSONResponse:
-  return JSONResponse({"status": "ok", "service": "mcp"})
+  return JSONResponse({"status": "ok", "service": "mcp-leash"})
 
 
 class BearerAuthMiddleware:
@@ -304,7 +304,7 @@ class BearerAuthMiddleware:
 def _allowed_hosts() -> list[str]:
   # DNS-rebinding protection rejects any Host header not listed here. Once
   # deployed, the public hostname must be added or every request fails.
-  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp:*")
+  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp-leash:*")
   return [h.strip() for h in raw.split(",") if h.strip()]
 
 

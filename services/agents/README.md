@@ -27,7 +27,7 @@ Deployment `agents`, reached in-cluster at `http://agents:8000` (container port 
 docker build -f services/agents/Dockerfile .
 ```
 
-`scripts/deploy_lke.sh` does this, and also deploys the MCP server as `mcp` at `http://mcp:8002/mcp`. Settings come from the `app-env` secret (the team `.env`), with `API_URL` and `MCP_URL` set in `k8s/agents.yaml`.
+`scripts/deploy_lke.sh` does this, and also deploys `mcp-leash` / `mcp-store` (ClusterIP). In-cluster agents use `http://mcp-leash:8002/mcp` and `http://mcp-store:8003/mcp` from `k8s/agents.yaml`. External tools use the NodeBalancer via Next rewrites: `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp`.
 
 ## Routes
 
@@ -58,7 +58,8 @@ Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST 
 | `AGENTS_SERVICE_TOKEN` | Required bearer for `/runs` and `/guardian/evaluate` |
 | `AGENT_TOKEN_SHOPPER` | Shopper's bearer for MCP, run registration, and trace intake |
 | `API_URL` | Run registration and trace intake; without it, local-only mode |
-| `MCP_URL` | Leash tools for the shopper (default `http://localhost:8002/mcp`) |
+| `MCP_LEASH_URL` | Leash MCP tools for the shopper (default `http://localhost:8002/mcp`) |
+| `MCP_STORE_URL` | Store MCP endpoint (default `http://localhost:8003/mcp`; tools TBD) |
 | `STORE_URL` | Store checkout API (default `http://localhost:8004`) |
 | `STORE_API_TOKEN` | Optional bearer for the store's checkout API only, pending the scheme agreed with Cameron |
 | `TRACE_SPOOL_DIR` | Trace outbox (default `./trace-spool`; `/app/trace-spool` in the image). Mount a volume to survive pod restarts |

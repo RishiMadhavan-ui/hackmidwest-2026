@@ -8,7 +8,8 @@ Owner: Aditya (A10). Every `<...>` is a value still to fill in from Cameron's de
 |---|---|---|
 | Web | `http://173.255.199.245/` (NodeBalancer) | Up |
 | api | `http://173.255.199.245/backend/...` (web proxies `/backend/*` to `api:8000`) | Up, starter only: `/backend/health` works, no Leash routes yet |
-| agents, mcp | cluster-internal `agents:8001`, `mcp:8002` | Not deployed yet |
+| agents | cluster-internal `agents:8000` | Manifests exist; confirm Ready pods after deploy |
+| mcp-leash, mcp-store | public via web: `http://<NB>/mcp-leash/mcp`, `http://<NB>/mcp-store/mcp` (ClusterIP behind Next rewrites) | Need web image with rewrites + mcp pods Ready |
 | store | `<url>` | Not deployed yet |
 
 Plain HTTP, no TLS yet. Lithic needs a public HTTPS responder before the Lithic rail can be selected; until then it's the Local Payment Rail Simulator.
