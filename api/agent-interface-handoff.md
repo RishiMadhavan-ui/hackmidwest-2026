@@ -1,16 +1,20 @@
 # Rishi / Aditya / Cameron interface alignment
 
-Inspected `origin/aditya-mcp` at `aa5d8d3` on October 10. Rishi's unfrozen R01
-candidate conforms to the pushed serializers, hooks, and advisory guardian,
-which are newer than the earlier messages. The captured fixture records three
-actual MCP bodies, four guardian outputs, and three hook/source events generated
-with fixture inputs; no live SDK run, network or model is claimed. These payloads
-and security regressions pass in the 48-test API contract suite.
+Inspected `origin/main` at `fae667b` and `origin/aditya-mcp` at `2e6f940` on
+October 10. Main already contains Cameron's PRs #2/#3 and Aditya's PR #4;
+neither teammate's branch has commits outside main. Rishi merged this main into
+the R01 branch without conflicts. The refreshed `aditya-2e6f940-wire.json` capture
+contains three actual MCP bodies, run registration, seven guardian outputs, and
+five hook/source events generated with fixture inputs. HTTP, S3 and models are
+substituted; this is not live inference or real Object Storage. All 52 API contract
+tests pass. `capture_peer_wire.py` makes the refresh reproducible.
 
 This is on `rishi/r01-shared-contracts` / draft PR #1, pending joint freeze. Rishi's
-API still exposes only `/health`. No Cameron remote branch is visible. Aditya's
-services exist on his branch; they have not been merged or executed as a full stack
-here. Keep implementation, schema compatibility, and live acceptance separate.
+API still exposes only `/health`. Aditya's services and Cameron's deployment
+code now exist in this checkout. The public web and `/backend/health` respond 200;
+deployed OpenAPI lists only `/health`. Store, webhook, API application routes,
+Valkey, shared packaging, and Compose remain absent. PostgreSQL provisioning
+scripts do not implement application persistence. No complete payment stack is claimed.
 
 ## Rishi's accepted wire contracts
 
@@ -85,6 +89,14 @@ it as a fallback to `original_instruction`. Human confirmation/signature/ownersh
 fields remain forbidden in agent draft input. Explicit USB-C constraints cannot be
 silently dropped; defaults forbid subscriptions/recurrence and permit one unit/purchase.
 
+Aditya's current MCP now forwards these semantic fields and uses strict integer
+cents/quantity and strict boolean flags. Strings are compared case-insensitively
+by his advisory guardian; numeric minimum/maximum currently use nonnegative integers.
+The R03 verifier must execute agreed attribute checks independently: a wrong
+connector blocks, an absent/unknown connector cannot pass. Shared schema validation
+is not this verifier. Its `ProductConstraint` also rejects malformed numeric/string
+operator values; peer validators should be replaced with it after packaging/freeze.
+
 ### Guardian evaluation and findings
 
 Aditya's current route accepts `{mandate, checkout?, proposal?, provenance:[], trace:[]}`;
@@ -142,16 +154,43 @@ foreign run/bucket references fail. Unavailable snapshots retain their honest la
 Optional `stored_sha256` supports separate integrity for a redacted stored snapshot;
 the original source SHA-256 remains separate evidence.
 
+## Run registration and intake acknowledgment
+
+R01 accepts Aditya's proposed `POST /agent-runs` with the agent bearer:
+
+```json
+{"id":"run_demo","mandate_id":"mnd_demo","agent_mode":"scripted","model":"scripted-shopper","provider":"fixture"}
+```
+
+`AgentRunRegistration` forbids agent-chosen user/agent identity, version/hash, and
+status. R02 resolves the authenticated owner/current confirmed mandate and persists
+`AgentRun` with server-derived identity, version/hash and creation time. Reply 2xx
+only after commit, echoing the exact ID and mode; refuse unauthorized/invalid runs
+with `{"detail":"plain string"}`. Registration precedes tools and provenance.
+Model/provider remain reported metadata; mode must match the API's authorized run
+dispatch. A client cannot relabel a scripted run by registering it again.
+
+R06 follows the outbox's status handling:
+
+- 2xx: durable SQL commit completed (not merely queued).
+- 409: the same authenticated subject/origin/event ID and normalized content
+  were already committed. Only an identical retry gets this result.
+- Altered duplicate: 422, permanently rejected; preserve the original and record
+  the collision. Do not return 409, which the outbox treats as safely delivered.
+- 400/401/403/404/413/422: permanently rejected; plain-string detail.
+- Outages: 5xx; transient throttling/timeouts: 429/408, retried.
+
+These are contract choices for later route work, not implemented API endpoints.
+
 ## Owner actions before integration
 
 | Owner | Concrete remaining action |
 |---|---|
-| Aditya | Authenticate `/runs`, `GET /runs/{id}`, and `/guardian/evaluate`; bind caller/run/mandate ownership. Cluster-only exposure remains required but does not authenticate callers. |
-| Aditya | Extend MCP `propose_mandate` to forward the ready semantic constraints/flags, and consume shared validators so float/bool cents cannot be coerced by duplicate models. |
-| Aditya | Redact before Object Storage `put_object`, not just before trace/log sinks. Current hooks pass raw HTML to `upload_snapshot`. Record stored-content hash separately if redaction changes it. |
-| Aditya | Fix PAN redaction to preserve SHA-256/opaque IDs. Reproduced: `a` + 16 digits + 47 `b`s becomes `a[CARD ****3456]...`, corrupting a valid source hash before intake. |
-| Rishi + Aditya | Register/authorize run ownership and live/scripted mode in the API before dispatching traces; add retry/recovery for the current best-effort HttpSink so API outages/restarts cannot permanently lose required traces. |
-| Cameron | C01 shared packaging/runtime and internal network/config. Current snapshot code uses `OBJ_ENDPOINT`, `OBJ_BUCKET`, `OBJ_ACCESS_KEY`, `OBJ_SECRET_KEY`; configure these exact names plus service auth without sharing secret values. |
+| Rishi | Implement registered ownership/mandate/mode persistence and intake acknowledgment above in R02/R06; guardian calls now require `AGENTS_SERVICE_TOKEN`. Aditya's registration and retry/spooling code is present. |
+| Aditya | Fix the restart test's scheduling assumption; wait for a delivery attempt and synchronize old worker shutdown instead of requiring an attempt within 0.3 seconds. Consider joining on `OutboxSink.stop()`. Require the mode echo rather than accepting null in registration responses. |
+| Aditya | After C01/freeze, consume shared validators, including numeric/string constraint validation. Align the live attack demo and resolve direct shopping tools versus the requested MCP interface with Rishi. |
+| Cameron | Mount persistent storage at `/app/trace-spool`. `k8s/agents.yaml` has no volumes/mounts, so image-local spooling does not survive pod replacement. Supply exact OBJ names, configured STORE_URL/token, service tokens and documented MCP hosts. |
+| Cameron + Rishi | C01 installable shared package/runtime; API image currently copies only `main.py` from an `api/` build context. It cannot import R01. Rishi owns the API Dockerfile; Cameron owns the matching deploy build context. Change these together before product API deployment. |
 | Cameron + Rishi | Agree authenticated canonical retrieval, session/owner assignment, revision/expiry, protected grant/instrument binding and atomic Valkey protocol. CheckoutSnapshot binds session ID; product billing interval is preserved/hash-bound. |
 
 Aditya has already replaced the hotel YAML with charger/subscription cases and
@@ -161,8 +200,10 @@ tests and canned wiring servers do not prove a deployed secure payment flow.
 
 Adi's store routes are acceptable proposals: `POST /api/checkouts {sku,quantity}`
 and `POST /api/checkouts/{id}/complete {payment_id,card?}`. His `_store_post` currently
-sends no auth header. Cameron and Aditya must agree a scoped caller/session credential
-and forward it without weakening the protected charge boundary. Rishi assigns the
+now forwards `STORE_API_TOKEN` only to its configured checkout API, never browse.
+That static bearer is interim authentication, not scoped session ownership. Cameron
+and Aditya must agree a scoped caller/session credential and forward it without
+weakening the protected charge boundary. Rishi assigns the
 payment/purchase-attempt ID, adds the authorized context to its persisted snapshot,
 and registers the exact frozen checkout/grant/instrument association. Completion
 loads that protected binding and rejects another session or checkout; supplied card
@@ -174,3 +215,42 @@ Use Aditya's draft catalog: `CHG-65W` / `laptop_charger` and `SUB-CARE-MO` /
 `protection_plan`, both 2999 cents at `mer_volt_supply` / `VOLT SUPPLY CO` / MCC
 `"5732"` / USD, pending Cameron's catalog implementation. Injection changes listing
 text, not canonical facts. No edits were made in Aditya's or Cameron's lanes.
+
+## Evidence and decisions to reconcile
+
+- R01: 52 tests passed, refreshed peer captures passed; selected correctness lint
+  (E4/E7/E9/F), documentation links/fences and whitespace checked separately.
+- MCP: 33 tests passed with its committed lockfile.
+- Agents: 126 passed, one failed, two live inference tests deselected with its
+  committed lockfile. Real MCP subprocess wiring against stub API/store passed;
+  those canned decisions do not prove payment enforcement.
+- The failed restart test also failed in isolation. First mocked HTTP attempt
+  measured 0.563 seconds versus its 0.3-second flush window. A diagnostic waiting
+  for the attempt and joining the old worker recovered both pending events.
+  This explains the local failure; the checked-in suite still needs Aditya's fix.
+- Six deployed-stack tests skipped because live E2E was not enabled; no real
+  inference, merchant/rail enforcement, ASA or settlement was exercised.
+- Kubernetes YAML/selectors/service and probe ports/exposure match; deployment
+  scripts pass Bash syntax. Docker daemon is unavailable and Compose absent, so
+  fresh image builds or complete boot were not validated here.
+- Web lint and Next.js production build passed with the merged configuration.
+  This validates the frontend build, not an authenticated purchase flow.
+
+Two architecture differences need an explicit team decision, not a silent model
+change. The current shopper obtains the four Leash financial tools through MCP,
+but `browse`, `create_checkout`, and `complete_checkout` are local Python Strands
+tools calling the store directly. Rishi's latest clarification describes shopping
+and guarded financial operations through MCP; if that includes these tools, Aditya
+must move/adapt them into MCP while keeping backend enforcement. MCP connection
+failure already prevents this shopper loop from starting.
+
+`docs/demo-script.md` makes the attack scripted by default and labels it honestly.
+The spec still requires a real live shopper encountering the injected listing for
+the signature demonstration; scripted runs are repeatable security fixtures or
+an explicit fallback. The same script uses remote agent port 8001, but LKE Service
+port is now 8000: port-forward must be `8001:8000`. Aditya owns that correction.
+
+R01 is ready for shared contract review after these adjustments. Schema compatibility
+does not depend on pretending unfinished services work; do not mark G0 frozen or
+merge on the team's behalf before the three humans agree. Keep R01's PR draft while
+Rishi reconciles the architecture differences and Cameron reviews checkout/grant shape.

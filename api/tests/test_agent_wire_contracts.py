@@ -18,7 +18,7 @@ from leash_shared.events import (  # noqa: E402
 )
 from leash_shared.models import (  # noqa: E402
   AuthorizationGrant, CheckoutVerification, MandateProposal, PaymentProposal,
-  GuardianEvaluationRequest, Mandate, PaymentResponse, Verdict,
+  AgentRunRegistration, GuardianEvaluationRequest, Mandate, PaymentResponse, Verdict,
 )
 
 
@@ -251,11 +251,32 @@ class AgentWireContractTests(unittest.TestCase):
     with self.assertRaises(ValidationError):
       MandateProposal(**{**data, "maximum_quantity": 10})
 
+  def test_run_registration_cannot_choose_owner_or_confirmed_authority(self):
+    body = {"id": "run_demo", "mandate_id": "mnd_demo", "agent_mode": "scripted",
+      "model": "scripted-shopper", "provider": "fixture"}
+    self.assertEqual(AgentRunRegistration(**body).model_dump(mode="json"), body)
+    for field in ("user_id", "agent_id", "mandate_version", "mandate_hash", "status"):
+      with self.subTest(field=field), self.assertRaises(ValidationError):
+        AgentRunRegistration(**{**body, field: "agent claim"})
+    for field in ("id", "mandate_id", "agent_mode"):
+      missing = {k: v for k, v in body.items() if k != field}
+      with self.subTest(field=field), self.assertRaises(ValidationError):
+        AgentRunRegistration(**missing)
+
+  def test_redacted_snapshot_keeps_source_hash_and_stored_hash_separate(self):
+    report = parse_provenance(source_data(snapshot={
+      "storage": "object_storage", "bucket": "demo-evidence",
+      "key": "runs/run_demo/" + "a" * 64 + ".html", "stored_sha256": "b" * 64,
+    }))
+    event = normalize(report, configured_snapshot_bucket="demo-evidence")
+    self.assertEqual(event.data["sha256"], "a" * 64)
+    self.assertEqual(event.data["snapshot"]["stored_sha256"], "b" * 64)
+
 
 class CapturedPeerContractTests(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.capture = json.loads((Path(__file__).parent / "fixtures/aditya-aa5d8d3-wire.json").read_text(encoding="utf-8"))
+    cls.capture = json.loads((Path(__file__).parent / "fixtures/aditya-2e6f940-wire.json").read_text(encoding="utf-8"))
 
   def test_actual_mcp_serialization_matches_shared_wire_models(self):
     for call in self.capture["mcp_calls"]:
@@ -280,12 +301,14 @@ class CapturedPeerContractTests(unittest.TestCase):
 
   def test_actual_hook_source_and_mode_survive_auth_bound_normalization(self):
     for payload in self.capture["provenance_events"]:
-      event = normalize(parse_provenance(payload), authorized_agent_mode="scripted")
+      event = normalize(parse_provenance(payload), authorized_agent_mode="scripted",
+        configured_snapshot_bucket="demo-evidence")
       self.assertEqual(event.event_id, payload["event_id"])
       self.assertEqual(event.data["agent_mode"], "scripted")
       self.assertFalse(event.data["authoritative"])
       if payload["type"] == "provenance.source":
-        self.assertEqual(event.data["snapshot"]["storage"], "none")
+        self.assertEqual(event.data["snapshot"]["storage"], "object_storage")
+        self.assertIn("stored_sha256", event.data["snapshot"])
         self.assertEqual(event.data["sha256"], payload["sha256"])
 
   def test_guardian_input_uses_checkout_and_proposal_and_accepts_legacy_cart_alias(self):
@@ -297,13 +320,26 @@ class CapturedPeerContractTests(unittest.TestCase):
     body = {"mandate": mandate.model_dump(mode="json"),
       "checkout": checkout.model_dump(mode="json"), "proposal": PAYMENT["proposal"],
       "provenance": [self.capture["provenance_events"][-1]],
-      "trace": self.capture["provenance_events"][:2]}
+      "trace": self.capture["provenance_events"][:-1]}
     parsed = GuardianEvaluationRequest.model_validate(body)
     self.assertIn("proposal", parsed.model_dump())
     self.assertEqual(parsed.checkout.session_id, "ses_demo_a")
     legacy = {**body, "cart": body["proposal"]}
     del legacy["proposal"]
     self.assertEqual(parsed, GuardianEvaluationRequest.model_validate(legacy))
+
+  def test_actual_run_registration_and_hash_preservation_match_contracts(self):
+    body = self.capture["run_registration"]["body"]
+    self.assertEqual(AgentRunRegistration.model_validate(body).id, "run_demo")
+    self.assertEqual(self.capture["run_registration"]["path"], "/agent-runs")
+    probe = self.capture["peer_redaction_probe"]
+    self.assertEqual(probe["input_hash"], probe["output_hash"])
+
+  def test_current_guardian_distinguishes_wrong_and_unknown_connectors(self):
+    outputs = self.capture["guardian_product_constraint_responses"]
+    self.assertEqual(Verdict.model_validate(outputs["wrong"]).recommendation, "block")
+    self.assertEqual(Verdict.model_validate(outputs["unknown"]).recommendation, "review")
+    self.assertEqual(Verdict.model_validate(outputs["case_insensitive"]).recommendation, "no_findings")
 
 
 if __name__ == "__main__":

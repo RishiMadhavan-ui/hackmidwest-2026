@@ -27,7 +27,7 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-Initial inspection on October 10, 2026: `api/main.py` implements only `GET /health`; `api/pyproject.toml` declares FastAPI and Strands with the OpenAI extra. `web/` contains a Next.js/React/TypeScript starter, Tailwind/shadcn configuration, UI primitives, and a health-fetch helper. R01 now adds shared models/events and contract tests on `rishi/r01-shared-contracts`; see [api/README.md](api/README.md) for exact fields, hash payloads, event wire format, and owner handoffs. This is a review candidate, not jointly frozen contracts or an integrated payment flow. Root README, service implementations, persistence, Compose, infrastructure, agents, and payments remain absent. A dependency declaration is not a working integration.
+October 10 review: main at `fae667b` includes Cameron's LKE/build/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP, guardian, provenance and test scaffolding. R01's review branch incorporates main without conflicts and adds shared models/events and contract tests; see [api/README.md](api/README.md). API application routes remain absent (`GET /health` only); web is still a starter. Store/webhook, application persistence, Valkey, installable shared packaging and Compose remain pending. The public web/API health respond; a complete payment flow and live inference are not verified. Contracts remain an unfrozen review candidate.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -43,9 +43,9 @@ human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
 |---|---|---|---|
 | Product backend | `api/` exists; `services/api/` is planned | Rishi | Mandates, trusted checkout verification, grants, persistence, audit, SSE |
 | Web | `web/` exists | Rishi | Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
-| Agents / MCP | `services/agents/`, `services/mcp/` planned | Aditya | Strands shopper/investigator, protected tools, hooks, thin MCP adapter |
+| Agents / MCP | `services/agents/`, `services/mcp/` exist | Aditya | Strands shopper/investigator, protected tools, hooks, thin MCP adapter |
 | Merchant / payment rail | `services/store/`, `services/webhook/` planned | Cameron | Canonical catalog and checkout API, simulator, Lithic ASA, atomic enforcement |
-| Database / Valkey / deployment | `db/`, `infra/`, Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
+| Database / Valkey / deployment | `k8s/`, `scripts/` exist; `db/`, Valkey and Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
 
 ## Repository tree
 
@@ -57,17 +57,19 @@ hackmidwest-2026/
   Leash-build-plan.md                 [E] shared team execution plan
   README.md                          [P] shared setup/product guide
   docker-compose.yml                 [P] Cameron: integrated local runtime
-  .env.example                       [P] Cameron: configuration names only
+  .env.example                       [E] Cameron: configuration names only
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
   infra/                             [P] Cameron: Akamai deployment
-    k8s/                             [P] service manifests if using LKE
+  k8s/                               [E] Cameron: current LKE manifests
+  scripts/                           [E] Cameron: build/deploy/PostgreSQL provisioning
+  mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
     main.py                          [E] currently GET /health only
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
     tests/                           [E] Rishi: R01 contract tests; service tests planned
-    Dockerfile                       [P] Rishi: backend image
+    Dockerfile                       [E] Rishi: health-only image; shared context pending
   db/migrations/                     [P] Rishi: durable domain/audit schema
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
@@ -76,15 +78,15 @@ hackmidwest-2026/
       models.py                      [E] Rishi: R01 initial contract review candidate
       events.py                      [E] Rishi: R01 sanitized events/publish helper
       lithic.py                      [P] Cameron: official sandbox client wrapper
-      llm.py                         [P] Aditya: centralized model factory
+      llm.py                         [E] Aditya: centralized model factory
   services/
-    agents/                          [P] Aditya: FastAPI agent service
-      shopper/                       [P] real, intentionally gullible Strands agent
-      guardian/                      [P] evidence-linked investigation
-      provenance/                    [P] sanitized hooks/source snapshots
+    agents/                          [E] Aditya: FastAPI agent service
+      shopper/                       [E] real, intentionally gullible Strands agent
+      guardian/                      [E] evidence-linked investigation
+      provenance/                    [E] sanitized hooks/source snapshots and outbox
       attacker/                      [P] optional; outside required MVP scope
-      tests/                         [P] agent/hook/tool tests
-    mcp/                             [P] Aditya: authenticated thin adapter
+      tests/                         [E] agent/hook/tool tests
+    mcp/                             [E] Aditya: thin adapter, bearer forwarded to API
     webhook/                         [P] Cameron: rail responders/atomic state
       decide.py                      [P] pure domain payment policy
       tests/                         [P] handler/concurrency/signature tests
@@ -96,12 +98,12 @@ hackmidwest-2026/
     src/lib/api.ts                   [E] health fetch helper
     src/lib/api-types.ts             [P] generated from agreed OpenAPI
   tests/
-    decision_cases.yaml              [P] Aditya: independent policy fixtures
+    decision_cases.yaml              [E] Aditya: independent policy fixtures
     test_decision_cases.py            [P] Cameron: policy fixture runner
-    e2e/                             [P] Aditya: all six acceptance scenarios
+    e2e/                             [E] Aditya: six gated scenario tests, not yet live proof
   docs/
     LEASH_SPEC.md                    [E] shared detailed specification
-    demo-script.md                   [P] Aditya: live rehearsal/reset instructions
+    demo-script.md                   [E] Aditya: draft; live attack/port updates pending
 ```
 
 Each new service keeps its own Dockerfile and tests in its owner's directory. The build plan names the exact owner, prerequisites, and evidence for every planned deliverable.
@@ -120,7 +122,7 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 
 | Path | Owner |
 |---|---|
-| `infra/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
+| `infra/`, `k8s/`, `scripts/`, `mise.toml`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
 | `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
@@ -135,7 +137,7 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 **Contracts:** R01's initial `models.py` and `events.py` are implemented as a review candidate, with validation/hash/event tests in `api/tests/`. Review the concrete fields together before freezing and integrating dependent lanes. Once frozen, changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** inspected Aditya's pushed `aditya-mcp` at `aa5d8d3`; its services/fixtures exist on that branch, while this Rishi checkout keeps its own lane. The unfrozen R01 candidate now follows his `proposal` input with nullable input context, dotted tool/source events including live/scripted mode, and guardian `recommendation: block | review | no_findings` with structured nullable model metadata. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) gives exact examples, captured compatibility tests and owner actions. Mandate output uses his lookup names `max_quantity`, `allow_subscription`, `allow_recurring`; old R01 spellings remain input aliases. No guardian finding or agent-reported trust/status can authorize payment. Internal run/guardian/store calls still need authentication/ownership, snapshots need redaction before upload, and trace redaction must preserve hashes. Shared packaging, run registration/recovery, protected checkout binding and real integration remain pending.
+**Agent interface alignment:** the candidate follows the merged `2e6f940` serializers, guardian, run registration and source/trace fields. R01 adds `AgentRunRegistration`; API-owned confirmation/identity/version/hash stay forbidden in agent input. Aditya's service authentication, semantic forwarding, redacted snapshots with `stored_sha256`, hash-preserving redaction and trace outbox are implemented. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records 52 passing contract tests, peer-suite results, exact HTTP acknowledgment semantics and remaining owner actions. Packaging/API image context, persistent spool volume, scoped store/checkout binding and application routes remain pending. Reconcile direct Python shopping tools versus Rishi's MCP clarification and scripted versus live signature demo before claiming agreement; do not change those requirements silently.
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
@@ -145,8 +147,8 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Money is integer minor units; the USD MVP uses `_cents` fields, never float dollars. Validate amounts, quantities, supported currencies, required checkout fields, and UTC-aware timestamps. Convert only for display.
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
-- Models use the planned shared `make_model()` factory and provider abstraction, explicit `max_tokens`, text-only Akamai requests, guardian temperature 0. Validate structured output with Pydantic; plain-text JSON fallback never grants authority. These integrations still need implementation and smoke tests.
-- MCP remains an official SDK, Streamable HTTP, stateless thin adapter with bearer credentials forwarded unchanged. Planned tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. No privilege escalation tools.
+- Models use shared `make_model()` with explicit `max_tokens`, text-only Akamai requests and guardian temperature 0. Both matched INFERENCE_* and workshop OPENAI_* environment pairs work. Structured findings/fallback remain advisory; genuine inference smoke evidence is pending.
+- MCP uses the official locked SDK's `MCPServer` (the FastMCP rename), Streamable HTTP, stateless thin adaptation and forwarded bearer credentials. Tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`; API validates identity/permissions. No privilege escalation tools. Shopper currently uses direct Python browse/store tools alongside MCP; reconcile that scope with the requested MCP primary interface.
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.
@@ -176,8 +178,8 @@ web/: pnpm lint
 web/: pnpm build
 ```
 
-The current health route is `/health`; `/healthz`, payment routes, and the previous plan's ports 8001–8004 are proposed interfaces, not implemented ones. Inspect generated OpenAPI before claiming an endpoint exists. Generate web API types from agreed OpenAPI once available; do not hand-edit generated types.
+API currently has `/health` only; agents/MCP expose both health paths and their implemented routes. Agents use local port 8001 but LKE Service/container port 8000; MCP uses 8002. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
-Before completing implementation, run the affected service's tests, the security decision matrix, and end-to-end scenarios, and confirm `docker compose up --build` boots once Cameron supplies Compose. R01 contract tests run from the root with `api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v`; they need Python 3.12+ and Pydantic v2. Compose, the payment decision matrix runner, and end-to-end implementation remain absent; report these gaps instead of claiming passing checks. Documentation changes require diff/whitespace, link, and consistency checks. Do not claim that static inspection proves credentials, deployed services, or live integrations work.
+Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 tests run with `api/.venv/Scripts/python.exe -m unittest discover -s api/tests -v`; they need Python 3.12+ and Pydantic v2. Agents/MCP have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.

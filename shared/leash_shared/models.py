@@ -664,6 +664,16 @@ class AuthorizationDecision(PaymentDecision):
   amount_cents: Cents
 
 
+class AgentRunRegistration(Contract):
+  """Agent draft for POST /agent-runs; the API fills authority and ownership."""
+
+  id: RunId
+  mandate_id: MandateId
+  agent_mode: Literal["live", "scripted"]
+  model: Text | None = None
+  provider: Text | None = None
+
+
 class AgentRun(Contract):
   id: RunId
   agent_id: AgentId

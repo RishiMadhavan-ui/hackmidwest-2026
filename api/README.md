@@ -43,7 +43,7 @@ frozen-contract changes follow AGENTS.md's dedicated PR rule.
 | `CheckoutVerification` | Deterministic check results bound to user, purchase attempt, mandate version/hash, and checkout ID/hash |
 | `AuthorizationGrant`, `PreApproval` | Exact verified amount/currency, instrument, merchant binding, expiry, and grant identity/status |
 | `AuthorizationAttempt`, `PaymentDecision`, `AuthorizationDecision` | Normalized request and actual outcome, rail, reason, latency, and evidence references |
-| `AgentRun`, `AgentTraceEvent`, `ProvenanceEvent`, `SecurityIncident` | Execution and source evidence linked to authority and security decisions |
+| `AgentRunRegistration`, `AgentRun`, `AgentTraceEvent`, `ProvenanceEvent`, `SecurityIncident` | Agent registration draft, server-owned execution records, and source evidence linked to authority and decisions |
 | `Verdict` / alias `GuardianFindings` | Advisory `block`, `review`, or `no_findings`; checks/evidence and structured nullable model metadata; never approves |
 | `PaymentResponse` | Top-level `id` and `status`; grant approval and actual authorization remain separate |
 
@@ -168,10 +168,29 @@ directly. Trace/source records also require sanitization at their service bounda
 - **Cameron / C01-C04:** installable shared package/runtime, canonical merchant
   source and protected binding, pure authorization rules, atomic Valkey protocol.
 - **Aditya / A01-A06:** consume these exact models/hash helpers/event fields; add
-  explicit mandate constraints, authenticated internal run/guardian routes, new
-  integrate his updated policy fixtures and trace/source envelopes. Payment, trace,
+  integrate his semantic mandate fields, authenticated internal run/guardian routes,
+  updated policy fixtures and trace/source envelopes. Payment, trace,
   and guardian vocabulary follows his pushed code; inspect the exact handoff for
   remaining owner actions.
 
 R01 tests prove contract validation/hashing/event behavior. They do not claim live
 Strands, merchant, Lithic, database, concurrent consumption, or end-to-end acceptance.
+
+## Integrated branch review
+
+Main at `fae667b` includes Cameron's build/deployment PRs and Aditya's `2e6f940`
+agents/MCP branch. R01 has incorporated it without conflicts. The API is still
+health-only; PostgreSQL provisioning is not application persistence. Current
+payloads, run registration, 52 passing contract tests, peer-suite results, deployment
+gaps and architecture decisions are recorded in [the handoff](agent-interface-handoff.md).
+
+To refresh peer captures with their SDK dependencies installed:
+
+```powershell
+.\api\.venv\Scripts\python.exe api/tests/capture_peer_wire.py
+```
+
+The utility invokes current serializers/evaluator/hooks with fixture inputs and
+substituted HTTP, model, and S3 calls, then names the capture after the inspected
+peer commit. It does not start a live model or upload data. Consume the matching
+capture in the contract tests when reviewing a new peer revision.
