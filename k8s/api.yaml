@@ -1,0 +1,63 @@
+# FastAPI backend. ClusterIP only — the browser reaches it through the web
+# Service via Next.js /backend rewrites (see web/next.config.ts).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: ${API_IMAGE}
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: app-env
+          env:
+            - name: AGENTS_URL
+              value: http://agents:8000
+            - name: API_URL
+              value: http://api:8000
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
