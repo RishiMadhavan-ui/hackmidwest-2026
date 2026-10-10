@@ -1,7 +1,8 @@
-"""Leash MCP server.
+"""Leash MCP server (Deployment mcp-leash, port 8002, path /mcp).
 
-A thin, stateless adapter: each tool forwards to exactly one api route with the
-caller's bearer token, unchanged. The api decides whether the token is valid
+Payment tools only; shopping lives in the separate store MCP service
+(services/mcp-store). A thin, stateless adapter: each tool forwards to exactly
+one api route with the caller's bearer token, unchanged. The api decides whether the token is valid
 and what the agent may do. Nothing here can approve a mandate or payment, raise
 a limit, or touch the kill switch; those routes need a human's token.
 """
@@ -20,8 +21,6 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
-
-from store_server import StoreAuthMiddleware, store
 
 # The caller's raw "Bearer ..." header for the current request. Set by
 # BearerAuthMiddleware, read by every tool.
@@ -46,7 +45,6 @@ All money is integer cents: $29.99 is 2999.
 
 # mcp 2.x renamed FastMCP to MCPServer and moved stateless_http/json_response
 # from the constructor onto streamable_http_app().
-# The Leash server: payment tools only. Shopping lives in store_server.py.
 mcp = MCPServer("Leash", instructions=INSTRUCTIONS)
 
 
@@ -266,7 +264,7 @@ async def check_status(payment_id: str) -> dict[str, Any]:
 
 async def health(_: Request) -> JSONResponse:
   # /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
-  return JSONResponse({"status": "ok", "service": "mcp"})
+  return JSONResponse({"status": "ok", "service": "mcp-leash"})
 
 
 class BearerAuthMiddleware:
@@ -306,33 +304,25 @@ class BearerAuthMiddleware:
 def _allowed_hosts() -> list[str]:
   # DNS-rebinding protection rejects any Host header not listed here. Once
   # deployed, the public hostname must be added or every request fails.
-  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp:*")
+  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp-leash:*")
   return [h.strip() for h in raw.split(",") if h.strip()]
 
 
-def _http_app(server: MCPServer, path: str) -> Starlette:
-  return server.streamable_http_app(
-    streamable_http_path=path,
-    stateless_http=True,
-    json_response=True,
-    transport_security=TransportSecuritySettings(
-      enable_dns_rebinding_protection=True,
-      allowed_hosts=_allowed_hosts(),
-    ),
-  )
-
-
-# Two MCP servers in one service. Leash (payments) at /mcp forwards the
-# agent's own token to the api; the store at /store/mcp checks STORE_MCP_TOKEN
-# and calls the store with a store-scoped credential. They share nothing.
-leash_app = _http_app(mcp, "/mcp")
-store_app = _http_app(store, "/store/mcp")
+leash_app = mcp.streamable_http_app(
+  streamable_http_path="/mcp",
+  stateless_http=True,
+  json_response=True,
+  transport_security=TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=_allowed_hosts(),
+  ),
+)
 
 
 @asynccontextmanager
 async def lifespan(_: Starlette):
-  # Routed sub-apps don't run their own lifespans, so start both here.
-  async with mcp.session_manager.run(), store.session_manager.run():
+  # The routed MCP sub-app doesn't run its own lifespan, so start it here.
+  async with mcp.session_manager.run():
     yield
 
 
@@ -341,7 +331,6 @@ app = Starlette(
     Route("/health", health),
     Route("/healthz", health),
     Route("/mcp", BearerAuthMiddleware(leash_app)),
-    Route("/store/mcp", StoreAuthMiddleware(store_app)),
   ],
   lifespan=lifespan,
 )

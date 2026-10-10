@@ -37,7 +37,7 @@ def store():
 
 def call(client, name, arguments, headers=HEADERS):
   return client.post(
-    "/store/mcp",
+    "/mcp",
     headers=headers,
     json={
       "jsonrpc": "2.0",
@@ -57,24 +57,16 @@ def text_of(r):
   return "".join(block["text"] for block in r["content"] if block["type"] == "text")
 
 
-# -- separation from the Leash server ----------------------------------------
+# -- what this server exposes and who may call it -----------------------------
 
 
-def test_store_and_leash_servers_have_separate_tools(client):
-  def names(path, headers):
-    res = client.post(
-      path, headers=headers, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    )
-    return {t["name"] for t in res.json()["result"]["tools"]}
-
-  leash_headers = {**HEADERS, "authorization": "Bearer agent-token"}
-  assert names("/store/mcp", HEADERS) == {"browse", "create_checkout", "complete_checkout"}
-  assert names("/mcp", leash_headers) == {
-    "propose_mandate",
-    "list_mandates",
-    "request_payment",
-    "check_status",
-  }
+def test_store_server_has_only_store_tools(client):
+  res = client.post(
+    "/mcp", headers=HEADERS, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+  )
+  names = {t["name"] for t in res.json()["result"]["tools"]}
+  # No payment tools here: those live only on the Leash MCP service.
+  assert names == {"browse", "create_checkout", "complete_checkout"}
 
 
 def test_refuses_when_no_store_token_is_configured(client, monkeypatch):

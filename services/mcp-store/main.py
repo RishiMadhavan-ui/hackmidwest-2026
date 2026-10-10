@@ -1,6 +1,7 @@
-"""Store MCP server: shop at the controlled merchant, for any agent.
+"""Store MCP server (Deployment mcp-store, port 8003, path /mcp).
 
-Separate from the Leash MCP server on purpose. Leash's server carries the
+Shop at the controlled merchant, for any agent. Its own service, separate from
+the Leash MCP server (services/mcp-leash) on purpose. Leash's server carries the
 agent's payment credential to the Leash api; this one carries a store-scoped
 credential to the merchant, and never sees or forwards the Leash token.
 
@@ -19,14 +20,19 @@ canonical checkout from the store itself.
 import hmac
 import os
 import re
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import httpx
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import Field, StrictInt
+from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from evidence.html_text import extract
 from evidence.inspect import inspect_page
@@ -274,3 +280,42 @@ class StoreAuthMiddleware:
       await res(scope, receive, send)
       return
     await self.app(scope, receive, send)
+
+
+async def health(_: Request) -> JSONResponse:
+  # /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
+  return JSONResponse({"status": "ok", "service": "mcp-store"})
+
+
+def _allowed_hosts() -> list[str]:
+  # DNS-rebinding protection rejects any Host header not listed here.
+  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp-store:*")
+  return [h.strip() for h in raw.split(",") if h.strip()]
+
+
+store_app = store.streamable_http_app(
+  streamable_http_path="/mcp",
+  stateless_http=True,
+  json_response=True,
+  transport_security=TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=_allowed_hosts(),
+  ),
+)
+
+
+@asynccontextmanager
+async def lifespan(_: Starlette):
+  # The routed MCP sub-app doesn't run its own lifespan, so start it here.
+  async with store.session_manager.run():
+    yield
+
+
+app = Starlette(
+  routes=[
+    Route("/health", health),
+    Route("/healthz", health),
+    Route("/mcp", StoreAuthMiddleware(store_app)),
+  ],
+  lifespan=lifespan,
+)

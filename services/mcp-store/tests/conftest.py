@@ -14,9 +14,9 @@ def _isolate_env(monkeypatch):
     monkeypatch.delenv(name, raising=False)
 
 
-# Each MCP session manager can only be started once per process, so every test
+# The MCP session manager can only be started once per process, so every test
 # module shares one client and one app lifespan.
 @pytest.fixture(scope="session")
 def client():
-  with TestClient(app, base_url="http://localhost:8002") as c:
+  with TestClient(app, base_url="http://localhost:8003") as c:
     yield c
