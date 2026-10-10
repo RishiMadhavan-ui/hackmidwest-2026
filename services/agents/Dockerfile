@@ -12,6 +12,9 @@ COPY services/agents/pyproject.toml services/agents/uv.lock services/agents/.pyt
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY services/agents/ ./
+# shared/ has no package metadata yet (C01), so copy the package next to the
+# app where Python finds it. TODO: install it as a package once C01 lands.
+COPY shared/leash_shared/ ./leash_shared/
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8001
