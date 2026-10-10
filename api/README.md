@@ -36,13 +36,16 @@ frozen-contract changes follow AGENTS.md's dedicated PR rule.
 | Records | Purpose |
 |---|---|
 | `PurchaseMandate` / alias `Mandate` | Original instruction, semantic constraints, quantity/purchase limits, merchant identities, validity, immutable version/hash, confirmation/signature association |
-| `CartProposal`, `Cart`, `PaymentProposal` | Agent claims and a checkout reference; never independent checkout proof |
+| `MandateProposal` | Agent-facing draft, including semantic flags/constraints; no ownership, status, confirmation, or signature fields |
+| `AgentPurchaseProposal`, `PaymentProposal` | Adi's `proposal` comparison claims plus checkout/run/mandate references; never independent checkout proof |
+| `CartProposal`, `Cart` | Earlier structured merchant/cart evidence and unchanged legacy hash helper; not the new payment input |
 | `CanonicalProduct`, `ProductListing`, `CheckoutSnapshot` | Separate canonical catalog, untrusted listing, and complete itemized checkout facts/source |
 | `CheckoutVerification` | Deterministic check results bound to user, purchase attempt, mandate version/hash, and checkout ID/hash |
 | `AuthorizationGrant`, `PreApproval` | Exact verified amount/currency, instrument, merchant binding, expiry, and grant identity/status |
 | `AuthorizationAttempt`, `PaymentDecision`, `AuthorizationDecision` | Normalized request and actual outcome, rail, reason, latency, and evidence references |
 | `AgentRun`, `AgentTraceEvent`, `ProvenanceEvent`, `SecurityIncident` | Execution and source evidence linked to authority and security decisions |
-| `Verdict` | Guardian recommendation; `model` is nullable when no model ran |
+| `Verdict` / alias `GuardianFindings` | Advisory `block`, `review`, or `no_findings`; checks/evidence and structured nullable model metadata; never approves |
+| `PaymentResponse` | Top-level `id` and `status`; grant approval and actual authorization remain separate |
 
 Amounts and quantities use strict integers, flags use strict booleans, MCCs are
 four-digit strings, and timestamps must be timezone-aware and normalize to UTC.
@@ -51,14 +54,22 @@ validation. Authority models are frozen and nested collections use tuples.
 Service code must validate at trust boundaries; `model_construct()` and
 `model_copy(update=...)` bypass Pydantic validation and must not admit external input.
 
-`PaymentProposal` requires `mandate_id`, `checkout_id`, and `run_id`; its optional
-`cart` contains `merchant`, `items`, `total_cents`, and optional USD `currency`.
-This adapts the earlier cart-only MCP request to the trusted-checkout requirement.
-The API supplies internal cart IDs/hashes; the agent does not author trusted facts.
+`PaymentProposal` requires `mandate_id` and `checkout_id`; input `run_id` is nullable
+to match MCP, but R04 must resolve an authenticated owned run context before issuing.
+Its optional
+`proposal` contains `merchant_name`, `items` (`name`, optional `sku`, `quantity`,
+`unit_cents`), and `total_cents`, matching Adi's serializer; merchant name is nullable.
+A contradictory proposed
+total is retained for comparison; the backend obtains and checks the actual total
+independently. The earlier Cart/CartProposal and four-field cart hash are retained
+for legacy evidence, never reconstructed by inventing trusted descriptor/MCC facts.
+The exact examples and remaining owner changes are in the
+[agent interface alignment handoff](agent-interface-handoff.md).
 
 `CheckoutSnapshot` requires explicit SKU, nullable category, quantity, unit price,
 subscription/recurring flags, subtotal/tax/shipping/total, revision, user/attempt,
-expiry, and source identity. Category `null` represents uncertainty; it must never
+expiry, source identity and session ID; billing interval is retained if supplied.
+Category `null` represents uncertainty; it must never
 pass the category check. Parsing `source.method="server_fetch"` does not authenticate
 a source. R03 must retrieve it through Cameron's configured protected interface.
 
@@ -114,6 +125,18 @@ R01 validates signature format only; the test signature is an explicitly synthet
 The existing event names remain, with checkout/grant/run/tool/incident lifecycle
 types added. Send typed records through their JSON representation or as nested
 models; callers allowlist data and summarize untrusted tool text before publishing.
+`parse_provenance()` accepts `agent.tool.before`, `agent.tool.after`, and
+`provenance.source` bodies. `agent_report_event()` requires authenticated user,
+agent, and registered run/mode context, preserves the original event ID and
+live/scripted label, redacts data,
+and marks claims as non-authoritative. It never promotes a reported policy result
+or trust label into a payment decision. Source snapshot metadata matches the pushed
+code; object references require configured bucket/run/hash validation. Inline snapshot
+bodies never enter the stream. Current guardian input/output and captured compatibility
+evidence are documented in the linked handoff; `review` and structured model metadata
+are supported. Canonical mandate names now match the actual guardian lookups
+(`max_quantity`, `allow_subscription`, `allow_recurring`); first-draft spellings remain
+input aliases, with only canonical names in signed/hash payloads.
 
 ```python
 event = AuditEvent(
@@ -145,8 +168,10 @@ directly. Trace/source records also require sanitization at their service bounda
 - **Cameron / C01-C04:** installable shared package/runtime, canonical merchant
   source and protected binding, pure authorization rules, atomic Valkey protocol.
 - **Aditya / A01-A06:** consume these exact models/hash helpers/event fields; add
-  checkout identity to tools; preserve nullable guardian model; build independent
-  fixtures, sanitized real traces, and the internal guardian adapter.
+  explicit mandate constraints, authenticated internal run/guardian routes, new
+  integrate his updated policy fixtures and trace/source envelopes. Payment, trace,
+  and guardian vocabulary follows his pushed code; inspect the exact handoff for
+  remaining owner actions.
 
 R01 tests prove contract validation/hashing/event behavior. They do not claim live
 Strands, merchant, Lithic, database, concurrent consumption, or end-to-end acceptance.

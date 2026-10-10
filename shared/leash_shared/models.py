@@ -13,11 +13,13 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
   AfterValidator,
+  AliasChoices,
   AwareDatetime,
   BaseModel,
   BeforeValidator,
   ConfigDict,
   Field,
+  JsonValue,
   StrictBool,
   StrictInt,
   StrictStr,
@@ -90,10 +92,10 @@ class MandateStatus(StrEnum):
   SUPERSEDED = "superseded"
 
 
-class GuardianDecision(StrEnum):
-  APPROVE = "approve"
-  NEEDS_USER = "needs_user"
-  DENY = "deny"
+class GuardianRecommendation(StrEnum):
+  BLOCK = "block"
+  REVIEW = "review"
+  NO_FINDINGS = "no_findings"
 
 
 class VerificationDecision(StrEnum):
@@ -176,6 +178,34 @@ class ShippingConstraints(Contract):
   max_shipping_cents: Cents | None = None
 
 
+class MandateProposal(Contract):
+  """Agent-facing draft input; ownership, confirmation and signing are server-only."""
+
+  description: Text
+  category: Text
+  max_cents: Cents
+  location: Text | None = None
+  valid_until: UtcDatetime | None = None
+  currency: Currency = "USD"
+  product_constraints: tuple[ProductConstraint, ...] = ()
+  max_quantity: Quantity = Field(default=1, validation_alias=AliasChoices("max_quantity", "maximum_quantity"))
+  maximum_purchases: Quantity = 1
+  allow_subscription: StrictBool = Field(default=False, validation_alias=AliasChoices("allow_subscription", "allow_subscriptions"))
+  allow_recurring: StrictBool = Field(default=False, validation_alias=AliasChoices("allow_recurring", "allow_recurring_payments"))
+  shipping_constraints: ShippingConstraints | None = None
+  merchant_allowlist: tuple[Text, ...] | None = None
+  valid_from: UtcDatetime | None = None
+
+  @model_validator(mode="after")
+  def validate_draft(self) -> Self:
+    if self.valid_from is not None and self.valid_until is not None and self.valid_from >= self.valid_until:
+      raise ValueError("draft validity must end after its start")
+    if self.merchant_allowlist is not None:
+      if not self.merchant_allowlist or len(set(self.merchant_allowlist)) != len(self.merchant_allowlist):
+        raise ValueError("merchant_allowlist must be nonempty and unique or null")
+    return self
+
+
 class PurchaseMandate(Contract):
   id: MandateId
   user_id: UserId
@@ -185,10 +215,10 @@ class PurchaseMandate(Contract):
   max_cents: Cents
   currency: Currency = "USD"
   product_constraints: tuple[ProductConstraint, ...] = ()
-  maximum_quantity: Quantity = 1
+  max_quantity: Quantity = Field(default=1, validation_alias=AliasChoices("max_quantity", "maximum_quantity"))
   maximum_purchases: Quantity = 1
-  allow_subscriptions: StrictBool = False
-  allow_recurring_payments: StrictBool = False
+  allow_subscription: StrictBool = Field(default=False, validation_alias=AliasChoices("allow_subscription", "allow_subscriptions"))
+  allow_recurring: StrictBool = Field(default=False, validation_alias=AliasChoices("allow_recurring", "allow_recurring_payments"))
   shipping_constraints: ShippingConstraints | None = None
   location: Text | None = None
   merchant_allowlist: tuple[Text, ...] | None = None
@@ -266,11 +296,26 @@ class Cart(CartProposal):
     return self
 
 
+class AgentProposalItem(Contract):
+  name: Text
+  sku: Text | None = None
+  quantity: Quantity
+  unit_cents: Cents
+
+
+class AgentPurchaseProposal(Contract):
+  """Shopper claims for comparison; contains no trusted merchant or product facts."""
+
+  merchant_name: Text | None = None
+  items: Annotated[tuple[AgentProposalItem, ...], Field(min_length=1)]
+  total_cents: Cents
+
+
 class PaymentProposal(Contract):
   mandate_id: MandateId
   checkout_id: Text
-  run_id: RunId
-  cart: CartProposal | None = None
+  run_id: RunId | None = None
+  proposal: AgentPurchaseProposal | None = None
 
 
 class CanonicalProduct(Contract):
@@ -282,6 +327,7 @@ class CanonicalProduct(Contract):
   currency: Currency = "USD"
   subscription: StrictBool
   recurring: StrictBool
+  billing_interval: Text | None = None
   attributes: tuple[ProductAttribute, ...] = ()
 
 
@@ -305,6 +351,7 @@ class CheckoutItem(Contract):
   unit_cents: Cents
   recurring: StrictBool
   subscription: StrictBool
+  billing_interval: Text | None = None
   attributes: tuple[ProductAttribute, ...] = ()
 
 
@@ -323,6 +370,7 @@ class CheckoutSnapshot(Contract):
   purchase_attempt_id: PaymentId
   user_id: UserId
   merchant_id: Text
+  session_id: Text
   merchant: Merchant
   items: Annotated[tuple[CheckoutItem, ...], Field(min_length=1)]
   currency: Currency = "USD"
@@ -398,14 +446,52 @@ class SuspiciousSource(Contract):
   excerpt: Text
 
 
+class GuardianCheck(Check):
+  severity: Literal["block", "review"]
+  evidence: tuple[Text, ...] = ()
+
+
+class GuardianSource(SuspiciousSource):
+  excerpt: StrictStr
+  phrases: tuple[Text, ...] = ()
+  event_id: Text | None = None
+
+
+class GuardianModelMetadata(Contract):
+  status: Literal["skipped", "ok", "unavailable", "invalid_output"]
+  error: Text | None = None
+  provider: Text | None = None
+  model_id: Text | None = None
+  cited_sources: tuple[Text, ...] = ()
+  intent_match: Literal["match", "mismatch", "unclear"] | None = None
+  violated_constraints: tuple[Text, ...] = ()
+
+
 class Verdict(Contract):
   """Guardian recommendation; not a verification record or payment decision."""
 
-  decision: GuardianDecision
-  reasons: tuple[Text, ...]
-  checks: tuple[Check, ...] = ()
-  suspicious_sources: tuple[SuspiciousSource, ...] = ()
-  model: Text | None = None
+  recommendation: GuardianRecommendation
+  authority: Literal["advisory"] = "advisory"
+  reasons: tuple[Text, ...] = ()
+  explanation: StrictStr | None = None
+  checks: tuple[GuardianCheck, ...] = ()
+  suspicious_sources: tuple[GuardianSource, ...] = ()
+  checkout_id: Text | None = None
+  model: GuardianModelMetadata | None = None
+
+
+# The existing Verdict name stays importable, with the non-authorizing wire schema.
+GuardianFindings = Verdict
+
+
+class GuardianEvaluationRequest(Contract):
+  mandate: PurchaseMandate
+  checkout: CheckoutSnapshot | None = None
+  proposal: AgentPurchaseProposal | None = Field(
+    default=None, validation_alias=AliasChoices("proposal", "cart")
+  )
+  provenance: tuple[dict[str, JsonValue], ...] = ()
+  trace: tuple[dict[str, JsonValue], ...] = ()
 
 
 class AuthorizationGrant(Contract):
@@ -492,6 +578,7 @@ class PaymentRequest(Contract):
   agent_id: AgentId
   run_id: RunId
   checkout_id: Text
+  proposal: AgentPurchaseProposal | None = None
   cart: Cart | None = None
   status: PaymentStatus = PaymentStatus.PENDING_GUARDIAN
   verdict: Verdict | None = None
@@ -500,6 +587,28 @@ class PaymentRequest(Contract):
   card_token: Text | None = None
   card_last4: Annotated[StrictStr, Field(pattern=r"^[0-9]{4}$")] | None = None
   created_at: UtcDatetime
+
+
+class PaymentResponse(Contract):
+  """Payment setup/status response. Approved means a grant, not a completed charge."""
+
+  id: PaymentId
+  status: Literal[
+    "approved", "pending_user", "blocked", "denied", "pending_guardian", "expired", "used"
+  ]
+  reasons: tuple[Text, ...] = ()
+  verification_id: Text | None = None
+  grant_id: Text | None = None
+  payment_result: PaymentOutcome | None = None
+
+  @model_validator(mode="after")
+  def validate_grant_references(self) -> Self:
+    if self.status in {"approved", "used"}:
+      if self.verification_id is None or self.grant_id is None:
+        raise ValueError("approved/used responses require verification and grant references")
+    if self.payment_result == PaymentOutcome.APPROVED and self.status not in {"approved", "used"}:
+      raise ValueError("an unapproved payment cannot claim successful authorization")
+    return self
 
 
 class AuthorizationAttempt(Contract):
@@ -562,6 +671,7 @@ class AgentRun(Contract):
   mandate_id: MandateId
   mandate_version: Version
   mandate_hash: Sha256
+  agent_mode: Literal["live", "scripted"]
   status: RunStatus = RunStatus.PENDING
   model: Text | None = None
   provider: Text | None = None
@@ -584,17 +694,20 @@ class AgentTraceEvent(Contract):
   run_id: RunId
   agent_id: AgentId
   user_id: UserId
+  agent_mode: Literal["live", "scripted"]
   timestamp: UtcDatetime
   phase: Literal["before_tool", "after_tool"]
   tool_name: Text
-  # A tuple of structured attributes keeps sensitive raw tool dictionaries out.
-  tool_arguments: tuple[ProductAttribute, ...] = ()
+  tool_use_id: Text
+  # Inputs are sanitized by the provenance adapter before storage.
+  tool_arguments: dict[str, JsonValue] = Field(default_factory=dict)
   source_reference: Text | None = None
   source_sha256: Sha256 | None = None
   tool_result_summary: Text | None = None
   trust_classification: TrustClassification
   proposed_action: Text | None = None
   policy_decision: Text | None = None
+  duration_ms: Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)] | None = None
 
 
 class ProvenanceEvent(Contract):

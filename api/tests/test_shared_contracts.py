@@ -22,6 +22,7 @@ from leash_shared.models import (  # noqa: E402
   REQUIRED_VERIFICATION_CHECKS,
   AgentRun,
   AgentTraceEvent,
+  AgentPurchaseProposal,
   AuthorizationAttempt,
   AuthorizationDecision,
   AuthorizationGrant,
@@ -31,9 +32,11 @@ from leash_shared.models import (  # noqa: E402
   CheckoutSnapshot,
   CheckoutVerification,
   Mandate,
+  MandateProposal,
   PaymentDecision,
   PaymentProposal,
   PaymentRequest,
+  PaymentResponse,
   PreApproval,
   ProductConstraint,
   ProductListing,
@@ -81,9 +84,10 @@ def checkout_data(**updates):
   return {
     "checkout_id": "checkout_demo", "revision": 1,
     "purchase_attempt_id": "pay_demo", "user_id": "usr_demo",
+    "session_id": "ses_demo_a",
     "merchant_id": "merchant_demo", "merchant": MERCHANT,
     "items": [{
-      "sku": "charger_usb_c", "product_name": "USB-C charger",
+      "sku": "CHG-65W", "product_name": "USB-C charger",
       "product_category": "charger", "quantity": 1, "unit_cents": 2999,
       "subscription": False, "recurring": False,
       "attributes": [{"name": "connector", "value": "USB-C"}],
@@ -188,8 +192,8 @@ class MoneyAndShapeTests(unittest.TestCase):
 
   def test_payment_proposal_requires_checkout_reference(self):
     with self.assertRaises(ValidationError):
-      PaymentProposal(mandate_id="mnd_demo", run_id="run_demo", cart=CartProposal(
-        merchant=MERCHANT, items=[ITEM], total_cents=2999,
+      PaymentProposal(mandate_id="mnd_demo", run_id="run_demo", proposal=AgentPurchaseProposal(
+        merchant_name="Demo Store", items=[ITEM], total_cents=2999,
       ))
 
   def test_constraint_operators_require_unambiguous_values(self):
@@ -274,7 +278,7 @@ class HashAndMandateTests(unittest.TestCase):
     charger = CheckoutSnapshot(**checkout_data())
     data = checkout_data()
     data["items"][0].update(
-      sku="premium_subscription", product_name="Premium subscription",
+      sku="SUB-CARE-MO", product_name="Premium subscription",
       product_category="subscription", subscription=True, recurring=True,
     )
     subscription = CheckoutSnapshot(**data)
@@ -316,7 +320,7 @@ class VerificationAndGrantTests(unittest.TestCase):
     self.assertEqual(blocked.decision, "BLOCKED")
 
   def test_guardian_recommendation_is_not_a_verification(self):
-    verdict = Verdict(decision="approve", reasons=["Looks relevant"])
+    verdict = Verdict(recommendation="no_findings", reasons=["No suspicious evidence found"])
     self.assertIsNone(verdict.model)
     with self.assertRaises(ValidationError):
       CheckoutVerification.model_validate(verdict.model_dump())
@@ -360,7 +364,8 @@ class VerificationAndGrantTests(unittest.TestCase):
 
   def test_all_public_domain_schemas_are_generated_and_closed(self):
     models = (
-      PurchaseMandate, Cart, CartProposal, PaymentProposal, CanonicalProduct,
+      PurchaseMandate, MandateProposal, Cart, CartProposal, AgentPurchaseProposal,
+      PaymentProposal, PaymentResponse, CanonicalProduct,
       ProductListing, CheckoutSnapshot, CheckoutVerification, Verdict,
       AuthorizationGrant, PreApproval, PaymentRequest, AuthorizationAttempt,
       PaymentDecision, AuthorizationDecision, AgentRun, AgentTraceEvent,
