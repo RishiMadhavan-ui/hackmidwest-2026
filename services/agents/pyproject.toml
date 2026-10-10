@@ -24,6 +24,11 @@ indent-width = 2
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.isort]
+known-first-party = ["leash_shared"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+# shared/ has no package metadata yet, so put it on the path for tests.
+# TODO: switch to a uv path dependency once shared/pyproject.toml exists.
+pythonpath = [".", "../../shared"]
