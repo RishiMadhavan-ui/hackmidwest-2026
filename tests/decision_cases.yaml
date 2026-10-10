@@ -157,7 +157,7 @@ fixtures:
     current_mandate_version: 1
 
   # Reproducible adversarial listings. HTML versions live in
-  # services/agents/tests/fixtures/listings/. The canonical catalog above never
+  # services/mcp/tests/fixtures/listings/. The canonical catalog above never
   # changes when a listing does.
   listings:
     clean_charger:
