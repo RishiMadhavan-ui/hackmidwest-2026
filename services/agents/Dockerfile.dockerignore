@@ -1,11 +1,13 @@
-# BuildKit reads this because it sits next to the Dockerfile; paths are
-# relative to the repo root build context.
+# BuildKit reads this because it sits next to the Dockerfile. The build context
+# is the repo root, so allowlist only what the image needs; nothing else (the
+# kubeconfig, .env files, other services) is even sent to the builder.
+*
+!services/agents/
+!shared/leash_shared/
 **/.venv
 **/__pycache__
 **/.pytest_cache
 **/.ruff_cache
 **/.env
 **/.env.*
-web/
-.git/
 **/trace-spool
