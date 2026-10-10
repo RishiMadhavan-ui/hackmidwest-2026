@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 from main import app
 
 API = "http://api.test"
+INSTRUCTION = "Buy a USB-C laptop charger for under $40. No subscriptions."
 TOKEN = "Bearer agent-token-123"
 MCP_HEADERS = {
   "accept": "application/json, text/event-stream",
@@ -15,13 +16,14 @@ MCP_HEADERS = {
   "authorization": TOKEN,
 }
 
-MERCHANT = {
-  "name": "Crossroads Hotel",
-  "descriptor": "CROSSROADS HOTEL KC",
-  "mcc": "7011",
-  "url": "http://store.test/hotels/crossroads",
+ITEMS = [{"name": "VoltPro 65W USB-C charger", "sku": "CHG-65W", "quantity": 1, "unit_cents": 2999}]
+PAYMENT_ARGS = {
+  "mandate_id": "mnd_1",
+  "checkout_id": "chk_1",
+  "items": ITEMS,
+  "total_cents": 2999,
+  "merchant_name": "Volt Supply Co.",
 }
-ITEMS = [{"name": "King room, Sat Oct 10", "quantity": 1, "unit_cents": 15800}]
 
 
 @pytest.fixture(autouse=True)
@@ -67,10 +69,13 @@ def test_tool_discovery(client):
   assert tools["propose_mandate"]["annotations"]["readOnlyHint"] is False
   assert tools["request_payment"]["annotations"]["readOnlyHint"] is False
   # Descriptions are what outside agents read, so the key rules must be in them.
-  assert "phone" in tools["propose_mandate"]["description"]
-  assert "18000" in tools["propose_mandate"]["description"]
-  for status in ("approved", "pending_user", "denied"):
+  assert "cannot confirm it yourself" in tools["propose_mandate"]["description"]
+  assert "3999" in tools["propose_mandate"]["description"]
+  for status in ("approved", "pending_user", "blocked"):
     assert status in tools["request_payment"]["description"]
+  # The agent's item list is evidence; the checkout id is what Leash verifies.
+  assert "checkout_id" in tools["request_payment"]["inputSchema"]["required"]
+  assert "fetches the" in tools["request_payment"]["description"]
 
 
 def test_no_tool_can_approve_or_toggle_killswitch(client):
@@ -81,19 +86,19 @@ def test_no_tool_can_approve_or_toggle_killswitch(client):
 
 def test_propose_mandate(client, api):
   route = api.post("/mandates/propose").respond(
-    201, json={"id": "mnd_1", "status": "proposed", "max_cents": 18000}
+    201, json={"id": "mnd_1", "status": "proposed", "max_cents": 3999}
   )
   out = call_tool(
     client,
     "propose_mandate",
-    {"description": "hotel in KC Saturday, max $180", "category": "lodging", "max_cents": 18000},
+    {"description": INSTRUCTION, "category": "laptop_charger", "max_cents": 3999},
   )
-  assert out == {"id": "mnd_1", "status": "proposed", "max_cents": 18000}
+  assert out == {"id": "mnd_1", "status": "proposed", "max_cents": 3999}
   sent = json.loads(route.calls.last.request.content)
   assert sent == {
-    "description": "hotel in KC Saturday, max $180",
-    "category": "lodging",
-    "max_cents": 18000,
+    "description": INSTRUCTION,
+    "category": "laptop_charger",
+    "max_cents": 3999,
     "location": None,
     "valid_until": None,
   }
@@ -105,7 +110,7 @@ def test_propose_mandate_rejects_float_cents(client, api):
     "tools/call",
     {
       "name": "propose_mandate",
-      "arguments": {"description": "hotel", "category": "lodging", "max_cents": 180.5},
+      "arguments": {"description": INSTRUCTION, "category": "laptop_charger", "max_cents": 39.99},
     },
   )
   assert res.json()["result"]["isError"] is True
@@ -124,24 +129,22 @@ def test_list_mandates(client, api):
 def test_request_payment(client, api):
   approved = {"id": "pay_1", "status": "approved", "card": {"last4": "4242"}}
   route = api.post("/payments").respond(201, json=approved)
-  out = call_tool(
-    client,
-    "request_payment",
-    {
-      "mandate_id": "mnd_1",
-      "merchant": MERCHANT,
-      "items": ITEMS,
-      "total_cents": 15800,
-      "run_id": "run_1",
-    },
-  )
+  out = call_tool(client, "request_payment", {**PAYMENT_ARGS, "run_id": "run_1"})
   assert out == approved
   sent = json.loads(route.calls.last.request.content)
   assert sent == {
     "mandate_id": "mnd_1",
-    "cart": {"merchant": MERCHANT, "items": ITEMS, "total_cents": 15800},
+    "checkout_id": "chk_1",
+    "proposal": {"merchant_name": "Volt Supply Co.", "items": ITEMS, "total_cents": 2999},
     "run_id": "run_1",
   }
+
+
+def test_request_payment_requires_checkout_id(client, api):
+  args = {k: v for k, v in PAYMENT_ARGS.items() if k != "checkout_id"}
+  res = rpc(client, "tools/call", {"name": "request_payment", "arguments": args})
+  assert res.json()["result"]["isError"] is True
+  assert not api.calls
 
 
 def test_check_status(client, api):
@@ -153,11 +156,7 @@ def test_check_status(client, api):
 
 def test_api_error_becomes_plain_result(client, api):
   api.post("/payments").respond(409, json={"detail": "Mandate is not active"})
-  out = call_tool(
-    client,
-    "request_payment",
-    {"mandate_id": "mnd_1", "merchant": MERCHANT, "items": ITEMS, "total_cents": 15800},
-  )
+  out = call_tool(client, "request_payment", PAYMENT_ARGS)
   assert out == {"status": "error", "http_status": 409, "reason": "Mandate is not active"}
 
 

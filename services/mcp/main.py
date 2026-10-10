@@ -22,18 +22,21 @@ from starlette.responses import JSONResponse
 # BearerAuthMiddleware, read by every tool.
 bearer_header: contextvars.ContextVar[str] = contextvars.ContextVar("bearer_header")
 
-# POST /payments waits up to 20 s on the guardian, so give the api headroom.
+# POST /payments fetches and verifies the checkout with the merchant before it
+# answers, so give the api headroom.
 API_TIMEOUT_SECONDS = 30.0
 
 INSTRUCTIONS = """\
 Leash is a payment firewall. You never get the user's real card. To spend money:
 1. Call list_mandates to find an active mandate that covers the purchase. If none
-   fits, call propose_mandate and tell the user to approve it on their phone.
-   You cannot approve it yourself.
-2. Call request_payment with the exact cart. If approved, you get a single-use
-   card locked to that merchant and amount, shown once. If it needs the user,
-   poll check_status. If denied, read the reasons and stop.
-All money is integer cents: $180.00 is 18000.
+   fits, call propose_mandate and tell the user to confirm it. You cannot
+   confirm it yourself.
+2. Start a checkout at the merchant and get its checkout_id.
+3. Call request_payment with that checkout_id. Leash fetches the real checkout
+   from the merchant and checks it against what the user confirmed. If it
+   passes, you get payment credentials for that exact checkout only.
+   If it needs the user, poll check_status. If blocked, read the reasons and stop.
+All money is integer cents: $29.99 is 2999.
 """
 
 # mcp 2.x renamed FastMCP to MCPServer and moved stateless_http/json_response
@@ -41,20 +44,14 @@ All money is integer cents: $180.00 is 18000.
 mcp = MCPServer("Leash", instructions=INSTRUCTIONS)
 
 
-# TODO: switch to leash_shared.models.Merchant and CartItem once models.py lands.
-class Merchant(BaseModel):
-  name: str = Field(description="Merchant name as shown on the site, e.g. 'Crossroads Hotel'")
-  descriptor: str = Field(
-    description="Name that appears on the card network, e.g. 'CROSSROADS HOTEL KC'"
-  )
-  mcc: str = Field(description="4-digit merchant category code as a string, e.g. '7011'")
-  url: str = Field(description="URL of the page where you're checking out")
-
-
-class CartItem(BaseModel):
-  name: str = Field(description="Item name exactly as the merchant lists it")
+# TODO: switch to the agreed proposal-cart model in leash_shared.models (R01).
+# This is the agent's own description of the purchase. Leash treats it as
+# evidence to compare against the merchant's checkout, never as proof.
+class ProposedItem(BaseModel):
+  name: str = Field(description="Item name as you understand it, e.g. 'VoltPro 65W USB-C charger'")
+  sku: str | None = Field(default=None, description="The store's SKU, if you know it")
   quantity: int = Field(ge=1)
-  unit_cents: int = Field(ge=0, description="Price per unit in integer cents. $158.00 is 15800.")
+  unit_cents: int = Field(ge=0, description="Price per unit in integer cents. $29.99 is 2999.")
 
 
 def _api_url() -> str:
@@ -108,15 +105,15 @@ async def propose_mandate(
 ) -> dict[str, Any]:
   """Ask the user for permission to spend money on one kind of purchase.
 
-  This only proposes. The mandate stays "proposed" until a human approves it on
-  their phone, and you cannot approve it yourself. Tell the user to check their
-  phone, then call list_mandates until it shows as active.
+  This only proposes. The mandate grants nothing until the user reviews and
+  confirms it in Leash, and you cannot confirm it yourself. Tell the user to
+  check Leash, then call list_mandates until it shows as active.
 
   Args:
-    description: The user's request in plain words, e.g. "hotel in Kansas City
-      on Saturday, max $180".
-    category: Purchase category, e.g. "lodging".
-    max_cents: Spending cap in integer cents. $180.00 is 18000. Never a float.
+    description: The user's request word for word, e.g. "Buy a USB-C laptop
+      charger for under $40. No subscriptions."
+    category: Product category, e.g. "laptop_charger".
+    max_cents: Spending cap in integer cents. "Under $40" is 3999. Never a float.
     location: Optional place the purchase is for, e.g. "Kansas City, MO".
     valid_until: Optional ISO 8601 UTC expiry, e.g. "2026-10-11T23:59:00Z".
 
@@ -142,9 +139,9 @@ async def propose_mandate(
 async def list_mandates() -> dict[str, Any]:
   """List the mandates the user has approved and that are active right now.
 
-  Each mandate says what you may buy (category, location, merchant allowlist),
-  the most you may spend (max_cents, integer cents: 18000 is $180.00), and when
-  it expires. Pick the mandate that matches the purchase before calling
+  Each mandate says what you may buy (category and other constraints, like no
+  subscriptions), the most you may spend (max_cents, integer cents: 3999 is
+  $39.99), and when it expires. Pick the mandate that matches the purchase before calling
   request_payment. Read-only.
 
   Returns {"items": [mandate, ...]}.
@@ -154,7 +151,7 @@ async def list_mandates() -> dict[str, Any]:
 
 @mcp.tool(
   annotations=ToolAnnotations(
-    title="Request a single-use card for a cart",
+    title="Request payment for a merchant checkout",
     read_only_hint=False,
     destructive_hint=False,
     idempotent_hint=False,
@@ -163,36 +160,40 @@ async def list_mandates() -> dict[str, Any]:
 )
 async def request_payment(
   mandate_id: str,
-  merchant: Merchant,
-  items: list[CartItem],
+  checkout_id: str,
+  items: list[ProposedItem],
   total_cents: int,
+  merchant_name: str | None = None,
   run_id: str | None = None,
 ) -> dict[str, Any]:
-  """Ask Leash to pay for an exact cart under an active mandate.
+  """Ask Leash to pay for a checkout you started at the merchant.
 
-  Leash checks the cart against the mandate and the pages you read. The result
-  has one of three statuses:
-  - "approved": includes a single-use virtual card (number, expiry, CVV) locked
-    to this merchant and at most total_cents. It is shown only once, so use it
-    right away at this merchant's checkout. It will be declined anywhere else.
-  - "pending_user": the user has to approve it on their phone. Poll
-    check_status with the payment id. The card appears there once, after they
-    approve.
-  - "denied": includes plain-English reasons. Do not retry the same cart.
+  Leash does not take your word for what's in the checkout. It fetches the
+  checkout from the merchant using checkout_id and checks the real items,
+  total, currency, and any subscription or recurring charge against what the
+  user confirmed. Your items and total are compared against it as evidence.
+
+  The result says one of:
+  - approved: payment credentials that work only for this exact checkout,
+    shown once. Use them right away to complete this checkout.
+  - pending_user: the user has to review it. Poll check_status with the id.
+  - blocked or denied: includes plain-English reasons. Do not retry the same
+    checkout.
 
   Args:
     mandate_id: The id of the active mandate that covers this purchase.
-    merchant: Who you're paying: name, card-network descriptor, MCC, checkout URL.
-    items: Every line item, with unit prices in integer cents.
-    total_cents: The final total in integer cents, including taxes and fees.
-      $165.00 is 16500.
-    run_id: Optional id of your current agent run, so Leash can see which pages
-      you read.
+    checkout_id: The merchant's checkout id from starting the checkout.
+    items: What you believe you are buying, with unit prices in integer cents.
+    total_cents: The total you expect to pay in integer cents. $29.99 is 2999.
+    merchant_name: The store's name, e.g. "Volt Supply Co.".
+    run_id: Optional id of your current agent run, so Leash can see which
+      pages you read.
   """
   body = {
     "mandate_id": mandate_id,
-    "cart": {
-      "merchant": merchant.model_dump(),
+    "checkout_id": checkout_id,
+    "proposal": {
+      "merchant_name": merchant_name,
       "items": [item.model_dump() for item in items],
       "total_cents": total_cents,
     },
@@ -211,10 +212,9 @@ async def request_payment(
 async def check_status(payment_id: str) -> dict[str, Any]:
   """Check a payment request you made with request_payment.
 
-  Use this to poll a "pending_user" payment. When the user approves, the result
-  includes the single-use card details once; later calls show only the last four
-  digits. Status is one of pending_guardian, pending_user, approved, denied,
-  expired, or used. Read-only.
+  Use this to poll a "pending_user" payment. If the user approves, the result
+  includes the payment credentials once; later calls show only the last four
+  digits of any card. Read-only.
 
   Args:
     payment_id: The payment id from request_payment, e.g. "pay_...".
