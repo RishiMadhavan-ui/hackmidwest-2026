@@ -1,8 +1,9 @@
 """Where trace and provenance events go.
 
 Events are redacted once more right before they leave, so a sink can never be
-the place a card number slips through. Sending is best effort: a failed post
-is logged and the agent run keeps going.
+the place a card number slips through. Delivery to the api goes through a
+durable outbox (provenance/outbox.py), so an api outage or a restart delays
+traces instead of losing them, and it never stops the agent run.
 """
 
 import json
@@ -10,15 +11,10 @@ import logging
 import os
 from typing import Any, Protocol
 
-import httpx
-
+from provenance.outbox import shared_outbox
 from provenance.redact import redact
 
 log = logging.getLogger("leash.provenance")
-
-# TODO: confirm the intake route with Rishi (R06). Spec 23.6 lists
-# POST /provenance for sanitized agent trace claims.
-INTAKE_PATH = "/provenance"
 
 
 class Sink(Protocol):
@@ -40,31 +36,13 @@ class LogSink:
     log.info("trace %s", json.dumps(redact(event), default=str))
 
 
-class HttpSink:
-  """Posts each event to the api with the agent's own bearer token."""
-
-  def __init__(self, api_url: str, token: str, timeout: float = 3.0) -> None:
-    self.url = api_url.rstrip("/") + INTAKE_PATH
-    self.headers = {"Authorization": f"Bearer {token}"}
-    self.timeout = timeout
-
-  def emit(self, event: dict[str, Any]) -> None:
-    try:
-      res = httpx.post(self.url, json=redact(event), headers=self.headers, timeout=self.timeout)
-      if res.is_error:
-        log.warning("provenance intake returned HTTP %s for %s", res.status_code, event.get("type"))
-    except httpx.HTTPError as exc:
-      # Never let observability failures crash the agent run.
-      log.warning(
-        "provenance intake unreachable (%s) for %s", type(exc).__name__, event.get("type")
-      )
+def api_configured() -> bool:
+  return bool(os.environ.get("API_URL") and os.environ.get("AGENT_TOKEN_SHOPPER"))
 
 
 def default_sinks() -> list[Sink]:
-  api_url = os.environ.get("API_URL")
-  token = os.environ.get("AGENT_TOKEN_SHOPPER")
-  if api_url and token:
-    return [HttpSink(api_url, token)]
+  if api_configured():
+    return [shared_outbox(os.environ["API_URL"], os.environ["AGENT_TOKEN_SHOPPER"])]
   return [LogSink()]
 
 
