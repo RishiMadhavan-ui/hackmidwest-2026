@@ -37,7 +37,7 @@ The same thing from the CLI: `--scripted-sku SUB-CARE-MO --claim-sku CHG-65W`.
 | `AGENT_TOKEN_SHOPPER` | Shopper's bearer for MCP and trace intake |
 | `API_URL` | Trace intake (`POST /provenance`); without it, traces only go to logs |
 | `STORE_URL` | Store checkout API (default `http://localhost:8004`) |
-| `OBJ_ENDPOINT`, `OBJ_BUCKET`, `OBJ_ACCESS_KEY`, `OBJ_SECRET_KEY` | Page snapshots; placeholder names until the workshop names are confirmed |
+| `OBJ_ENDPOINT`, `OBJ_BUCKET`, `OBJ_ACCESS_KEY`, `OBJ_SECRET_KEY` | Page snapshots (same names as the Akamai workshop starter) |
 
 ## Test
 

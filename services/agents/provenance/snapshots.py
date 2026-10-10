@@ -11,8 +11,9 @@ from typing import Any
 
 log = logging.getLogger("leash.provenance")
 
-# TODO: replace with the exact OBJ_* names from the Akamai workshop starter
-# once Cameron confirms them (spec section 24, item 4).
+# Same names and boto3 setup as the Akamai workshop starter
+# (akamai-developers/akamai-workshop-hackmidwest, .env.example and
+# docs/01_knowledge.md). OBJ_KEY_ID there is for cleanup only, so it's unused.
 ENV_ENDPOINT = "OBJ_ENDPOINT"
 ENV_BUCKET = "OBJ_BUCKET"
 ENV_ACCESS_KEY = "OBJ_ACCESS_KEY"
