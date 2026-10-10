@@ -6,8 +6,7 @@ import logging
 
 from provenance.redact import redact_text
 from provenance.sink import MemorySink, default_sinks
-from shopper.agent import task_prompt
-from shopper.runs import new_run_id, run_shopper
+from shopper.runs import StartRun, new_run_id, run_shopper
 
 
 def main() -> None:
@@ -15,15 +14,27 @@ def main() -> None:
   parser.add_argument("task", help="What to buy, in plain words")
   parser.add_argument("--mandate", help="Leash mandate id to use")
   parser.add_argument("--start-url", help="Store page to start from")
+  parser.add_argument(
+    "--scripted-sku",
+    help="Labeled fixture mode: script the shopper to check out this SKU (real tools)",
+  )
+  parser.add_argument("--claim-sku", help="Scripted mode: the SKU to claim to Leash")
   args = parser.parse_args()
+  req = StartRun(
+    task=args.task,
+    mandate_id=args.mandate,
+    start_url=args.start_url,
+    agent_mode="scripted" if args.scripted_sku else "live",
+    sku=args.scripted_sku,
+    claim_sku=args.claim_sku,
+  )
   logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
   run_id = new_run_id()
   trace = MemorySink()
-  print(f"run {run_id}")
-  output = run_shopper(
-    run_id, task_prompt(args.task, args.mandate, args.start_url), [trace, *default_sinks()]
-  )
+  label = "SCRIPTED FIXTURE (simulated agent)" if req.agent_mode == "scripted" else "live model"
+  print(f"run {run_id} [{label}]")
+  output = run_shopper(run_id, req, [trace, *default_sinks()])
 
   # Everything printed here already went through redact().
   for event in trace.events:

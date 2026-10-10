@@ -98,8 +98,12 @@ class ProvenanceHooks(HookProvider):
     agent_id: str,
     sinks: list[Sink],
     upload: Callable[[str, str, str], dict[str, Any]] = upload_snapshot,
+    agent_mode: str = "live",
   ) -> None:
     self.run_id = run_id
+    # "live" or "scripted". Rides on every event so a scripted fixture run can
+    # never be shown as a live model's behavior.
+    self.agent_mode = agent_mode
     self.agent_id = agent_id
     self.sinks = sinks
     self.upload = upload
@@ -117,6 +121,7 @@ class ProvenanceHooks(HookProvider):
       "type": event_type,
       "run_id": self.run_id,
       "agent_id": self.agent_id,
+      "agent_mode": self.agent_mode,
       "timestamp": _now(),
       "tool_name": name,
       "tool_use_id": tool_use["toolUseId"],
@@ -173,6 +178,7 @@ class ProvenanceHooks(HookProvider):
         "type": "provenance.source",
         "run_id": self.run_id,
         "agent_id": self.agent_id,
+        "agent_mode": self.agent_mode,
         "timestamp": _now(),
         "tool_use_id": tool_use["toolUseId"],
         "url": fetch["url"],

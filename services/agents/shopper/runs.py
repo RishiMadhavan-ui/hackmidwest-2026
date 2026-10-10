@@ -12,14 +12,15 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from provenance.redact import redact, redact_text
 from provenance.sink import MemorySink, Sink, default_sinks
 from shopper.agent import build_agent, task_prompt
+from shopper.scripted import ScriptedShopper
 
 log = logging.getLogger("leash.shopper")
 
@@ -32,8 +33,32 @@ def new_run_id() -> str:
   return f"run_{uuid.uuid4().hex}"
 
 
-def run_shopper(run_id: str, prompt: str, sinks: list[Sink]) -> str:
-  """Run the real shopper with the Leash tools loaded from the MCP server."""
+class StartRun(BaseModel):
+  task: str
+  mandate_id: str | None = None
+  start_url: str | None = None
+  # "live" runs the real model. "scripted" is a labeled fixture: the shopper's
+  # choices are scripted, but every tool call is real.
+  agent_mode: Literal["live", "scripted"] = "live"
+  # Scripted mode only: the SKU to check out and the SKU to claim to Leash.
+  sku: str | None = None
+  claim_sku: str | None = None
+
+  @model_validator(mode="after")
+  def _scripted_needs_target(self):
+    if self.agent_mode == "scripted" and not (self.sku and self.mandate_id):
+      raise ValueError("scripted runs need sku and mandate_id")
+    return self
+
+
+def make_model_for(req: StartRun):
+  if req.agent_mode == "scripted":
+    return ScriptedShopper(req.sku, req.mandate_id, req.start_url, req.claim_sku)
+  return None  # build_agent falls back to make_model("shopper")
+
+
+def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
+  """Run the shopper with the Leash tools loaded from the MCP server."""
   from strands.tools.mcp import MCPClient
 
   mcp_url = os.environ.get("MCP_URL", "http://localhost:8002/mcp")
@@ -43,12 +68,18 @@ def run_shopper(run_id: str, prompt: str, sinks: list[Sink]) -> str:
 
   client = MCPClient(url=mcp_url, headers={"Authorization": f"Bearer {token}"})
   with client:
-    agent = build_agent(run_id, sinks, client.list_tools_sync())
-    result = agent(prompt)
+    agent = build_agent(
+      run_id,
+      sinks,
+      client.list_tools_sync(),
+      model=make_model_for(req),
+      agent_mode=req.agent_mode,
+    )
+    result = agent(task_prompt(req.task, req.mandate_id, req.start_url))
   return str(result)
 
 
-Runner = Callable[[str, str, list[Sink]], str]
+Runner = Callable[[str, StartRun, list[Sink]], str]
 
 
 class RunManager:
@@ -59,15 +90,21 @@ class RunManager:
     self._lock = threading.Lock()
     self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="shopper")
 
-  def start(self, task: str, mandate_id: str | None, start_url: str | None) -> dict[str, Any]:
+  def start(self, req: StartRun) -> dict[str, Any]:
     run_id = new_run_id()
     trace = MemorySink()
     record = {
       "id": run_id,
       "status": "queued",
-      "task": task,
-      "mandate_id": mandate_id,
-      "start_url": start_url,
+      "task": req.task,
+      "mandate_id": req.mandate_id,
+      "start_url": req.start_url,
+      "agent_mode": req.agent_mode,
+      "agent_label": (
+        "Simulated compromised agent (scripted fixture)"
+        if req.agent_mode == "scripted"
+        else "Live Strands shopper"
+      ),
       "created_at": _now(),
       "finished_at": None,
       "output": None,
@@ -76,15 +113,14 @@ class RunManager:
     with self._lock:
       self.runs[run_id] = record
       self._traces[run_id] = trace
-    prompt = task_prompt(task, mandate_id, start_url)
-    self._pool.submit(self._execute, run_id, prompt, [trace, *default_sinks()])
+    self._pool.submit(self._execute, run_id, req, [trace, *default_sinks()])
     return dict(record)
 
-  def _execute(self, run_id: str, prompt: str, sinks: list[Sink]) -> None:
+  def _execute(self, run_id: str, req: StartRun, sinks: list[Sink]) -> None:
     record = self.runs[run_id]
     record["status"] = "running"
     try:
-      output = self.runner(run_id, prompt, sinks)
+      output = self.runner(run_id, req, sinks)
       # The model has seen card details, so its final words are redacted too.
       record["output"] = redact_text(output)
       record["status"] = "completed"
@@ -102,20 +138,14 @@ class RunManager:
     return redact({**record, "events": list(self._traces[run_id].events)})
 
 
-class StartRun(BaseModel):
-  task: str
-  mandate_id: str | None = None
-  start_url: str | None = None
-
-
 router = APIRouter()
 manager = RunManager()
 
 
 @router.post("/runs", status_code=202)
 def start_run(body: StartRun) -> dict[str, Any]:
-  record = manager.start(body.task, body.mandate_id, body.start_url)
-  return {"run_id": record["id"], "status": record["status"]}
+  record = manager.start(body)
+  return {"run_id": record["id"], "status": record["status"], "agent_mode": body.agent_mode}
 
 
 @router.get("/runs/{run_id}")

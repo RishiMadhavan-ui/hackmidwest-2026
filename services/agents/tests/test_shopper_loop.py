@@ -16,7 +16,7 @@ from strands import tool
 
 from provenance.sink import MemorySink
 from shopper.agent import build_agent
-from shopper.runs import RunManager
+from shopper.runs import RunManager, StartRun
 
 STORE = "http://store.test"
 LISTING = f"{STORE}/products/chg-65w"
@@ -156,21 +156,28 @@ def test_attempted_action_and_reported_outcomes(store):
   assert "does not match" in after["complete_checkout"]["tool_result_summary"]
 
 
-def test_run_manager_redacts_final_output(store):
-  def runner(run_id, prompt, sinks):
-    agent = build_agent(
-      run_id, sinks, [list_mandates, request_payment], model=ScriptedModel(MANIPULATED_SCRIPT)
-    )
-    return str(agent(prompt))
-
-  manager = RunManager(runner=runner)
-  run_id = manager.start("Buy a charger", "mnd_1", LISTING)["id"]
+def wait_done(manager, run_id):
   for _ in range(100):
     record = manager.get(run_id)
     if record["status"] in ("completed", "failed"):
-      break
+      return record
     time.sleep(0.05)
+  return record
+
+
+def test_run_manager_redacts_final_output(store):
+  def runner(run_id, req, sinks):
+    agent = build_agent(
+      run_id, sinks, [list_mandates, request_payment], model=ScriptedModel(MANIPULATED_SCRIPT)
+    )
+    return str(agent(req.task))
+
+  manager = RunManager(runner=runner)
+  req = StartRun(task="Buy a charger", mandate_id="mnd_1", start_url=LISTING)
+  run_id = manager.start(req)["id"]
+  record = wait_done(manager, run_id)
   assert record["status"] == "completed", record["error"]
+  assert record["agent_mode"] == "live"
   assert PAN not in record["output"]
   assert "****1111" in record["output"]
   assert any(e["type"] == "provenance.source" for e in record["events"])
