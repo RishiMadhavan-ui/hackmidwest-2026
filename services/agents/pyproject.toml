@@ -1,0 +1,10 @@
+[project]
+name = "agents"
+version = "0.1.0"
+description = "LEASH Strands agents service (shopper / guardian)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.143.0",
+    "strands-agents[openai]>=1.59.0",
+]
