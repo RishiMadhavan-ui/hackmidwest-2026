@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Read this whole file before changing anything. The authoritative product direction and detailed implementation requirements are in [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md). It supersedes conflicting hotel/gift-card flows and fallbacks in `Leash-build-plan.md`. Preserve compatible work; inspect files before treating a proposed component as implemented.
+Read this whole file before changing anything. [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md) defines product/security requirements; this file defines coding rules and path ownership; [Leash-build-plan.md](Leash-build-plan.md) defines each human's and coding agent's tasks, dependencies, handoffs, and completion gates. Keep all three synchronized in any direction/ownership change. Preserve compatible work; inspect files before treating a proposed component as implemented.
 
 ## What LEASH is
 
@@ -47,6 +47,66 @@ human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
 | Merchant / payment rail | `services/store/`, `services/webhook/` planned | Cameron | Canonical catalog and checkout API, simulator, Lithic ASA, atomic enforcement |
 | Database / Valkey / deployment | `db/`, `infra/`, Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
 
+## Repository tree
+
+`[E]` exists in the inspected checkout; `[P]` is a planned implementation path. This is the working map for all three lanes, not a claim that planned services already run. Keep the existing backend in `api/`; `services/api/` remains a reserved legacy alternative rather than a required duplicate.
+
+```text
+hackmidwest-2026/
+  AGENTS.md                          [E] shared coding rules/ownership
+  Leash-build-plan.md                 [E] shared team execution plan
+  README.md                          [P] shared setup/product guide
+  docker-compose.yml                 [P] Cameron: integrated local runtime
+  .env.example                       [P] Cameron: configuration names only
+  pyproject.toml                     [P] Cameron: workspace/ruff configuration
+  .github/                           [P] Cameron: CI/build/deployment
+  infra/                             [P] Cameron: Akamai deployment
+    k8s/                             [P] service manifests if using LKE
+  api/                               [E] Rishi: current FastAPI backend
+    main.py                          [E] currently GET /health only
+    pyproject.toml                   [E] backend dependencies
+    tests/                           [P] Rishi: API/verifier/persistence tests
+    Dockerfile                       [P] Rishi: backend image
+  db/migrations/                     [P] Rishi: durable domain/audit schema
+  shared/
+    pyproject.toml                   [P] Cameron: shared package installability
+    leash_shared/
+      __init__.py                    [P] Cameron: package marker
+      models.py                      [P] Rishi: jointly agreed frozen contracts
+      events.py                      [P] Rishi: frozen events/publish helper
+      lithic.py                      [P] Cameron: official sandbox client wrapper
+      llm.py                         [P] Aditya: centralized model factory
+  services/
+    agents/                          [P] Aditya: FastAPI agent service
+      shopper/                       [P] real, intentionally gullible Strands agent
+      guardian/                      [P] evidence-linked investigation
+      provenance/                    [P] sanitized hooks/source snapshots
+      attacker/                      [P] optional; outside required MVP scope
+      tests/                         [P] agent/hook/tool tests
+    mcp/                             [P] Aditya: authenticated thin adapter
+    webhook/                         [P] Cameron: rail responders/atomic state
+      decide.py                      [P] pure domain payment policy
+      tests/                         [P] handler/concurrency/signature tests
+    store/                           [P] Cameron: controlled merchant
+      tests/                         [P] catalog/checkout/correlation tests
+  web/                               [E] Rishi: Next.js/Tailwind/shadcn starter
+    src/app/                         [E] starter; product views still planned
+    src/components/ui/               [E] reusable UI primitives
+    src/lib/api.ts                   [E] health fetch helper
+    src/lib/api-types.ts             [P] generated from agreed OpenAPI
+  tests/
+    decision_cases.yaml              [P] Aditya: independent policy fixtures
+    test_decision_cases.py            [P] Cameron: policy fixture runner
+    e2e/                             [P] Aditya: all six acceptance scenarios
+  docs/
+    LEASH_SPEC.md                    [E] shared detailed specification
+    demo-script.md                   [P] Aditya: live rehearsal/reset instructions
+```
+
+Each new service keeps its own Dockerfile and tests in its owner's directory. The build plan names the exact owner, prerequisites, and evidence for every planned deliverable.
+
+## Runtime boundaries
+
 Do not move `api/` solely to match the old plan. Preserve independently runnable frontend/backend. PostgreSQL and API-only durable writes remain the preferred design; SQLite is an explicit local development option, not a silent production change. The ASA handler never calls an LLM, SQL database, merchant API, or network service other than Valkey. Verification and investigation happen outside its critical path. Target under 100 ms; [Lithic documents a six-second deadline and recommends under three seconds](https://docs.lithic.com/docs/auth-stream-access-asa). Use current provider schemas and configured HMAC verification; authentication failures are not ordinary policy declines.
 
 The controlled merchant's catalog/checkout interface is trusted and separate from attacker-editable listings. Server-side retrieval uses a configured merchant connection, not an agent-selected URL or browser cart as proof. A dedicated payment instrument alone cannot distinguish two same-merchant/same-amount SKUs: the controlled merchant must bind that instrument/grant to the exact verified checkout and enforce the association when charging.
@@ -62,18 +122,19 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 | `infra/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
 | `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
+| `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
 | `services/agents/`, `services/mcp/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
-| `AGENTS.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
+| `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
 
 If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The present documentation update authorizes only the shared direction files. Do not implement new services as part of documentation alignment.
 
 **Contracts:** the formerly described `models.py` and `events.py` do not exist yet. Agree schemas together before implementing them; once frozen, changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec maps old field names to new concepts; do not independently redefine schemas in each service.
 
-Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow `web/AGENTS.md` and read the installed Next.js guides before changing web code.
+Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
 ## Engineering requirements
 
