@@ -8,13 +8,13 @@ a limit, or touch the kill switch; those routes need a human's token.
 
 import contextvars
 import os
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -44,14 +44,30 @@ All money is integer cents: $29.99 is 2999.
 mcp = MCPServer("Leash", instructions=INSTRUCTIONS)
 
 
+# Money and counts are strict integers, matching leash_shared.models: lax
+# pydantic ints would quietly turn 40.0 into 40 and true into 1.
+# TODO: import Cents/Quantity/ProductConstraint from leash_shared.models once
+# R01 is frozen and the shared package is installable (C01).
+Cents = Annotated[StrictInt, Field(ge=0)]
+Quantity = Annotated[StrictInt, Field(ge=1)]
+
+
+class ProductConstraint(BaseModel):
+  name: str = Field(description='Product attribute, e.g. "connector"')
+  operator: Literal["equals", "contains", "minimum", "maximum"] = "equals"
+  value: StrictStr | StrictInt | StrictBool = Field(
+    description='Required value, e.g. "USB-C". minimum/maximum take integers.'
+  )
+
+
 # TODO: switch to the agreed proposal-cart model in leash_shared.models (R01).
 # This is the agent's own description of the purchase. Leash treats it as
 # evidence to compare against the merchant's checkout, never as proof.
 class ProposedItem(BaseModel):
   name: str = Field(description="Item name as you understand it, e.g. 'VoltPro 65W USB-C charger'")
   sku: str | None = Field(default=None, description="The store's SKU, if you know it")
-  quantity: int = Field(ge=1)
-  unit_cents: int = Field(ge=0, description="Price per unit in integer cents. $29.99 is 2999.")
+  quantity: Quantity
+  unit_cents: Cents = Field(description="Price per unit in integer cents. $29.99 is 2999.")
 
 
 def _api_url() -> str:
@@ -99,15 +115,24 @@ async def _call_api(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
 async def propose_mandate(
   description: str,
   category: str,
-  max_cents: int,
+  max_cents: Cents,
   location: str | None = None,
   valid_until: str | None = None,
+  product_constraints: list[ProductConstraint] | None = None,
+  max_quantity: Quantity = 1,
+  maximum_purchases: Quantity = 1,
+  allow_subscription: StrictBool = False,
+  allow_recurring: StrictBool = False,
 ) -> dict[str, Any]:
   """Ask the user for permission to spend money on one kind of purchase.
 
   This only proposes. The mandate grants nothing until the user reviews and
   confirms it in Leash, and you cannot confirm it yourself. Tell the user to
   check Leash, then call list_mandates until it shows as active.
+
+  Capture every requirement the user stated and never loosen one. The defaults
+  are the strict reading: one unit, one purchase, no subscriptions, no
+  recurring charges. Leash shows all of it to the user before they confirm.
 
   Args:
     description: The user's request word for word, e.g. "Buy a USB-C laptop
@@ -116,6 +141,12 @@ async def propose_mandate(
     max_cents: Spending cap in integer cents. "Under $40" is 3999. Never a float.
     location: Optional place the purchase is for, e.g. "Kansas City, MO".
     valid_until: Optional ISO 8601 UTC expiry, e.g. "2026-10-11T23:59:00Z".
+    product_constraints: Specific product requirements, e.g.
+      [{"name": "connector", "operator": "equals", "value": "USB-C"}].
+    max_quantity: Most units allowed in one purchase. Default 1.
+    maximum_purchases: Most separate purchases allowed. "Buy a charger" is 1.
+    allow_subscription: Only true if the user asked for a subscription.
+    allow_recurring: Only true if the user accepted recurring charges.
 
   Returns the proposed mandate, including its id and status "proposed".
   """
@@ -125,6 +156,11 @@ async def propose_mandate(
     "max_cents": max_cents,
     "location": location,
     "valid_until": valid_until,
+    "product_constraints": [c.model_dump() for c in product_constraints or []],
+    "max_quantity": max_quantity,
+    "maximum_purchases": maximum_purchases,
+    "allow_subscription": allow_subscription,
+    "allow_recurring": allow_recurring,
   }
   return await _call_api("POST", "/mandates/propose", json=body)
 
@@ -162,7 +198,7 @@ async def request_payment(
   mandate_id: str,
   checkout_id: str,
   items: list[ProposedItem],
-  total_cents: int,
+  total_cents: Cents,
   merchant_name: str | None = None,
   run_id: str | None = None,
 ) -> dict[str, Any]:

@@ -95,13 +95,71 @@ def test_propose_mandate(client, api):
   )
   assert out == {"id": "mnd_1", "status": "proposed", "max_cents": 3999}
   sent = json.loads(route.calls.last.request.content)
+  # The strict defaults are sent explicitly so the user sees them.
   assert sent == {
     "description": INSTRUCTION,
     "category": "laptop_charger",
     "max_cents": 3999,
     "location": None,
     "valid_until": None,
+    "product_constraints": [],
+    "max_quantity": 1,
+    "maximum_purchases": 1,
+    "allow_subscription": False,
+    "allow_recurring": False,
   }
+
+
+def test_propose_mandate_forwards_semantic_constraints(client, api):
+  route = api.post("/mandates/propose").respond(201, json={"id": "mnd_1"})
+  call_tool(
+    client,
+    "propose_mandate",
+    {
+      "description": INSTRUCTION,
+      "category": "laptop_charger",
+      "max_cents": 3999,
+      "product_constraints": [{"name": "connector", "operator": "equals", "value": "USB-C"}],
+      "max_quantity": 1,
+      "maximum_purchases": 1,
+      "allow_subscription": False,
+      "allow_recurring": False,
+    },
+  )
+  sent = json.loads(route.calls.last.request.content)
+  assert sent["product_constraints"] == [
+    {"name": "connector", "operator": "equals", "value": "USB-C"}
+  ]
+  assert sent["allow_subscription"] is False
+  assert sent["maximum_purchases"] == 1
+
+
+@pytest.mark.parametrize(
+  "bad",
+  [
+    {"max_cents": 40.0},
+    {"max_cents": True},
+    {"max_cents": "3999"},
+    {"max_cents": -1},
+    {"max_quantity": 0},
+    {"max_quantity": 1.0},
+    {"allow_subscription": "false"},
+    {"allow_subscription": 0},
+  ],
+)
+def test_propose_mandate_rejects_coercible_values(client, api, bad):
+  args = {"description": INSTRUCTION, "category": "laptop_charger", "max_cents": 3999, **bad}
+  res = rpc(client, "tools/call", {"name": "propose_mandate", "arguments": args})
+  assert res.json()["result"]["isError"] is True, bad
+  assert not api.calls
+
+
+@pytest.mark.parametrize("total", [29.99, 2999.0, True, "2999"])
+def test_request_payment_rejects_non_integer_cents(client, api, total):
+  args = {**PAYMENT_ARGS, "total_cents": total}
+  res = rpc(client, "tools/call", {"name": "request_payment", "arguments": args})
+  assert res.json()["result"]["isError"] is True, total
+  assert not api.calls
 
 
 def test_propose_mandate_rejects_float_cents(client, api):
