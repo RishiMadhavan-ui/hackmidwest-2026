@@ -37,10 +37,12 @@ IMAGE_REGISTRY=$(echo "${IMAGE_REGISTRY:-$(get_env IMAGE_REGISTRY)}" | tr -d '[:
 API_IMAGE="$IMAGE_REGISTRY/api:$IMAGE_TAG"
 WEB_IMAGE="$IMAGE_REGISTRY/web:$IMAGE_TAG"
 AGENTS_IMAGE="$IMAGE_REGISTRY/agents:$IMAGE_TAG"
+MCP_IMAGE="$IMAGE_REGISTRY/mcp:$IMAGE_TAG"
 
 echo "API image:    $API_IMAGE"
 echo "Web image:    $WEB_IMAGE"
 echo "Agents image: $AGENTS_IMAGE"
+echo "MCP image:    $MCP_IMAGE"
 
 # 1. Cluster: one node on the newest Kubernetes version LKE offers.
 cluster_id=$(linode-cli lke clusters-list --label "$LKE_LABEL" --text --no-headers --format id)
@@ -87,11 +89,14 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   docker push "$API_IMAGE"
   "$BUILDX" build --platform "$PLATFORM" -t "$WEB_IMAGE" --build-arg NEXT_PUBLIC_API_URL=/backend --load "$REPO/web"
   docker push "$WEB_IMAGE"
-  "$BUILDX" build --platform "$PLATFORM" -t "$AGENTS_IMAGE" --load "$REPO/services/agents"
+  # Agents build from the repo root: the image also needs shared/leash_shared.
+  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/agents/Dockerfile" -t "$AGENTS_IMAGE" --load "$REPO"
   docker push "$AGENTS_IMAGE"
+  "$BUILDX" build --platform "$PLATFORM" -t "$MCP_IMAGE" --load "$REPO/services/mcp"
+  docker push "$MCP_IMAGE"
   echo "$(elapsed): images pushed ($PLATFORM)."
 else
-  echo "SKIP_BUILD=1 — using existing $API_IMAGE, $WEB_IMAGE, $AGENTS_IMAGE."
+  echo "SKIP_BUILD=1 — using existing $API_IMAGE, $WEB_IMAGE, $AGENTS_IMAGE, $MCP_IMAGE."
 fi
 
 # 5. Namespace + Secret from .env (IMAGE_REGISTRY is not needed inside the pods).
@@ -121,13 +126,15 @@ fi
 # 7. Apply workloads. Restart on rerun so new images/env are picked up.
 existed=$(kubectl -n "$NAMESPACE" get deployment api -o name 2>/dev/null || true)
 render_manifest k8s/agents.yaml | kubectl apply -f -
+render_manifest k8s/mcp.yaml | kubectl apply -f -
 render_manifest k8s/api.yaml | kubectl apply -f -
 render_manifest k8s/web.yaml | kubectl apply -f -
 kubectl apply -f k8s/service.yaml
 if [[ -n $existed ]]; then
-  kubectl -n "$NAMESPACE" rollout restart deployment/api deployment/web deployment/agents
+  kubectl -n "$NAMESPACE" rollout restart deployment/api deployment/web deployment/agents deployment/mcp
 fi
 kubectl -n "$NAMESPACE" rollout status deployment/agents --timeout=600s
+kubectl -n "$NAMESPACE" rollout status deployment/mcp --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/api --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=600s
 

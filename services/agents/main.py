@@ -1,27 +1,30 @@
-import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Hack Midwest Agents")
-
-# Comma-separated origins for local Next.js; cluster traffic is service-to-service.
-_cors = os.getenv("CORS_ORIGINS", "http://localhost:3000")
-allow_origins = [origin.strip() for origin in _cors.split(",") if origin.strip()]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from guardian.routes import router as guardian_router
+from provenance.sink import default_sinks
+from shopper.runs import router as runs_router
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+  # Start the trace outbox right away so events spooled before a restart are
+  # delivered even if no new run starts.
+  for sink in default_sinks():
+    start = getattr(sink, "start", None)
+    if start:
+      start()
+  yield
+
+
+app = FastAPI(title="Leash agents", lifespan=lifespan)
+app.include_router(guardian_router)
+app.include_router(runs_router)
+
+
+# /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
 @app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "service": "hackmidwest-agents",
-        "api_url": os.getenv("API_URL", ""),
-    }
+@app.get("/healthz")
+def healthz():
+  return {"status": "ok", "service": "agents"}

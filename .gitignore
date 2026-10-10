@@ -11,3 +11,4 @@
 # LKE kubeconfig is a credential
 hackmidwest-kubeconfig.yaml
 *.kubeconfig.yaml
+/plan.md

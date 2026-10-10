@@ -81,7 +81,8 @@ wait_for() {
 render_manifest() {
   sed -e "s|\${API_IMAGE}|${API_IMAGE}|g" \
       -e "s|\${WEB_IMAGE}|${WEB_IMAGE}|g" \
-      -e "s|\${AGENTS_IMAGE}|${AGENTS_IMAGE}|g" "$1"
+      -e "s|\${AGENTS_IMAGE}|${AGENTS_IMAGE}|g" \
+      -e "s|\${MCP_IMAGE}|${MCP_IMAGE}|g" "$1"
 }
 
 # db_id: managed Postgres labeled hackmidwest-db, or empty.
