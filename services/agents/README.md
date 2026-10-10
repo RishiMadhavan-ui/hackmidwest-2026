@@ -19,7 +19,14 @@ PYTHONPATH=../../shared uv run python -m shopper "Buy a USB-C laptop charger for
 
 In PowerShell, set `$env:PYTHONPATH="../../shared"` first.
 
-Routes: `GET /healthz`, `POST /runs` (`{task, mandate_id?, start_url?}`, returns `run_id`), `GET /runs/{run_id}` (status, redacted output, trace events), `POST /guardian/evaluate`. The routes have no auth yet, so keep this service internal to the cluster.
+Routes: `GET /healthz`, `POST /runs`, `GET /runs/{run_id}` (status, redacted output, trace events), `POST /guardian/evaluate`. The routes have no auth yet, so keep this service internal to the cluster.
+
+`POST /runs` takes `{task, mandate_id?, start_url?, agent_mode?, sku?, claim_sku?}`:
+
+- `agent_mode: "live"` (default): the real model shops.
+- `agent_mode: "scripted"`: a **labeled fixture**. The shopper's choices are scripted (check out `sku`, tell Leash it's buying `claim_sku`), but every tool call is real: store pages, the store's checkout, and the Leash api through MCP. The run and every trace event carry `agent_mode: "scripted"`, and the run is labeled "Simulated compromised agent (scripted fixture)". Never present it as a live model falling for the injection.
+
+The same thing from the CLI: `--scripted-sku SUB-CARE-MO --claim-sku CHG-65W`.
 
 ## Environment
 
@@ -38,4 +45,4 @@ Routes: `GET /healthz`, `POST /runs` (`{task, mandate_id?, start_url?}`, returns
 uv run pytest
 ```
 
-Loop tests in `tests/test_shopper_loop.py` drive the real Strands event loop with a **scripted fixture model**. They prove the hooks, redaction, and correlation; they are not a live agent run. The two live inference tests in `tests/test_llm.py` skip unless `INFERENCE_API_KEY` and `INFERENCE_BASE_URL` are set.
+`tests/test_wiring_local.py` starts the real MCP server as a subprocess with stub api/store servers and runs the scripted shopper over HTTP; the stubs' decisions are canned. Loop tests in `tests/test_shopper_loop.py` drive the real Strands event loop with a **scripted fixture model**. They prove the hooks, redaction, and correlation; they are not a live agent run. The two live inference tests in `tests/test_llm.py` skip unless `INFERENCE_API_KEY` and `INFERENCE_BASE_URL` are set.
