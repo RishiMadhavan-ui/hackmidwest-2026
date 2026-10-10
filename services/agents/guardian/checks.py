@@ -250,6 +250,61 @@ def check_merchant(mandate: dict[str, Any], checkout: dict[str, Any] | None) -> 
   return _check(name, False, "block", f"Merchant {merchant!r} is not on the allowlist.")
 
 
+def _constraint_met(operator: str, wanted: Any, actual: Any) -> bool | None:
+  """True/False if we can tell, None if the value's type makes it unknowable."""
+  if operator == "equals":
+    if isinstance(wanted, str) and isinstance(actual, str):
+      return actual.strip().casefold() == wanted.strip().casefold()
+    return type(actual) is type(wanted) and actual == wanted
+  if operator == "contains":
+    if not isinstance(actual, str):
+      return None
+    return str(wanted).casefold() in actual.casefold()
+  if operator in ("minimum", "maximum"):
+    if not _is_cents(actual) or not _is_cents(wanted):
+      return None
+    return actual >= wanted if operator == "minimum" else actual <= wanted
+  return None
+
+
+def check_product_constraints(mandate: dict[str, Any], checkout: dict[str, Any] | None) -> Check:
+  name = "product_constraints_met"
+  constraints = mandate.get("product_constraints") or []
+  if not constraints:
+    return _check(name, True, "block", "Mandate has no product constraints.")
+  items = _items(checkout)
+  if not items:
+    return _check(name, False, "review", "No trusted items to check the product constraints.")
+  ref = [f"checkout:{(checkout or {}).get('checkout_id')}"]
+  unknown = []
+  for item in items:
+    attributes = {
+      str(a.get("name", "")).casefold(): a.get("value") for a in item.get("attributes") or []
+    }
+    for constraint in constraints:
+      attr = str(constraint.get("name", "")).casefold()
+      operator = constraint.get("operator", "equals")
+      wanted = constraint.get("value")
+      if attr not in attributes:
+        unknown.append(f"{item.get('sku')} doesn't state its {constraint.get('name')}")
+        continue
+      met = _constraint_met(operator, wanted, attributes[attr])
+      if met is False:
+        return _check(
+          name,
+          False,
+          "block",
+          f"User required {constraint.get('name')} {operator} {wanted!r}; "
+          f"{item.get('sku')} has {attributes[attr]!r}.",
+          ref,
+        )
+      if met is None:
+        unknown.append(f"{item.get('sku')} {constraint.get('name')} can't be compared")
+  if unknown:
+    return _check(name, False, "review", "; ".join(unknown) + ".", ref)
+  return _check(name, True, "block", "Every item meets the user's product constraints.", ref)
+
+
 def check_claim_matches_checkout(
   proposal: dict[str, Any] | None, checkout: dict[str, Any] | None
 ) -> Check:
@@ -336,6 +391,7 @@ def run_checks(
     check_checkout_fresh(checkout, now),
     check_totals_consistent(checkout),
     check_category(mandate, checkout),
+    check_product_constraints(mandate, checkout),
     check_no_subscription(mandate, checkout),
     check_no_recurring(mandate, checkout),
     check_quantity(mandate, checkout),

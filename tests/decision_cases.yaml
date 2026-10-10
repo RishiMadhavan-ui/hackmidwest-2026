@@ -27,7 +27,8 @@
 #   category_mismatch, subscription_prohibited, recurring_prohibited,
 #   quantity_exceeded, amount_over_limit, currency_mismatch, checkout_expired,
 #   checkout_incomplete, checkout_totals_inconsistent, checkout_source_unavailable,
-#   unknown_category, invalid_amount
+#   unknown_category, invalid_amount, product_constraint_unmet,
+#   product_attribute_unknown
 #
 # Rail reason codes, in precedence order when more than one applies:
 #   unsupported_request_type > killswitch_on > no_grant > grant_revoked >
@@ -58,7 +59,9 @@ fixtures:
     max_cents: 3999          # "under $40" means < 4000 unless the human confirms inclusive
     currency: USD
     max_quantity: 1
-    purchase_count: 1        # one successful checkout
+    maximum_purchases: 1     # one successful checkout (an authorized cap, not a counter)
+    product_constraints:
+      - {name: connector, operator: equals, value: USB-C}
     allow_subscription: false
     allow_recurring: false
     merchant_allowlist: [mer_volt_supply]
@@ -74,6 +77,9 @@ fixtures:
       unit_cents: 2999
       recurring: false
       subscription: false
+      attributes:
+        - {name: connector, value: USB-C}
+        - {name: wattage, value: 65}
     SUB-CARE-MO: &sku_subscription
       sku: SUB-CARE-MO
       product_name: VoltPro Care+ Monthly
@@ -89,6 +95,9 @@ fixtures:
       unit_cents: 4499
       recurring: false
       subscription: false
+      attributes:
+        - {name: connector, value: USB-C}
+        - {name: wattage, value: 100}
 
   checkouts:
     charger: &checkout_charger
@@ -274,6 +283,33 @@ cases:
         - {sku: CHG-65W, product_name: VoltPro 65W USB-C Laptop Charger,
            product_category: laptop_charger, unit_cents: 2999, quantity: 1}
     expected: {result_in: [REQUIRES_REVIEW, BLOCKED], failed_checks: [checkout_incomplete]}
+
+  - name: wrong_connector_blocked
+    stage: verifier
+    note: A laptop charger at the right price that breaks the user's USB-C constraint.
+    mandate: *mandate
+    checkout:
+      <<: *checkout_charger
+      items:
+        - <<: *sku_charger
+          sku: CHG-65W-BARREL
+          attributes: [{name: connector, value: barrel}, {name: wattage, value: 65}]
+          quantity: 1
+    expected: {result: BLOCKED, failed_checks: [product_constraint_unmet], only: true}
+
+  - name: unknown_connector_needs_review
+    stage: verifier
+    note: The merchant doesn't say what connector it has; that's not a yes.
+    mandate: *mandate
+    checkout:
+      <<: *checkout_charger
+      items:
+        - <<: *sku_charger
+          attributes: [{name: wattage, value: 65}]
+          quantity: 1
+    expected:
+      result_in: [REQUIRES_REVIEW, BLOCKED]
+      failed_checks: [product_attribute_unknown]
 
   - name: different_item_category_blocked
     stage: verifier

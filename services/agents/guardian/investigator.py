@@ -73,9 +73,11 @@ def build_prompt(
     k: mandate.get(k)
     for k in (
       "category",
+      "product_constraints",
       "max_cents",
       "currency",
       "max_quantity",
+      "maximum_purchases",
       "allow_subscription",
       "allow_recurring",
       "merchant_allowlist",

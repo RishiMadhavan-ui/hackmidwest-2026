@@ -91,6 +91,28 @@ def test_s2_links_attempt_to_hidden_page_text():
   assert f"source:{POISONED_SOURCE['sha256']}" in planted["evidence"]
 
 
+@pytest.mark.parametrize(
+  ("operator", "wanted", "actual", "expected"),
+  [
+    ("equals", "USB-C", "usb-c", "no_findings"),
+    ("equals", "USB-C", "barrel", "block"),
+    ("contains", "USB", "USB-C PD", "no_findings"),
+    ("minimum", 60, 65, "no_findings"),
+    ("minimum", 100, 65, "block"),
+    ("maximum", 60, 65, "block"),
+    ("minimum", 60, "65", "review"),
+  ],
+)
+def test_product_constraint_operators(operator, wanted, actual, expected):
+  mandate = {
+    **MANDATE,
+    "product_constraints": [{"name": "spec", "operator": operator, "value": wanted}],
+  }
+  item = {**CHARGER["items"][0], "attributes": [{"name": "spec", "value": actual}]}
+  findings = evaluate(mandate, checkout={**CHARGER, "items": [item]}, now=NOW, model_runner=None)
+  assert findings["recommendation"] == expected, findings["reasons"]
+
+
 def test_agent_claim_mismatch_is_recorded():
   proposal = {"items": [{"sku": "CHG-65W", "quantity": 1, "unit_cents": 2999}]}
   findings = evaluate(MANDATE, checkout=SUBSCRIPTION, proposal=proposal, now=NOW, model_runner=None)
@@ -197,13 +219,16 @@ def test_prompt_quotes_instruction_and_trusted_checkout():
   assert "SUB-CARE-MO" in prompt
 
 
-def test_evaluate_route_accepts_legacy_cart_key():
+def test_evaluate_route_accepts_legacy_cart_key(monkeypatch):
+  monkeypatch.setenv("AGENTS_SERVICE_TOKEN", "svc-token")
   body = {
     "mandate": {**MANDATE, "valid_until": "2099-01-01T00:00:00Z"},
     "checkout": {**SUBSCRIPTION, "expires_at": "2099-01-01T00:00:00Z"},
     "cart": {"items": [{"sku": "CHG-65W", "quantity": 1, "unit_cents": 2999}]},
   }
-  res = TestClient(app).post("/guardian/evaluate", json=body)
+  res = TestClient(app).post(
+    "/guardian/evaluate", json=body, headers={"Authorization": "Bearer svc-token"}
+  )
   assert res.status_code == 200
   findings = res.json()
   assert findings["recommendation"] == "block"
