@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
@@ -14,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runtime  # noqa: F401,E402
 
 from authority_errors import AuthorityError  # noqa: E402
-from leash_shared.models import PaymentProposal, PurchaseMandate  # noqa: E402
+from leash_shared.models import PaymentProposal, PurchaseMandate, canonical_json  # noqa: E402
 from payment_service import request_payment  # noqa: E402
 from principals import Principal  # noqa: E402
 
@@ -46,6 +47,14 @@ def _mandate(**overrides) -> PurchaseMandate:
 
 
 def _store_checkout(*, sku: str = "CHG-65W", subscription: bool = False) -> dict:
+  record = _raw_store_checkout(sku=sku, subscription=subscription)
+  record["facts_hash"] = hashlib.sha256(canonical_json({key: record[key] for key in (
+    "checkout_id", "currency", "line_items", "mcc", "merchant_descriptor", "recurring", "total_cents"
+  )}).encode("utf-8")).hexdigest()
+  return record
+
+
+def _raw_store_checkout(*, sku: str = "CHG-65W", subscription: bool = False) -> dict:
   if subscription:
     return {
       "checkout_id": "ckt_sub",
@@ -117,6 +126,8 @@ class _FakeConn:
       cur.fetchone.return_value = self._prior
     elif "FROM leash_users" in text or "FROM lithic_cards" in text:
       cur.fetchone.return_value = None
+    elif "FROM agent_runs" in text:
+      cur.fetchone.return_value = {"id": "run_payment_test"}
     elif "FROM mandate_confirmations" in text:
       cur.fetchone.return_value = {"verify_key": "unused"}
     elif "INSERT INTO payment_attempts" in text:
@@ -146,7 +157,7 @@ class PaymentServiceTests(unittest.TestCase):
     }
 
   def _run(self, checkout_id: str, store_body: dict, *, seed_ok=True, bind_ok=True):
-    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id=checkout_id)
+    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id=checkout_id, run_id="run_payment_test")
     with (
       patch.dict("os.environ", self.env, clear=False),
       patch("payment_service.utc_now", return_value=NOW),
@@ -164,20 +175,16 @@ class PaymentServiceTests(unittest.TestCase):
       response = request_payment(self.conn, proposal, self.principal)
       return response, fetch, seed, bind
 
-  def test_approves_charger_and_seeds_grant_then_binds(self) -> None:
+  def test_verified_charger_stays_blocked_until_durable_financial_controls(self) -> None:
     response, fetch, seed, bind = self._run("ckt_charger", _store_checkout())
-    self.assertEqual(response.status, "approved")
-    self.assertIsNotNone(response.grant_id)
+    self.assertEqual(response.status, "blocked")
+    self.assertIsNone(response.grant_id)
     self.assertIsNotNone(response.verification_id)
-    self.assertEqual(response.reasons, ())
+    self.assertEqual(response.reasons, ("financial_authority_unavailable",))
     fetch.assert_called_once_with("ckt_charger")
-    seed.assert_called_once()
-    bind.assert_called_once()
-    grant = seed.call_args.args[0]
-    self.assertEqual(grant.verified_checkout_id, "ckt_charger")
-    self.assertEqual(grant.authorized_amount_cents, 2999)
-    self.assertEqual(grant.merchant_id, "mer_volt_supply")
-    self.assertTrue(grant.payment_instrument_id.startswith("ins_local_"))
+    seed.assert_not_called()
+    bind.assert_not_called()
+    self.assertIn(response.id, self.conn.rows)
 
   def test_blocks_subscription_same_merchant_amount_without_grant(self) -> None:
     response, _fetch, seed, bind = self._run("ckt_sub", _store_checkout(subscription=True))
@@ -193,7 +200,7 @@ class PaymentServiceTests(unittest.TestCase):
       "id": first.id,
       "record": first.model_dump(mode="json"),
     }
-    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id="ckt_charger")
+    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id="ckt_charger", run_id="run_payment_test")
     with (
       patch.dict("os.environ", self.env, clear=False),
       patch("payment_service.utc_now", return_value=NOW),
@@ -204,16 +211,16 @@ class PaymentServiceTests(unittest.TestCase):
     ):
       second = request_payment(self.conn, proposal, self.principal)
     self.assertEqual(second.id, first.id)
-    self.assertEqual(second.status, "approved")
+    self.assertEqual(second.status, "blocked")
     fetch2.assert_not_called()
     seed2.assert_not_called()
     bind2.assert_not_called()
     self.assertEqual(fetch.call_count, 1)
-    self.assertEqual(seed.call_count, 1)
-    self.assertEqual(bind.call_count, 1)
+    self.assertEqual(seed.call_count, 0)
+    self.assertEqual(bind.call_count, 0)
 
   def test_missing_store_config_fails_closed(self) -> None:
-    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id="ckt_x")
+    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id="ckt_x", run_id="run_payment_test")
     with (
       patch.dict("os.environ", {"STORE_URL": "", "STORE_API_TOKEN": ""}, clear=False),
       patch("payment_service.current_mandate", return_value=self.mandate),
@@ -227,6 +234,7 @@ class PaymentServiceTests(unittest.TestCase):
     proposal = PaymentProposal(
       mandate_id=self.mandate.id,
       checkout_id="ckt_missing",
+      run_id="run_payment_test",
       proposal={
         "merchant_name": "spoofed merchant",
         "total_cents": 2999,
@@ -256,6 +264,47 @@ class PaymentServiceTests(unittest.TestCase):
     self.assertEqual(ctx.exception.status, 404)
     seed.assert_not_called()
     bind.assert_not_called()
+
+  def test_invalid_trusted_facts_fail_closed_without_side_effects(self) -> None:
+    changes = [
+      ("currency", "EUR"), ("total_cents", "2999"), ("facts_hash", "0" * 64),
+      ("recurring", "false"), ("status", "completed"), ("checkout_id", "ckt_other"),
+    ]
+    for field, value in changes:
+      with self.subTest(field=field):
+        store = _store_checkout()
+        store[field] = value
+        with self.assertRaises(AuthorityError) as error:
+          self._run("ckt_charger", store)
+        self.assertEqual(error.exception.status, 502)
+    for field, value in [("quantity", 0), ("quantity", "1"), ("subscription", "false")]:
+      with self.subTest(item_field=field):
+        store = _store_checkout()
+        store["line_items"][0][field] = value
+        with self.assertRaises(AuthorityError) as error:
+          self._run("ckt_charger", store)
+        self.assertEqual(error.exception.status, 502)
+    for field in ("recurring", "merchant_descriptor", "mcc", "facts_hash"):
+      store = _store_checkout()
+      del store[field]
+      with self.subTest(missing=field), self.assertRaises(AuthorityError) as error:
+        self._run("ckt_charger", store)
+      self.assertEqual(error.exception.status, 502)
+
+  def test_historical_grant_is_not_reissued_as_payment_authority(self) -> None:
+    self.conn._prior = {"record": {"id": "pay_historical", "status": "approved", "reasons": [],
+                                  "verification_id": "ver_historical", "grant_id": "grt_historical"}}
+    with self.assertRaises(AuthorityError) as error:
+      self._run("ckt_charger", _store_checkout())
+    self.assertEqual(error.exception.status, 409)
+
+  def test_unregistered_payment_request_cannot_fetch_or_seed(self) -> None:
+    proposal = PaymentProposal(mandate_id=self.mandate.id, checkout_id="ckt_charger")
+    with patch("payment_service._fetch_store_checkout") as fetch:
+      with self.assertRaises(AuthorityError) as error:
+        request_payment(self.conn, proposal, self.principal)
+      self.assertEqual(error.exception.status, 422)
+      fetch.assert_not_called()
 
 
 if __name__ == "__main__":

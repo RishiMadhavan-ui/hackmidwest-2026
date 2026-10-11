@@ -1,6 +1,29 @@
 # LEASH build plan
 
+**Current main integration (`d773079`):** Cameron's checkout/payment work is
+preserved with security containment. Authenticated configured merchant retrieval,
+strict canonical facts/hash validation and durable blocked payment preflight exist.
+`POST /payments` requires the agent's owned registered uncancelled run, current
+confirmed mandate and account gate; `GET /payments/{id}` is user-and-agent scoped.
+A verified charger returns `blocked` / `financial_authority_unavailable` until
+durable issuance/reconciliation and atomic run financial revocation are complete;
+no grant, legacy account card or simulated charge is activated. Subscription
+preflight still returns its deterministic product reasons. Store listing/start,
+catalog/read and binding primitives remain; unbound completion is 403 and a valid
+bound completion is 503 with no rail call. This is tested containment, not a
+finished purchase flow. Committed migration 0007 is unchanged; unpublished V2
+closure/session migrations are now 0008/0009. See [docs/MAIN_INTEGRATION_HANDOFF.md](docs/MAIN_INTEGRATION_HANDOFF.md)
+for the exact risks, owner fixes and enablement gates. Frozen contracts and LKE
+topology remain intact.
+
 Updated October 10, 2026. Execution guide for **Rishi, Cameron, Aditya, and their coding agents**. This replaces the earlier hotel/gift-card implementation plan. It is a plan, not a record of completed work.
+
+**V2 precedence:** [spec section 27](docs/LEASH_SPEC.md#27-v2-post-lesson-baseline)
+supersedes earlier singular-stop/PAUSE/preferred-card wording. The original
+[137 test cases](docs/LEASH_SECURITY_TEST_CASES.md) and their
+[coverage index](docs/LEASH_SECURITY_COVERAGE.md) are required acceptance evidence,
+not a claim of 137 passes. Read [V2 handoff](api/v2-stop-handoff.md) for actual
+callable interfaces and current partial enforcement.
 
 **Master alignment revision:** Rishi's October 10 master specification is the desired-state baseline. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) resolves previous assumptions; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) preserves baseline evidence and records the implementation follow-up. Real Strands Graph, automatic clean recovery, comprehensive persisted SSE and authenticated human Kill Switch are mandatory MVP work. Kubernetes is the selected existing runtime; Compose is optional local convenience. Preserve task/handoff IDs and frozen R01 contracts. Rishi subsequently authorized implementation, testing, documentation sync and pushing on main; lane ownership and frozen-contract review remain unchanged.
 
@@ -14,7 +37,7 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; completion is disabled until protected binding/payment operations exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; binding primitives exist, but completion is disabled until durable payment/reconciliation and run financial controls exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and account stop/provider CLOSED intents and partial run Stop are implemented and locally tested. **Not a complete or deployed MVP:** owned durable merchant facts/protected charge binding, spending-enabled payments/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
 
 **Historical R01 integration snapshot:**
 
@@ -80,7 +103,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | R02 | SQL migrations in `db/`; persistence/session/auth wiring in `api/`; mandate propose/confirm/read/replacement/revoke and registered agent-run context | R01, C01 runtime/data; Aditya consumes mandate and `/agent-runs` routes | Explicit human confirmation/signature association, immutable history, agent forbidden on privileged routes, expiry/cross-session tests; run owner/version/hash/mode bound before traces |
 | R03 | Independent checkout verifier in `api/` and tests in `api/tests/` | R01, C02 canonical merchant interface; hand verified evidence to R04 | Server fetch/auth, trusted typed items/totals/revision, every constraint, unknown/missing evidence fail closed, agent cart never proof |
 | R04 | Payment proposal/status, idempotent grant/instrument issuance, correlation and reconciliation in `api/` | R02/R03/R11, C03/C04 protocol and C02 binding; MCP/Graph consumes | Verified current authority only; exact scope; persist operation before side effect; uncertain setup unusable; once-only details; no new purchase while outcome unknown |
-| R05 | Mandatory human Kill Switch, cancellation and replacement/revoke invalidation in `api/`, `db/`, `web/` | R02; C04 coordinated atomic protocol before grants; A12 cancellation; C09 actual provider controls | Owner-only idempotent request; effective unused-grant invalidation serialized with approval; stop runs/recovery; survive restart; report provider pause separately and preserve committed authorizations |
+| R05 | Mandatory human Kill Switch, cancellation and replacement/revoke invalidation in `api/`, `db/`, `web/` | R02; C04 coordinated atomic protocol before grants; A12 cancellation; C09 actual provider controls | Owner-only idempotent request; effective unused-grant invalidation serialized with approval; stop runs/recovery; survive restart; report provider closure separately and preserve committed authorizations |
 | R11 | Durable attempts/payment operations, idempotency, resumable run state and leases/fencing in `api/`, `db/` | R02; H05/H06 with Cameron; A11/A12 consumes | Record operation before external write; ambiguous result -> reconciliation; stale worker/repeated node cannot issue/charge twice; authorized != settled |
 | R12 | Stable auth-provider adapter and short-lived run/mandate/version/tool/audience credentials | Cameron leads H03 provider decision; R02 identity mapping retained; Aditya MCP enforces scopes | Backend verified human session; no cross-owner reads/SSE; agent expiry/audience/tool negatives; migrate without orphaning history or competing auth |
 | R06 | Comprehensive durable intake/SSE/history/incident reads for auth, mandates, inference, Graph, MCP, browsing, verification, guardian, recovery, grants/cards, rail, reconciliation and Kill Switch | R01 event mapping; A04/A13 emitters; C04 committed rail stream; R11 state/outbox | Commit before ack; authorized ordered replay/heartbeat/resync; dedup; browser reconnect never starts run; sanitized real events, refresh reconstruction and source/latency truth |
@@ -101,8 +124,8 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 |---|---|---|
 | R01/R02 | Retained and tested; frozen models/events unchanged | Hosted operator bindings/configuration still unverified |
 | R03 | Tested pure policy enforces all 15 checks | Authenticated independent merchant fetch, persistence/routes and protected checkout freeze |
-| R04/R11 | Product payment/issuance/reconciliation absent; durable idempotent PAUSE intents exist only | Persist payment operation before any issuance/charge; exact trusted binding, provider idempotency and unknown-outcome query |
-| R05 | Human durable stop, revoked SQL authority, cancellation records, atomic local rail latch and actual provider-pause outcome handling tested | Aditya cooperative cancellation, all-phase races, individual replacement/revoke propagation, live provider proof; no resume-old-authority route |
+| R04/R11 | Product payment/issuance/reconciliation absent; durable idempotent CLOSED intents exist | Persist payment operation before any issuance/charge; exact trusted binding, provider idempotency and unknown-outcome query |
+| R05 | Human durable stop, revoked SQL authority, cancellation records, atomic local rail latch and actual provider-closure response handling tested with mocked transport | Aditya cooperative cancellation, all-phase races, individual replacement/revoke propagation, live provider proof; no resume-old-authority route |
 | R06 | Provenance 201/409/422, ordered owner SSE through Next and durable rail-stream relay tested | Full Graph/inference/verification/recovery/reconciliation emitters, incident/source/history UI and agreed additive contracts |
 | R08–R10 | Identity/profile activity/stop UI build and lint pass | Human purchase confirmation, Mission Control, comparison, incident timeline, receipt and Attack Lab |
 | C02 | Catalog/listings and authenticated checkout create/read tested; charge disabled | User/session ownership, durable checkout freeze/revision/expiry, exact protected binding/charge and safe recovery alternative |
@@ -129,7 +152,7 @@ See [api/alignment-fixes-handoff.md](api/alignment-fixes-handoff.md) for exact r
 | C06 | Existing Akamai Kubernetes API/rail/merchant/agents runtime, PostgreSQL/Valkey, TLS/private routing and least-privilege Secrets | Owner Dockerfiles, C01; data schema from Rishi | Actual runtime/source/image/PVC evidence; each pod gets only needed keys; remove broad app-env imports from agent/MCP pods; no provider/JWT/mandate-signing/database keys there; durable state survives restart |
 | C07 | Service tests plus `tests/test_decision_cases.py`; fault/concurrency/integrity tests | A01 fixture YAML, C02–C05 | Full policy matrix, direct-charge bypass rejection, invalid signature distinct from decline, provider/state-store outages, revocation race and no-inference checks |
 | C08 | CI/image build/deploy setup in `.github/` and `infra/`, each service's deploy configuration | C01/C06; owners supply startup commands/dependencies | Reproducible image/startup, secret-only runtime config, probe/readiness and rollback; no mass formatting other lanes |
-| C09 | Kill-switch card pause support via wrapper, authorization latency measurement and operating runbook in owned infra docs | C04/C05 if Lithic, R05; deployed traffic C06 | Kill switch respected independently of slow provider pause; p50/p95 actual source/rail latency; under-100-ms target measured, no fabricated figures |
+| C09 | Kill-switch dedicated card closure support via wrapper, authorization latency measurement and operating runbook in owned infra docs | C04/C05 if Lithic, R05; deployed traffic C06 | Kill switch respected independently of slow provider closure; p50/p95 actual source/rail latency; under-100-ms target measured, no fabricated figures |
 | C10 | Deployed rail/reset/failure rehearsal and recording support | A07/G3, C07/C09 | Chosen rail accurately labeled, deployed tests run; authenticated local fallback ready; recording labeled prerecorded |
 
 **Cameron agent starting prompt:** “Read all three direction documents and work only in Cameron's lane. Inspect current files, then implement the earliest unfinished C-task whose contracts are agreed. Make the controlled catalog independent from malicious listings, bind protected charge operations to verified checkouts, and build real local authorization plus atomic Valkey consumption before depending on Lithic availability. Use current official provider schemas, keep ASA network I/O Valkey-only, and return task ID, test evidence, capability status and owner handoffs without secrets.”
@@ -239,7 +262,7 @@ C07 starts testing during G1 and grows as adapters arrive; R06's minimum durable
 | S4 Missing/untrusted checkout | R03/C02; A07 | `REQUIRES_REVIEW` or `BLOCKED`; no grant based on shopper assurance |
 | S5 Expiry/replay/concurrent delivery | R02/R04 + C04/C07; A07 | `BLOCKED` for distinct/expired use; exact duplicate response is idempotent, not a new transaction |
 | S6 Automatic compliant recovery after attack | A11/A12 + R03/R04/R11 + C02–C04; A07 | S2→S6 within one real bounded Graph; quarantined source/SKU excluded; fresh context and checkout/grant; unchanged mandate; actual authorization and retained incident |
-| S7 Human Kill Switch | R05 + C04/C09 + A12; A07 | Fresh unspent run/active grant stops; atomic race ordering, owner auth/idempotency/restart; actual provider pause/unknown outcomes; committed authorization not reversed |
+| S7 Human Kill Switch | R05 + C04/C09 + A12; A07 | Fresh unspent run/active grant stops; atomic race ordering, owner auth/idempotency/restart; actual provider closure/unknown outcomes; committed authorization not reversed |
 
 A07 may use intentionally manipulated agent outputs to test policy repeatedly; label these as fixtures. G2 and the live presentation separately require a genuine Strands run encountering the malicious content and making the attempted action. Do not call a fixture-driven trace a live model manipulation.
 
@@ -365,6 +388,49 @@ preserved and is not a verified purchase grant. Previously issued provider cards
 were not revoked; deployment of the patch remains a separate handoff to Cameron.
 
 ## Next work in dependency order
+
+The following V2 gates extend R05/R11/R12, C04/C05/C09, A11–A13. Preserve existing
+IDs; C10 remains deployment rehearsal. No ownership transfer or frozen-wire
+approval is implied by this proposed handoff:
+
+| Task | Human / agent work and current status | Dependencies | Completion evidence |
+|---|---|---|---|
+| R13 | Rishi: owned run stop/status/event and UI implemented; generation/issuance fencing, scoped card links and durable stop reconciliation **partial** | H14 additive scope/stop contract, C11, R03/R04/R11/R12 | RST-001–018 and EMG-001–009 including real race/outage/restart evidence; no account-wide mutation for run stop |
+| C11 | Cameron: issuing generation binding, atomic run barrier, rehydration and dedicated run/card closure association **missing**; existing account latch and CLOSED response transport are retained | H14, R13/R11, C02/C04/C05 | Valkey consume/stop/issue ordering; matching duplicate after stop returns original; loss recovery blocks stale grants; provider closure remains independent |
+| A14 | Aditya: owning-worker cancellation dispatch, SDK cooperative cancel, node/edge/MCP stop checks and lease fencing **missing** | H14, R12/R13, A11/A12, C11 | Stop queued/streaming/tool/guardian/recovery; no replacement run using old scope; fenced restart; truthful canceled acknowledgment |
+| H14 | Rishi + Cameron propose, Aditya consumes; all three review additive run/card/generation/credential/stop-operation and acknowledgment contract | Frozen R01 process; existing H03/H05/H06/H08 | Contract-only PR, agreed valid/error fixtures, separate persisted/financial/Graph/card states; no independent schema drift |
+
+Dependency order for the smallest truthful P0 path:
+
+1. **All three / H14:** human launch and bounded scoped identity; authoritative
+   run→attempt→checkout→grant→card mapping; run/account barrier and acknowledgment
+   wire. Preserve the current JWT foundation; do not install competing auth.
+2. **Cameron / C02/C11; Rishi / R03/R04/R11/R13:** durable trusted checkout/freeze/
+   protected charge, verification and payment/issuance ledger before external
+   writes. Exclusive SINGLE_USE, stable UUID key, once-only delivery, stop gates,
+   atomic revocation/consumption and restart repair must precede usable grants.
+3. **Aditya / A11/A12/A14:** real bounded Graph, poisoned attempt→independent deny→
+   guardian→quarantine→fresh-context alternative under unchanged mandate. Stop
+   dispatch/polling and stale-worker fencing. No recovery after unknown outcome,
+   hard decline, authorization, expiry or Stop.
+4. **Rishi / R06/R07–R10; Aditya / A13:** genuine persisted full lifecycle SSE,
+   original intent/verified checkout comparison, separate run/account controls and
+   financial/Graph/card status, accurate authorized/reconciling/settled semantics.
+5. **Cameron / C06/C09/C10 + all / A07/A10:** source/image/Secrets/TLS/PVC/CNI checks
+   on existing LKE, chosen actual rail, failure/replay/stop races and D1–D4.
+   Prioritize P0 subset; remaining P0 cases stay visibly incomplete, never silently
+   waive the financial boundaries to shorten the demo. Three-minute rehearsal and
+   genuine Akamai/injection evidence are not supplied by unit tests.
+
+Run Stop and Emergency Kill Switch are separate required acceptance storylines
+(D2 and D3), extending S7 without renaming S1–S6. Demo resets must never resurrect
+stopped/consumed grants or issue a second card after ambiguous provider outcomes.
+Single-run intent currently reports pending run binding/Graph acknowledgment;
+account stop's financially_stopped status excludes Graph cancellation. Do not
+claim that the two buttons complete the two-stop MVP.
+Human JWT logout/session reuse and ambient-cookie confirmation negatives are
+implemented/tested through migration 0009. This preserves current auth; it does
+not complete short-lived run/mandate/audience-scoped agent credentials in R12.
 
 1. **Cameron:** extend the merged authenticated catalog/checkouts with ownership, durable freeze and immutable protected charge binding (C02/H04/H05). Inspect the new credential names and root-context images before deployment.
 2. **Rishi + Cameron:** connect trusted retrieval to the existing pure verifier; persist attempts/verification/payment operations before any side effect (R03/R04/R11), with tested SQL/Valkey ordering and replace/revoke propagation.

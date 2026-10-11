@@ -221,7 +221,7 @@ class AlignmentStackTests(unittest.TestCase):
               f"/api/checkouts/{checkout['checkout_id']}/complete",
               json={"payment_id": "unverified-claim", "card_token": "unverified-card"},
             ).status_code,
-            503,
+            403,
           )
         with httpx.Client(base_url="http://127.0.0.1:58100", timeout=5) as client:
           signup = client.post(
@@ -302,7 +302,7 @@ class AlignmentStackTests(unittest.TestCase):
             self.assertEqual(seeded.status_code, 200, seeded.text)
             stopped = client.post("/killswitch", headers=human, json={"on": True})
             self.assertEqual(stopped.status_code, 200, stopped.text)
-            self.assertEqual(stopped.json()["status"], "stopped")
+            self.assertEqual(stopped.json()["status"], "financially_stopped")
             self.assertEqual(stopped.json()["rail"]["unused_grants_revoked"], 1)
             denied = rail_client.post(
               "/local/authorize",

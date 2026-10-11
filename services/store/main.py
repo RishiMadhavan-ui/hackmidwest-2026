@@ -1,8 +1,8 @@
-"""Volt Supply Co. — simulated merchant with bound local-rail completion.
+"""Volt Supply Co. — simulated merchant with gated completion.
 
 Canonical catalog + checkout truth for LEASH. Listing HTML may be poisoned in
 evil mode; POST /api/checkouts always reflects the real SKU from PRODUCTS.
-Completion requires a prior API bind and charges only via the local rail.
+Binding primitives are present; completion stays closed until durable controls exist.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import secrets
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -171,7 +170,7 @@ def healthz() -> dict[str, Any]:
     "service": "leash-store",
     "merchant": "volt_supply_co_simulated",
     "evil_mode_env": _evil_enabled(),
-    "payment_completion": "bound_local_rail",
+    "payment_completion": "disabled_pending_durable_controls",
     "checkout_persistence": "process_memory",
     "rail_configured": bool(_webhook_url() and len(_charge_token()) >= 32),
   }
@@ -341,18 +340,11 @@ def complete_checkout(
   body: CompleteBody,
   authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-  """Charge only a previously bound checkout via the local payment rail."""
+  """Validate binding, then fail closed until durable charge controls exist."""
   _require_store_auth(authorization)
   record = _CHECKOUTS.get(checkout_id)
   if not record:
     raise HTTPException(status_code=404, detail="Unknown checkout")
-
-  if record["status"] == "completed":
-    return {
-      **_checkout_public(record),
-      "payment_id": record.get("payment_id"),
-      "authorization": record.get("rail_result"),
-    }
 
   binding = record.get("binding")
   if not binding:
@@ -380,87 +372,13 @@ def complete_checkout(
   if expires <= datetime.now(timezone.utc):
     raise HTTPException(status_code=409, detail="Checkout binding expired")
 
-  webhook = _webhook_url()
-  charge = _charge_token()
-  if not webhook or len(charge) < 32:
-    raise HTTPException(status_code=503, detail="Local rail charge credentials are not configured")
-
-  event_id = f"evt_store_{secrets.token_hex(8)}"
-  attempt = {
-    "event_id": event_id,
-    "request_type": "AUTHORIZATION",
-    "instrument_token": instrument,
-    "descriptor": record["merchant_descriptor"],
-    "mcc": record["mcc"],
-    "amount_cents": int(record["total_cents"]),
-    "currency": "USD",
-    "checkout_id": checkout_id,
-    "checkout_hash": binding["checkout_hash"],
-    "merchant_binding_id": binding["merchant_binding_id"],
-  }
-  try:
-    with httpx.Client(timeout=5.0) as client:
-      res = client.post(
-        f"{webhook}/local/authorize",
-        headers={
-          "Authorization": f"Bearer {charge}",
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        json=attempt,
-      )
-  except httpx.HTTPError as exc:
-    logger.info("checkout_rail_unreachable id=%s", checkout_id)
-    raise HTTPException(status_code=502, detail="Local payment rail unreachable") from exc
-
-  try:
-    payload = res.json() if res.content else {}
-  except ValueError:
-    payload = {}
-  if not isinstance(payload, dict):
-    payload = {}
-
-  result = str(payload.get("result") or "").upper()
-  reason = str(payload.get("reason") or "")
-  safe_auth = {
-    "result": result or "ERROR",
-    "reason": reason or f"rail_http_{res.status_code}",
-    "event_id": event_id,
-    "rail": payload.get("rail") or "local_payment_rail_simulator",
-  }
-
-  if res.status_code >= 400 or result != "APPROVED":
-    logger.info(
-      "checkout_declined id=%s product_id=%s reason=%s",
-      checkout_id,
-      record["product_id"],
-      safe_auth["reason"],
-    )
-    return JSONResponse(
-      status_code=402 if result == "DECLINED" else 502,
-      content={
-        **_checkout_public(record),
-        "payment_id": body.payment_id,
-        "authorization": safe_auth,
-        "status": "open",
-      },
-    )
-
-  record["status"] = "completed"
-  record["payment_id"] = body.payment_id
-  record["rail_result"] = safe_auth
-  logger.info(
-    "checkout_completed id=%s product_id=%s total_cents=%s payment_id=%s",
-    checkout_id,
-    record["product_id"],
-    record["total_cents"],
-    body.payment_id,
+  # Process-memory bindings and fresh event IDs cannot safely reconcile a
+  # committed authorization whose response was lost. Do not charge until the
+  # durable operation/event identity, caller scope and stop barriers are wired.
+  raise HTTPException(
+    status_code=503,
+    detail="Checkout completion unavailable until durable payment reconciliation and stop controls are implemented",
   )
-  return {
-    **_checkout_public(record),
-    "payment_id": body.payment_id,
-    "authorization": safe_auth,
-  }
 
 
 @app.exception_handler(RequestValidationError)

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { KillSwitch } from "@/components/kill-switch";
+import { RunStops } from "@/components/run-stops";
 import { ActivityFeed } from "@/components/activity-feed";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,6 +93,7 @@ export default function ProfilePage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <KillSwitch />
+                <RunStops />
             <dl className="grid gap-3 text-sm">
               {displayName ? (
                 <div className="grid gap-1">

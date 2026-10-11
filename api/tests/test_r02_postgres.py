@@ -123,6 +123,67 @@ class PostgresAuthorityTests(unittest.TestCase):
       mapping=conn.execute("SELECT id FROM leash_users WHERE auth_user_id=%s",(self.legacy_auth_id,)).fetchone()
       self.assertEqual(mapping["id"],leash_user_id(str(self.legacy_auth_id)))
 
+  def test_payment_preflight_is_registered_owned_idempotent_and_stopped(self):
+    from test_payment_service import _store_checkout
+    active = self.active()
+    run = self.run_body(active)
+    self.assertEqual(self.request("POST", "/agent-runs", body=run).status_code, 201)
+    proposal = {"mandate_id": active["id"], "checkout_id": "ckt_charger", "run_id": run["id"]}
+    env = {"STORE_URL": "http://isolated-store.test", "STORE_API_TOKEN": "s" * 32}
+    with (patch.dict(os.environ, env),
+          patch("payment_service._fetch_store_checkout", return_value=_store_checkout()) as fetch,
+          patch("payment_service._seed_grant") as seed,
+          patch("payment_service._bind_store") as bind):
+      missing = {key: value for key, value in proposal.items() if key != "run_id"}
+      self.assertEqual(self.request("POST", "/payments", body=missing).status_code, 422)
+      foreign = {**proposal, "run_id": "run_foreign"}
+      self.assertEqual(self.request("POST", "/payments", body=foreign).status_code, 404)
+      fetch.assert_not_called()
+      first = self.request("POST", "/payments", body=proposal)
+      self.assertEqual(first.status_code, 200, first.text)
+      self.assertEqual(first.json()["status"], "blocked")
+      self.assertEqual(first.json()["reasons"], ["financial_authority_unavailable"])
+      self.assertIsNone(first.json()["grant_id"])
+      self.assertNotIn("instrument_token", first.json())
+      again = self.request("POST", "/payments", body=proposal)
+      self.assertEqual(again.json(), first.json())
+      self.assertEqual(fetch.call_count, 1)
+      path = f"/payments/{first.json()['id']}"
+      self.assertEqual(self.request("GET", path).status_code, 200)
+      self.assertEqual(self.request("GET", path, token=self.other_agent_token).status_code, 404)
+      self.assertEqual(self.request("GET", path, token=self.user_token).status_code, 401)
+      # Another agent owned by the same human cannot read this run's attempt.
+      peer_token = "peer-" + uuid4().hex
+      with db.get_conn() as conn:
+        bind_agent(conn, user_id=self.owner, agent_id="agt_" + uuid4().hex, token=peer_token, modes=("live",))
+      self.assertEqual(self.request("GET", path, token=peer_token).status_code, 404)
+      stop = self.request("POST", f"/agent-runs/{run['id']}/stop", token=self.user_token)
+      self.assertEqual(stop.status_code, 200, stop.text)
+      self.assertEqual(self.request("POST", "/payments", body=proposal).status_code, 409)
+      self.assertEqual(fetch.call_count, 1)
+      seed.assert_not_called()
+      bind.assert_not_called()
+    with db.get_conn() as conn:
+      row = conn.execute("SELECT count(*) n FROM payment_attempts WHERE run_id=%s", (run["id"],)).fetchone()
+      self.assertEqual(row["n"], 1)
+
+  def test_account_stop_blocks_payment_preflight_before_merchant_fetch(self):
+    active = self.active()
+    run = self.run_body(active)
+    self.assertEqual(self.request("POST", "/agent-runs", body=run).status_code, 201)
+    with patch("workflow_control.stop_rail", return_value={"status": "pending"}):
+      self.assertEqual(self.request("POST", "/killswitch", token=self.user_token, body={"on": True}).status_code, 200)
+    # Test the service with the former principal as well as revoked HTTP auth.
+    from payment_service import request_payment
+    from leash_shared.models import PaymentProposal
+    from principals import Principal
+    with patch("payment_service._fetch_store_checkout") as fetch, db.get_conn() as conn:
+      with self.assertRaises(AuthorityError) as error:
+        request_payment(conn, PaymentProposal(mandate_id=active["id"], checkout_id="ckt_charger", run_id=run["id"]),
+                        Principal("agent", self.owner, self.agent_id))
+      self.assertEqual(error.exception.status, 409)
+      fetch.assert_not_called()
+
   def test_rail_ingest_has_separate_credential_owner_validation_and_original_decision(self):
     event_id="evt_rail_"+uuid4().hex
     payload={"event_id":event_id,"type":"authorization.decided","user_id":self.owner,
@@ -144,7 +205,7 @@ class PostgresAuthorityTests(unittest.TestCase):
       self.assertEqual(conn.execute("SELECT count(*) n FROM audit_events WHERE event_id=%s",(event_id,)).fetchone()["n"],1)
       self.assertIsNone(conn.execute("SELECT id FROM leash_users WHERE id='usr_missing'").fetchone())
 
-  def test_stop_persists_owned_card_pause_and_retries_unknown_without_new_authority(self):
+  def test_stop_persists_owned_card_closure_and_retries_unknown_without_new_authority(self):
     card_token="card_"+uuid4().hex
     foreign="card_"+uuid4().hex
     with db.get_conn() as conn:
@@ -153,11 +214,11 @@ class PostgresAuthorityTests(unittest.TestCase):
     from unittest.mock import Mock
     def provider_call(path,**kwargs):
       self.assertEqual(path,"/internal/lithic/card-state")
-      self.assertEqual(kwargs["json"],{"card_token":card_token,"state":"PAUSED"})
+      self.assertEqual(kwargs["json"],{"card_token":card_token,"state":"CLOSED"})
       with db.get_conn() as conn:
         operation=conn.execute("SELECT * FROM card_control_operations WHERE user_id=%s",(self.owner,)).fetchone()
         self.assertIsNotNone(operation) # Intent already durable before provider call.
-      return Mock(is_success=True,json=lambda:{"card_token":card_token,"state":"PAUSED","provider":"lithic_sandbox"})
+      return Mock(is_success=True,json=lambda:{"card_token":card_token,"state":"CLOSED","provider":"lithic_sandbox"})
     with patch.dict(os.environ,{"WEBHOOK_INTERNAL_TOKEN":"control-"+"a"*32,"WEBHOOK_URL":"http://rail.test"}), patch("workflow_control.stop_rail",return_value={"status":"enforced","unused_grants_revoked":0}), patch("workflow_control.httpx.Client") as client:
       post=client.return_value.__enter__.return_value.post
       import httpx
@@ -169,7 +230,7 @@ class PostgresAuthorityTests(unittest.TestCase):
       post.side_effect=provider_call
       second=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
       self.assertEqual(second.json()["provider_card_controls"],{"status":"enforced","total":1,"confirmed":1})
-      self.assertEqual(second.json()["status"],"stopped")
+      self.assertEqual(second.json()["status"],"financially_stopped")
       third=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
       self.assertEqual(third.json()["provider_card_controls"]["confirmed"],1)
       self.assertEqual(post.call_count,2) # Confirmed control is not repeated.
@@ -194,6 +255,43 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(self.request("GET","/auth/me",token=payload["access_token"]).json()["id"],payload["user"]["id"])
     self.assertEqual(self.client.post("/auth/login",json={"email":email,"password":"r02-password-valid"}).status_code,200)
     self.assertEqual(self.client.post("/auth/login",json={"email":email,"password":"wrong"}).status_code,401)
+
+  def test_logout_revokes_only_presented_session_and_fresh_login_restores_human_actions(self):
+    draft=self.draft()
+    active=self.active()
+    password="isolated-session-password"
+    email=f"{self.auth_id.hex}@example.com"
+    with db.get_conn() as conn:
+      conn.execute("UPDATE users SET password_hash=%s WHERE id=%s",(auth.hash_password(password),self.auth_id))
+    other_session=auth.create_access_token(str(self.auth_id),email)
+    self.assertNotEqual(other_session,self.user_token)
+    self.assertEqual(self.request("POST","/auth/logout",token=self.user_token).status_code,204)
+    for path in ("/auth/me","/identity","/agent-runs","/killswitch","/activity"):
+      self.assertEqual(self.request("GET",path,token=self.user_token).status_code,401)
+    self.assertEqual(self.request("POST",f'/mandates/{draft["id"]}/approve',token=self.user_token,
+      body={**self.binding(draft),"confirmed":True}).status_code,401)
+    self.assertEqual(self.request("GET","/identity",token=self.other_user_token).status_code,200)
+    self.assertEqual(self.request("GET","/identity",token=other_session).status_code,200)
+    # Logout is session control; it does not silently revoke confirmed delegation.
+    self.assertEqual(self.request("GET",f'/mandates/{active["id"]}').json()["status"],"active")
+    login=self.client.post("/auth/login",json={"email":email,"password":password})
+    self.assertEqual(login.status_code,200)
+    fresh=login.json()["access_token"]
+    self.assertNotEqual(fresh,self.user_token)
+    self.assertEqual(self.request("POST",f'/mandates/{draft["id"]}/approve',token=fresh,
+      body={**self.binding(draft),"confirmed":True}).status_code,200)
+    with db.get_conn() as conn:
+      rows=conn.execute("SELECT token_hash,user_id FROM revoked_sessions WHERE user_id=%s",(self.auth_id,)).fetchall()
+      self.assertEqual(len(rows),1)
+      self.assertNotEqual(rows[0]["token_hash"],self.user_token)
+
+  def test_cross_origin_cookie_cannot_authorize_human_confirmation(self):
+    draft=self.draft()
+    response=self.client.post(f'/mandates/{draft["id"]}/approve',
+      headers={"Origin":"https://attacker.invalid","Cookie":"hmw_access_token="+self.user_token},
+      json={**self.binding(draft),"confirmed":True})
+    self.assertEqual(response.status_code,401)
+    self.assertEqual(self.request("GET",f'/mandates/{draft["id"]}').json()["status"],"proposed")
 
   def registered_trace(self):
     mandate = self.active()
@@ -249,8 +347,68 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(self.request("POST","/agent-runs",body=self.run_body(draft)).status_code,409)
     with patch("workflow_control.stop_rail",return_value={"status":"enforced","unused_grants_revoked":2}):
       retried=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
-    self.assertEqual(retried.json()["status"],"stopped")
+    self.assertEqual(retried.json()["status"],"financially_stopped")
     self.assertTrue(self.request("GET","/killswitch",token=self.user_token).json()["rail_enforced"])
+
+  def test_run_stop_is_owned_idempotent_and_preserves_other_runs_and_mandate(self):
+    mandate=self.active()
+    first,second=self.run_body(mandate),self.run_body(mandate)
+    for registration in (first,second):
+      self.assertEqual(self.request("POST","/agent-runs",body=registration).status_code,201)
+    route=f'/agent-runs/{first["id"]}/stop'
+    self.assertEqual(self.request("POST",route).status_code,401)
+    self.assertEqual(self.request("POST",route,token=self.other_user_token).status_code,404)
+    self.assertFalse(self.request("GET",f'/agent-runs/{first["id"]}/control').json()["cancel_requested"])
+    with patch("workflow_control.stop_rail") as rail, patch("workflow_control.close_owned_cards") as cards:
+      responses=[self.request("POST",route,token=self.user_token) for _ in range(2)]
+      rail.assert_not_called()
+      cards.assert_not_called()
+    self.assertEqual(responses[0].json(),responses[1].json())
+    self.assertEqual(responses[0].json()["financial_revocation"],"pending_run_binding")
+    self.assertEqual(responses[0].json()["graph_cancellation"],"not_acknowledged")
+    self.assertFalse(responses[0].json()["previous_authorizations_reversed"])
+    self.assertEqual(self.request("GET",route,token=self.user_token).json(),responses[0].json())
+    self.assertEqual(self.request("GET",f'/agent-runs/{first["id"]}/control').json()["authority_current"],False)
+    self.assertEqual(self.request("GET",f'/agent-runs/{second["id"]}/control').json()["authority_current"],True)
+    self.assertEqual(self.request("POST","/agent-runs",body=first).status_code,409)
+    self.assertEqual(self.request("POST","/agent-runs",body=second).status_code,201)
+    self.assertEqual(self.request("GET",f'/mandates/{mandate["id"]}').json()["status"],"active")
+    self.assertFalse(self.request("GET","/killswitch",token=self.user_token).json()["on"])
+    self.assertEqual(len(self.request("GET","/agent-runs",token=self.user_token).json()["runs"]),2)
+    self.assertEqual(self.request("GET","/agent-runs",token=self.other_user_token).json()["runs"],[])
+    self.assertEqual(self.request("GET","/agent-runs").status_code,401)
+    events=self.request("GET","/activity",token=self.user_token).json()["events"]
+    self.assertEqual(len([e for e in events if e["type"]=="run.stop.requested"]),1)
+
+  def test_run_stop_concurrent_requests_keep_one_durable_intent(self):
+    mandate=self.active()
+    registration=self.run_body(mandate)
+    self.assertEqual(self.request("POST","/agent-runs",body=registration).status_code,201)
+    barrier=Barrier(2)
+    def stop():
+      barrier.wait(timeout=5)
+      return self.request("POST",f'/agent-runs/{registration["id"]}/stop',token=self.user_token)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+      results=list(workers.map(lambda _:stop(),range(2)))
+    self.assertEqual([r.status_code for r in results],[200,200])
+    self.assertEqual(results[0].json(),results[1].json())
+    with db.get_conn() as conn:
+      self.assertEqual(conn.execute("SELECT count(*) n FROM run_cancellations WHERE run_id=%s",(registration["id"],)).fetchone()["n"],1)
+
+  def test_paused_provider_card_is_not_confirmed_closed_and_legacy_intent_survives(self):
+    from unittest.mock import Mock
+    token="card_"+uuid4().hex
+    with db.get_conn() as conn:
+      conn.execute("UPDATE users SET lithic_card_token=%s WHERE id=%s",(token,self.auth_id))
+      conn.execute("INSERT INTO card_control_operations (id,user_id,card_token,requested_state,outcome,observed_state,requested_at) VALUES (%s,%s,%s,'PAUSED','confirmed','PAUSED',%s)",("ctl_"+uuid4().hex,self.owner,token,utc_now()))
+    with patch.dict(os.environ,{"WEBHOOK_INTERNAL_TOKEN":"control-"+"a"*32,"WEBHOOK_URL":"http://rail.test"}), patch("workflow_control.stop_rail",return_value={"status":"enforced","unused_grants_revoked":0}), patch("workflow_control.httpx.Client") as client:
+      client.return_value.__enter__.return_value.post.return_value=Mock(is_success=True,json=lambda:{"provider":"lithic_sandbox","card_token":token,"state":"PAUSED"})
+      result=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
+      self.assertEqual(result.json()["status"],"pending_enforcement")
+      self.assertEqual(result.json()["provider_card_controls"],{"status":"pending","total":1,"confirmed":0})
+    with db.get_conn() as conn:
+      operations=conn.execute("SELECT requested_state,outcome FROM card_control_operations WHERE user_id=%s ORDER BY requested_state",(self.owner,)).fetchall()
+      self.assertEqual(operations,[{"requested_state":"CLOSED","outcome":"unknown"},{"requested_state":"PAUSED","outcome":"confirmed"}])
 
   def test_actual_http_sse_reconnect_replays_without_starting_runs(self):
     import threading

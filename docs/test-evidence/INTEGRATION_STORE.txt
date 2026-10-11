@@ -1,0 +1,12 @@
+LEASH main integration test output; collected 2026-10-11T05:04:26.869545+00:00
+Baseline d773079 plus V2/payment containment work.
+Local/mocked scope; no deployed/provider integration claimed.
+
+...................                                                      [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\hackmidwest-2026\services\store\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+19 passed, 1 warning in 1.89s

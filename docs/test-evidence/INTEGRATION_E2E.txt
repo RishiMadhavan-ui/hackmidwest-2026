@@ -1,0 +1,6 @@
+LEASH main integration test output; collected 2026-10-11T05:04:26.869545+00:00
+Baseline d773079 plus V2/payment containment work.
+Local/mocked scope; no deployed/provider integration claimed.
+
+ssssss                                                                   [100%]
+6 skipped in 0.05s

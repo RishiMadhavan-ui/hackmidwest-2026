@@ -1,0 +1,40 @@
+LEASH main integration test output; collected 2026-10-11T05:04:26.869545+00:00
+Baseline d773079 plus V2/payment containment work.
+Local/mocked scope; no deployed/provider integration claimed.
+
+
+> web@0.1.0 build C:\hackmidwest-2026\web
+> next build
+
+▲ Next.js 16.4.0 (Turbopack)
+- Environments: .env.local
+✓ Running next.config.ts took 101ms
+- Cache Components enabled
+- Partial Prefetching enabled
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 5.8s
+  Running TypeScript ...
+  Finished TypeScript in 11.9s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/8) ...
+  Generating static pages using 11 workers (2/8)
+  Generating static pages using 11 workers (4/8)
+  Generating static pages using 11 workers (6/8)
+✓ Generating static pages using 11 workers (8/8) in 1003ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /backend/activity/stream
+├ ƒ /backend/internal/[[...path]]
+├ ○ /profile
+├ ○ /signin
+├ ○ /signup
+├ ƒ /store/products/[productId]
+└ ƒ /store/products/[productId]/checkout
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

@@ -1,7 +1,7 @@
-"""Lithic sandbox client: account holders, virtual cards, spend-limit headroom.
+"""Lithic sandbox transport: SINGLE_USE purchase cards and legacy card reads.
 
-This sandbox program supports KYC_EXEMPT holders and virtual cards, but not
-financial-account balances. Credit-like headroom is card spend_limit minus
+Program eligibility and live sandbox behavior require external verification.
+Credit-like headroom is card spend_limit minus
 non-declined transaction pending/settled amounts (integer cents).
 
 Never log or persist PAN/CVV.
@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 import httpx
 
@@ -136,36 +137,46 @@ def create_account_holder(
 _ALLOWED_SPEND_DURATIONS = frozenset(
     {"TRANSACTION", "MONTHLY", "ANNUALLY", "FOREVER"}
 )
-_ALLOWED_CARD_TYPES = frozenset({"VIRTUAL", "SINGLE_USE"})
+_ALLOWED_CARD_TYPES = frozenset({"SINGLE_USE"})
 
 
 def create_virtual_card(
     account_token: str,
     *,
+    idempotency_key: str,
     spend_limit_cents: int | None = None,
-    spend_limit_duration: str = "FOREVER",
-    card_type: str = "VIRTUAL",
+    spend_limit_duration: str = "TRANSACTION",
+    card_type: str = "SINGLE_USE",
     memo: str | None = None,
     tags: dict[str, str] | None = None,
     include_payment_details: bool = False,
 ) -> dict[str, Any]:
-    """Issue an OPEN card on an account.
+    """Transport only; the backend must verify and persist issuance first.
+
+    The historical function name is retained. Every new purchase card is
+    SINGLE_USE with an explicit positive verified limit and a caller-persisted
+    UUID key. Never generate a replacement key after an ambiguous outcome.
 
     By default returns token metadata only (no PAN/CVV). When
     ``include_payment_details=True`` (sandbox once-only delivery to an
     authorized caller), pan/exp/cvv are included in the return dict â€” never log them.
     """
-    limit = default_spend_limit_cents() if spend_limit_cents is None else spend_limit_cents
-    if limit < 0:
-        raise LithicError("spend_limit_cents must be >= 0")
+    limit = spend_limit_cents
+    if type(limit) is not int or limit <= 0:
+        raise LithicError("spend_limit_cents must be an explicit positive integer")
+    try:
+        if not isinstance(idempotency_key, str) or str(UUID(idempotency_key)) != idempotency_key.lower():
+            raise ValueError
+    except (ValueError, AttributeError):
+        raise LithicError("idempotency_key must be a persisted UUID") from None
 
-    duration = spend_limit_duration.strip().upper()
+    duration = spend_limit_duration.strip().upper() if isinstance(spend_limit_duration, str) else ""
     if duration not in _ALLOWED_SPEND_DURATIONS:
         raise LithicError(
             f"spend_limit_duration must be one of {sorted(_ALLOWED_SPEND_DURATIONS)}"
         )
 
-    ctype = card_type.strip().upper()
+    ctype = card_type.strip().upper() if isinstance(card_type, str) else ""
     if ctype not in _ALLOWED_CARD_TYPES:
         raise LithicError(f"card_type must be one of {sorted(_ALLOWED_CARD_TYPES)}")
 
@@ -183,31 +194,37 @@ def create_virtual_card(
 
     try:
         with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
-            res = client.post("/v1/cards", headers=_headers(), json=body)
-    except httpx.HTTPError as exc:
-        raise LithicError("Lithic sandbox unreachable") from exc
+            res = client.post("/v1/cards", headers={**_headers(), "Idempotency-Key": idempotency_key}, json=body)
+    except httpx.HTTPError:
+        raise LithicError("Card issuance outcome unknown; reconcile the original operation") from None
 
     data = _json_or_empty(res)
     if res.status_code >= 400:
         raise LithicError(
-            _error_message(data, f"Lithic card create failed ({res.status_code})"),
+            f"Lithic card create failed ({res.status_code}); reconcile the original operation",
             status_code=res.status_code,
         )
 
     token = data.get("token")
-    if not token:
-        raise LithicError("Lithic card response missing token")
+    if (
+        res.status_code not in {200, 201}
+        or not isinstance(token, str) or not token
+        or data.get("type") != "SINGLE_USE"
+        or type(data.get("spend_limit")) is not int or data["spend_limit"] != limit
+        or data.get("spend_limit_duration") != duration
+        or data.get("account_token") != account_token
+        or data.get("state") not in {"OPEN", "PAUSED"}
+    ):
+        raise LithicError("Card issuance response unverified; reconcile the original operation")
 
     out: dict[str, Any] = {
         "card_token": str(token),
         "last_four": str(data.get("last_four") or ""),
-        "spend_limit_cents": int(
-            data.get("spend_limit") if data.get("spend_limit") is not None else limit
-        ),
-        "spend_limit_duration": str(data.get("spend_limit_duration") or duration),
-        "card_type": str(data.get("type") or ctype),
-        "account_token": str(data.get("account_token") or account_token),
-        "state": str(data.get("state") or "OPEN"),
+        "spend_limit_cents": data["spend_limit"],
+        "spend_limit_duration": data["spend_limit_duration"],
+        "card_type": "SINGLE_USE",
+        "account_token": data["account_token"],
+        "state": data["state"],
         "provider": "lithic_sandbox",
     }
     if include_payment_details:

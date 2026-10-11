@@ -210,6 +210,8 @@ def register_run(conn, registration: AgentRunRegistration, principal: Principal,
   if existing is not None:
     if existing["user_id"] != principal.user_id or existing["agent_id"] != principal.agent_id:
       raise AuthorityError(409, "Run identity is already registered")
+    if conn.execute("SELECT run_id FROM run_cancellations WHERE run_id=%s", (registration.id,)).fetchone():
+      raise AuthorityError(409, "Stopped run cannot be registered again")
     if canonical_json(existing["registration"]) != canonical_json(registration):
       raise AuthorityError(409, "Run registration conflicts with its original content")
     original = AgentRun.model_validate(existing["record"])

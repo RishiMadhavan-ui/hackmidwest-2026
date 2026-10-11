@@ -97,7 +97,8 @@ def verify_checkout(
     not item.billing_interval or item.subscription or item.recurring
     for item in checkout.items
   )
-  add("checkout_integrity", recurrence_consistent, "checkout_recurrence_inconsistent")
+  add("checkout_integrity", recurrence_consistent and all(item.unit_cents > 0 for item in checkout.items),
+      "checkout_recurrence_inconsistent" if not recurrence_consistent else "checkout_price_nonpositive")
   add(
     "checkout_valid",
     checkout.source.retrieved_at <= now < checkout.expires_at,

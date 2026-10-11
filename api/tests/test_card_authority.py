@@ -35,6 +35,9 @@ class CardAuthorityTests(unittest.TestCase):
       "id":self.owner, "email":"fixture@example.com"})
     self.user_mock = self.user.start()
     self.addCleanup(self.user.stop)
+    self.revocations = patch("auth.token_is_revoked",return_value=False)
+    self.revocations.start()
+    self.addCleanup(self.revocations.stop)
     self.database = patch("cards.get_conn")
     self.db_mock = self.database.start()
     self.addCleanup(self.database.stop)
@@ -152,8 +155,11 @@ class InternalLithicIntegrationTests(unittest.TestCase):
       transport = MagicMock()
       client.return_value.__enter__.return_value = transport
       transport.post.return_value = httpx.Response(201,json={
-        "token":"fixture-card","last_four":"1234","pan":"fixture-pan","cvv":"fixture-cvv"})
+        "token":"fixture-card","type":"SINGLE_USE","spend_limit":2999,
+        "spend_limit_duration":"TRANSACTION","account_token":"fixture-account","state":"OPEN",
+        "last_four":"1234","pan":"fixture-pan","cvv":"fixture-cvv"})
       card = lithic.create_virtual_card("fixture-account",spend_limit_cents=2999,
+        idempotency_key="493f2c1c-2416-4653-b134-3dd89fdcf609",
         spend_limit_duration="TRANSACTION",card_type="SINGLE_USE",
         tags={"leash_correlation":"fixture-verified-payment"},include_payment_details=True)
       self.assertEqual(card["card_token"],"fixture-card")
@@ -161,6 +167,48 @@ class InternalLithicIntegrationTests(unittest.TestCase):
       self.assertEqual(payload["type"],"SINGLE_USE")
       self.assertEqual(payload["spend_limit"],2999)
       self.assertEqual(payload["tags"]["leash_correlation"],"fixture-verified-payment")
+      self.assertEqual(transport.post.call_args.kwargs["headers"]["Idempotency-Key"],
+        "493f2c1c-2416-4653-b134-3dd89fdcf609")
+
+  def test_purchase_card_rejects_reusable_types_unlimited_limits_and_missing_keys(self):
+    valid = {"spend_limit_cents":2999,"idempotency_key":"493f2c1c-2416-4653-b134-3dd89fdcf609"}
+    invalid = [{"card_type":value} for value in ("VIRTUAL","MERCHANT_LOCKED")] + \
+      [{"spend_limit_cents":value} for value in (None,0,-1,True,29.99,"2999")] + \
+      [{"idempotency_key":value} for value in ("", "new-key", None)]
+    with patch("leash_shared.lithic.httpx.Client") as client:
+      for change in invalid:
+        with self.subTest(change=change), self.assertRaises(lithic.LithicError):
+          lithic.create_virtual_card("fixture-account",**{**valid,**change})
+      client.assert_not_called()
+
+  def test_ambiguous_issuance_never_retries_or_exposes_provider_text(self):
+    key="493f2c1c-2416-4653-b134-3dd89fdcf609"
+    with patch.dict(os.environ,{"LITHIC_API_KEY":"fixture-key"},clear=True), \
+        patch("leash_shared.lithic.httpx.Client") as client:
+      transport=client.return_value.__enter__.return_value
+      transport.post.side_effect=httpx.ReadTimeout("private credentials")
+      with self.assertRaisesRegex(lithic.LithicError,"outcome unknown") as caught:
+        lithic.create_virtual_card("fixture-account",spend_limit_cents=2999,idempotency_key=key)
+      self.assertNotIn("private",str(caught.exception))
+      self.assertEqual(transport.post.call_count,1)
+      transport.post.side_effect=None
+      transport.post.return_value=httpx.Response(201,json={"token":"fixture-card","type":"VIRTUAL"})
+      with self.assertRaisesRegex(lithic.LithicError,"unverified"):
+        lithic.create_virtual_card("fixture-account",spend_limit_cents=2999,idempotency_key=key)
+
+  def test_provider_response_cannot_infer_card_binding_limit_or_state(self):
+    observed={"token":"fixture-card","type":"SINGLE_USE","spend_limit":2999,
+      "spend_limit_duration":"TRANSACTION","account_token":"fixture-account","state":"OPEN"}
+    with patch.dict(os.environ,{"LITHIC_API_KEY":"fixture-key"},clear=True), \
+        patch("leash_shared.lithic.httpx.Client") as client:
+      transport=client.return_value.__enter__.return_value
+      for changes in ({"spend_limit":0},{"spend_limit":3000},{"spend_limit":True},
+                      {"account_token":"foreign-account"},{"state":None},
+                      {"spend_limit_duration":"FOREVER"}):
+        transport.post.return_value=httpx.Response(201,json={**observed,**changes})
+        with self.subTest(changes=changes), self.assertRaisesRegex(lithic.LithicError,"unverified"):
+          lithic.create_virtual_card("fixture-account",spend_limit_cents=2999,
+            idempotency_key="493f2c1c-2416-4653-b134-3dd89fdcf609")
 
 
 if __name__ == "__main__":

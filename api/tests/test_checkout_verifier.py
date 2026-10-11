@@ -14,6 +14,7 @@ from leash_shared.models import (
   PurchaseMandate,
   REQUIRED_VERIFICATION_CHECKS,
 )  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 
 class CheckoutVerifierTests(unittest.TestCase):
@@ -183,3 +184,29 @@ class CheckoutVerifierTests(unittest.TestCase):
       self.assertEqual(
         self.verify(mandate={**self.mandate, **changes}).decision, "BLOCKED"
       )
+
+  def test_matrix_quantity_shipping_tax_and_wrong_category(self):
+    cases = [
+      ("CHK-004", {"quantity":2,"unit_cents":1499}, 0, 0, "quantity_exceeded"),
+      ("CHK-005", {"unit_cents":3600}, 0, 600, "amount_over_limit"),
+      ("CHK-006", {"unit_cents":3900}, 200, 0, "amount_over_limit"),
+      ("CHK-009", {"product_category":"headphones"}, 0, 0, "category_mismatch"),
+      ("CHK-018", {"unit_cents":0}, 0, 0, "checkout_price_nonpositive"),
+    ]
+    for case_id,changes,tax,shipping,reason in cases:
+      item={**self.checkout["items"][0],**changes}
+      subtotal=item["quantity"]*item["unit_cents"]
+      with self.subTest(case=case_id):
+        record=self.verify(checkout={**self.checkout,"items":[item],"subtotal_cents":subtotal,
+          "tax_cents":tax,"shipping_cents":shipping,"total_cents":subtotal+tax+shipping})
+        self.assertEqual(record.decision,"BLOCKED")
+        self.assertIn(reason,record.reasons)
+
+  def test_matrix_currency_arithmetic_quantity_and_negative_price_validation(self):
+    cases = [("CHK-007",{"currency":"EUR"}),
+             ("CHK-011",{"subtotal_cents":2998}), ("CHK-012",{"total_cents":2998})]
+    for field,value in (("quantity",0),("quantity",-1),("unit_cents",-1)):
+      cases.append(("CHK-018",{"items":[{**self.checkout["items"][0],field:value}]}))
+    for case_id,changes in cases:
+      with self.subTest(case=case_id), self.assertRaises(ValidationError):
+        self.verify(checkout={**self.checkout,**changes})

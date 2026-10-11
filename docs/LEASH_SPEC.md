@@ -1,5 +1,21 @@
 # LEASH — Product and MVP Implementation Specification
 
+**Current main integration (`d773079`):** Cameron's checkout/payment work is
+preserved with security containment. Authenticated configured merchant retrieval,
+strict canonical facts/hash validation and durable blocked payment preflight exist.
+`POST /payments` requires the agent's owned registered uncancelled run, current
+confirmed mandate and account gate; `GET /payments/{id}` is user-and-agent scoped.
+A verified charger returns `blocked` / `financial_authority_unavailable` until
+durable issuance/reconciliation and atomic run financial revocation are complete;
+no grant, legacy account card or simulated charge is activated. Subscription
+preflight still returns its deterministic product reasons. Store listing/start,
+catalog/read and binding primitives remain; unbound completion is 403 and a valid
+bound completion is 503 with no rail call. This is tested containment, not a
+finished purchase flow. Committed migration 0007 is unchanged; unpublished V2
+closure/session migrations are now 0008/0009. See [MAIN_INTEGRATION_HANDOFF.md](MAIN_INTEGRATION_HANDOFF.md)
+for the exact risks, owner fixes and enablement gates. Frozen contracts and LKE
+topology remain intact.
+
 Adopted October 10, 2026 from the team's **Product Evolution & MVP Architecture Directive**. This is the authoritative product direction; [AGENTS.md](../AGENTS.md) defines coding rules/path ownership; the synchronized [Leash-build-plan.md](../Leash-build-plan.md) assigns human and coding-agent tasks, dependencies, handoffs, execution gates, and readiness evidence. Conflicting flows/timing/fallbacks from the earlier hotel/gift-card plan are superseded. Compatible stack, ownership, and service boundaries are preserved. Keep these three documents synchronized when direction or ownership changes.
 
 **Status: requirements and implementation plan, not a claim of completed functionality.** Sections 1–20 preserve the earlier directive; section 21 is its historical inspection. Sections 22–25 preserve useful contracts and handoffs. **Section 26 incorporates Rishi's October 10 master alignment specification and takes precedence where earlier sections permit manual/optional recovery, omit Graph/Kill Switch/full SSE, or require Compose.** The [alignment audit](LEASH_ALIGNMENT_AUDIT.md) contains the historical baseline and current requirements-to-code follow-up; historical suite counts and snapshots below are not current completion claims. The original audit was documentation-only; the authorized implementation follow-up changes application code while retaining frozen contracts.
@@ -1346,7 +1362,7 @@ The product API implements health/readiness and JWT signup/login/me; R02 adds ma
 | `POST /mandates/{id}/approve` | Human only | Exact structured payload/version/hash, authenticated confirmation and validity |
 | `GET /mandates`, `GET /mandates/{id}` | Authorized subject/session/agent | No cross-user/session access |
 | Replacement / `PATCH /mandates/{id}` | Human only | Draft replacement, explicit confirmation, immutable history, serialized old-grant revocation |
-| Revoke / `POST /killswitch` | Human only | Serialized invalidation; instrument pause outside ASA |
+| Revoke / `POST /killswitch` | Human only | Serialized invalidation; dedicated instrument closure outside ASA |
 | Internal agents `POST /runs`, `GET /runs/{id}` | `AGENTS_SERVICE_TOKEN`, API dispatch | Actual Strands execution tied to mandate/session, no implied consent |
 | API `POST /agent-runs` | Agent bearer, authenticated mandate owner | Persist exact run ID/mode; server supplies owner/version/hash; echo only after commit |
 | `POST /checkouts/verify`, `GET /checkouts/{id}` | Scoped purchase caller/trusted backend | Server retrieval/assertion validation; no arbitrary public grant minting |
@@ -1531,7 +1547,7 @@ Graph memory is execution progress only. PostgreSQL stores run/attempt state, op
 
 ### 26.3 Financial lifecycle, correlation and ambiguity
 
-Before an external write, persist a user/run/mandate/checkout-bound payment operation with stable idempotency key. Independently retrieve/freeze authenticated merchant facts, run every deterministic check, reserve successful-purchase scope, prepare grant/instrument/merchant correlation, then activate spending only when setup succeeds. Failed or uncertain setup must not leave usable authority. No OPEN/unrestricted card on signup or human login. Any pre-created instrument must be unusable until verified setup and must have reconciled lifecycle; prefer verified-purchase sandbox SINGLE_USE where supported.
+Before an external write, persist a user/run/mandate/checkout-bound payment operation with stable idempotency key. Independently retrieve/freeze authenticated merchant facts, run every deterministic check, reserve successful-purchase scope, prepare grant/instrument/merchant correlation, then activate spending only when setup succeeds. Failed or uncertain setup must not leave usable authority. No OPEN/unrestricted card on signup or human login. Any pre-created instrument must be unusable until verified setup and must have reconciled lifecycle; require exclusively SINGLE_USE for new MVP Lithic purchase cards, with program support verified before selecting that rail.
 
 Grant binding includes owner, run/attempt association, mandate version/hash, checkout revision/hash, exact merchant/amount/currency, instrument, authenticated merchant binding and bounded expiry. The protected merchant charge loads that binding server-side and enforces the same immutable checkout; caller-supplied payment IDs, hashes and card numbers never establish it. Re-fetch/reverify material changes. Atomic issuance/reservation, consume-and-cache-and-event commit, invalidation and idempotency follow 23.5; process-local locks are insufficient.
 
@@ -1539,13 +1555,13 @@ Typed lifecycle concepts are distinct: `VERIFIED`, active grant, card issued, au
 
 Use one pure deterministic rail engine/atomic protocol with separate local and Lithic adapters. The local simulator must run real policy and state transitions, authenticated and accurately labeled. Lithic is conditional on sandbox account/enrollment, configured per-program HMAC, HTTPS responder, current schemas and actual signed approve/decline evidence. For this MVP, reject production/unknown environment rather than silently labeling it sandbox. Do not send credentials to arbitrary configured origins. Lithic ASA performs no LLM/SQL/merchant/provider network calls: Valkey only in its critical path. Validate request type/raw signature/expiry/current revocation, commit before responding and measure real latency. [Lithic ASA documentation](https://docs.lithic.com/docs/auth-stream-access-asa) documents a six-second deadline, recommends three seconds and describes sandbox enrollment/HMAC configuration; it does not establish team readiness.
 
-### 26.4 Mandatory human Kill Switch
+### 26.4 Mandatory human stop controls (V2 scopes in section 27)
 
-An authenticated human can stop their own workflow and unused spending authority. The endpoint verifies owner/session, persists the cancellation/revocation intent, coordinates atomic fast-path invalidation with Cameron, prevents new candidates/grants/charges, and requests worker cancellation. Agents/service tokens cannot exercise human authority. Provider pause/close runs outside ASA through Cameron's adapter and records request/confirmed/failed/unknown outcomes separately.
+An authenticated human can stop their own workflow and unused spending authority. The endpoint verifies owner/session, persists the cancellation/revocation intent, coordinates atomic fast-path invalidation with Cameron, prevents new candidates/grants/charges, and requests worker cancellation. Agents/service tokens cannot exercise human authority. Provider CLOSED requests run outside ASA through Cameron's adapter and records request/confirmed/failed/unknown outcomes separately.
 
 PostgreSQL and Valkey are not one automatic transaction: Rishi and Cameron must agree a tested fail-closed ordering/version protocol. Do not acknowledge `effective` while an old unused grant remains consumable; incomplete synchronization must block new approvals. Durable cancellation survives restart. Approval/invalidation serialize across replicas: if invalidation wins, no new approval; if authorization commits first, preserve it and stop later spending. Repeated clicks return the same operation/outcome. Already authorized/settled payments are not reversed by the Kill Switch. Unknown payments remain reconciling.
 
-Mandatory race tests: before shopping, during browsing, between verification/issuance, after instrument issuance before authorization, concurrent with authorization, after authorization, rapid duplicate clicks, cross-user/agent invocation, restart/replay, Valkey outage and provider pause failure. UI shows requested versus effective, cancellation and actual provider status without overstating instantaneous network effects.
+Mandatory race tests: before shopping, during browsing, between verification/issuance, after instrument issuance before authorization, concurrent with authorization, after authorization, rapid duplicate clicks, cross-user/agent invocation, restart/replay, Valkey outage and provider closure failure. UI shows requested versus effective, cancellation and actual provider status without overstating instantaneous network effects.
 
 ### 26.5 Comprehensive persisted SSE and evidence
 
@@ -1561,7 +1577,7 @@ Persist sanitized state/event coupling before acknowledgment. API is the durable
 | Investigation/containment | `guardian.verdict`, `security.incident_recorded` | Investigation start/end, quarantine/exclusion, evidence correlation |
 | Recovery | No dedicated frozen events | Eligibility/start/restart/exhaustion, clean-context and budget metadata |
 | Grant/card/rail | `grant.*`, `card.issued`, `authorization.decided`, `payment.*` | Setup, actual received authorization, outcome ambiguity/reconciliation/resolution, real supported clearing |
-| Kill Switch | `killswitch.changed` | Requested, durable revocation, atomic invalidation, agent cancellation, provider pause request/result, effective status |
+| Kill Switch | `killswitch.changed` | Requested, durable revocation, atomic invalidation, agent cancellation, provider closure request/result, effective status |
 
 SSE emits persisted `id:`/`event:`/`data:`, heartbeats and authorized catch-up using `Last-Event-ID` or explicit cursor. All read/history/incident/receipt/source routes enforce stable owner/run access; cursors cannot expose another user. SSE disconnect/reconnect never starts/restarts Graph or payment. Define expired-cursor resync and dedup behavior, browser auth compatible with fetch streaming or secure cookie session, and reverse-proxy buffering/timeouts/TLS. Do not put bearer secrets in URLs. Model/tool/event streams from SDK/MCP are not product SSE.
 
@@ -1591,10 +1607,153 @@ Completion requires all previous applicable controls plus actual bounded Graph, 
 
 ### 26.8 Current implementation boundary and safety handoff
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; completion is disabled until protected binding/payment operations exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](../api/alignment-fixes-handoff.md) and [audit](LEASH_ALIGNMENT_AUDIT.md).
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; binding primitives exist, but completion is disabled until durable payment/reconciliation and run financial controls exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and account stop/provider CLOSED intents and partial run Stop are implemented and locally tested. **Not a complete or deployed MVP:** owned durable merchant facts/protected charge binding, spending-enabled payments/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](../api/alignment-fixes-handoff.md) and [audit](LEASH_ALIGNMENT_AUDIT.md).
 
 The pure verifier is not independent evidence until the API authenticates configured merchant retrieval and validates the current human confirmation. Local rail equality checks do not prove an actual store charge; Cameron must enforce immutable checkout/grant/instrument association in the protected merchant. No `/payments` route, issuance/charge operation ledger, or complete live shopping workflow exists yet. ASA receives no trusted SKU correlation and is deliberately incapable of approving, even with a same-merchant/amount card; HMAC authenticates provider origin, not product identity. The internal sandbox simulation route returns 503 until durable payment-operation integrity exists.
 
-Human stop commits authority/cancellation/provider PAUSE intent first, then obtains separately recorded rail and provider outcomes. It has no resume-old-authority endpoint. Agent-owned `/agent-runs/{id}/control` reports cancellation/current authority, but workers do not yet poll it; cancellation must be described as requested. Individual mandate replacement/revocation still needs rail propagation before production grant issuance. Pending or unknown provider outcomes remain visible; PAUSE retry repeats the same durable non-spending intent, never a purchase.
+Account Emergency Kill commits authority/cancellation/provider CLOSED intent first, then obtains separately recorded rail and provider outcomes. It has no resume-old-authority endpoint. Agent-owned `/agent-runs/{id}/control` reports cancellation/current authority, but workers do not yet poll it; cancellation must be described as requested. Individual mandate replacement/revocation still needs rail propagation before production grant issuance. Pending or unknown provider outcomes remain visible; CLOSED retry repeats the same durable non-spending intent, never a purchase.
 
 Authorization consumption, original decision cache and rail stream append are one Lua operation. A fenced relay retries API persistence outside the critical path; identical event replay returns 409. Unsupported/ownerless legacy records remain retained with quarantine markers. Valkey AOF/PVC configuration is source evidence, not verified restart durability. SSE uses commit-ordered SQL cursors and actual persisted sanitized records; comprehensive lifecycle emitters and product views remain mandatory unfinished work.
+
+## 27. V2 post-lesson baseline
+
+This section applies the entire V2 master, including its post-lesson Appendix A,
+to the existing architecture. It supersedes singular-stop/PAUSE/preferred-card
+wording in earlier sections without erasing valid immutable-mandate, verifier,
+MCP, payment correlation, evidence, Kubernetes or team ownership decisions.
+The supplied [137 security cases](LEASH_SECURITY_TEST_CASES.md) are a test
+specification; their exact original NOT_RUN matrix remains unchanged. The
+[coverage index](LEASH_SECURITY_COVERAGE.md) records current source/test functions,
+actual results, gaps and owner; [V2 handoff](../api/v2-stop-handoff.md) defines
+callable interfaces and implementation limits. Passing component tests never
+establish unimplemented or unexercised integration.
+
+### 27.1 Two distinct human stop controls
+
+| Control | Mandatory scope and effect | Other authority |
+|---|---|---|
+| Stop This Purchase | Authenticated owner targets one run; stop its Graph/queued recovery, revoke that run's unused grant/card/tool scope and pending checkout actions | Other runs/mandates/users remain usable; never revoke a shared mandate or static account-wide agent token to fake run isolation |
+| Emergency Kill Switch | Authenticated human suspends account spending, all active runs/mandate delegations, unused grants and relevant dedicated card controls | Other users unaffected; new account spending requires explicit human reenable/new authority without reviving old permissions |
+
+Neither control can be triggered by a shopper/guardian/MCP agent. Record an
+immutable durable command identity/time before dispatch. Repeated/concurrent
+clicks are idempotent; stop cannot silently resume shopping. Financial stop,
+Graph cancellation and provider closure are independent facts. Display requested,
+pending propagation, financially effective, Graph requested/acknowledged,
+card close requested/confirmed/failed/unknown and reconciling payment separately.
+An offline worker or slow provider cannot force an approval or fabricated
+cancellation acknowledgment. Do not report a stopped purchase while usable
+permission remains, or claim previous authorizations/settlement were reversed.
+
+### 27.2 Revocation cutover and distributed races
+
+PostgreSQL, Valkey, Strands and Lithic do not share one native atomic transaction.
+The recommended protocol (still requiring H14 contract agreement and tests) is:
+
+1. Persist account/run stop operation, suspension and advancing generations.
+   Serialize with issuing authority and require current scope at every grant/card
+   issuance boundary. A pending stop blocks new authority immediately.
+2. Apply the run/account Valkey revocation barrier. Bind each grant to its issuing
+   run/account generations and atomically check current generations/suspension,
+   mandate version/hash, checkout/card binding, expiry, purchase scope and unused
+   state with consumption, original decision cache and event append.
+3. Acknowledge **financially effective** only after that barrier is confirmed.
+   Retry via durable outbox/reconciliation on outage/crash. Missing fast state,
+   wiped Valkey or unrehydrated generations fail closed; AOF/PVC declaration is
+   not a proof of loss recovery. An equivalent tested safety protocol is valid.
+4. Independently request cancellation of the owning leased/fenced Graph worker,
+   invalidate exact run credentials/tool scope, and close the exact still-unused
+   dedicated cards. Track actual acknowledgments and reconcile unknown outcomes.
+
+If stop commits first in the fast path, new distinct authorizations decline. If
+authorization commits first, retain its original approval/history and stop later
+spending. Matching provider retries return the original decision after Stop
+without consuming again; altered same-ID payload is a conflict. Do not delete
+consumed grants/retry cache/history during demo resets. Stale verification ALLOW
+cannot mint authority after Stop; stale workers cannot issue new cards under a
+replacement run ID. Unknown card creation/authorization/charge outcomes prohibit
+new purchases and automatic recovery until reconciled.
+
+### 27.3 Real Graph cancellation and clean recovery
+
+Aditya must use real installed GraphBuilder/Graph for shopping, independent
+verification, guardian investigation, deterministic containment, conditional
+fresh-context recovery, payment and terminal state. Configure candidate caps,
+max node executions, node/whole-execution timeout and recovery eligibility.
+The installed SDK supports cooperative Agent.cancel()/invocation cancel_signal;
+it acts locally at cancellation-safe boundaries and does not revoke financial
+permission. Graph/node transport must route cancel to the owning worker, preserve
+durable stop state across pods and fence stale leases. No guaranteed distributed
+graph.cancel(run_id) exists in the current application.
+
+Check persisted run/account/mandate authority before node/edge transitions and
+again in MCP/API financial operations. Cancel model streaming/tool work best
+effort; independent backend financial gates remain authoritative. Never route
+stop, expiry, hard rail decline, unknown provider outcome or success into recovery.
+Only a rejected pre-payment candidate can enter bounded recovery. Quarantine its
+source/hash/SKU/checkout; a fresh shopper context receives the original unchanged
+mandate plus sanitized constraints/exclusions, never the hostile transcript.
+
+### 27.4 Exclusive SINGLE_USE purchase-card policy
+
+Every new MVP Lithic purchase card is exclusively **SINGLE_USE**, one per
+independently verified authorized checkout. VIRTUAL/MERCHANT_LOCKED are forbidden
+substitutes. Require exact amount/currency/merchant/checkout-to-charge correlation,
+separate scoped one-use grant and current run/account authority. A provider card
+type cannot distinguish equal-price SKUs. The signature charger/subscription
+remain the same merchant, 2999 cents and USD; canonical product/recurrence checks
+must independently block the subscription.
+
+Persist issuance/payment operation and stable provider Idempotency-Key before
+external writes. Use the original key when reconciling uncertain delivery; never
+blindly mint a second card/charge. Use explicit positive integer spend limits
+(zero is unlimited at Lithic), server-only provider credentials and once-only
+secret delivery; no durable/logged PAN/CVV. SINGLE_USE closes after its first
+successful authorization but does not cancel subsequent clearing, refund or
+force-post processing. Human stop requests **CLOSED** for unused dedicated cards;
+PAUSED is only deliberate temporary control and is not proof of closure.
+Provider response/error/outage requires truthful pending/failed/unknown status.
+
+Actual program support, ASA enrollment, HMAC, reachable protected HTTPS, signed
+provider tests and checkout-to-charge association must be verified before claiming
+Lithic sandbox. Otherwise use the conspicuously labeled **Local Payment Rail
+Simulator** with actual deterministic/atomic enforcement; do not invent Lithic IDs
+or provider approvals. See [Lithic create-card schema](https://docs.lithic.com/reference/postcards).
+
+### 27.5 Evidence, identity, runtime and truthful implementation
+
+Comprehensive sanitized persisted SSE covers auth/mandates, actual inference,
+Graph node/edge/cancel, MCP tools/listings, verification, guardian, containment,
+recovery, grants/cards/authorizations/reconciliation/revocation. Backend history
+survives refresh and reconnect with stable cursors/de-duplication; subscribing
+does not launch a run. Distinguish blocked checkout, grant permission, authorized,
+unknown/reconciling and settled. Never expose private reasoning, provider secrets,
+raw sensitive arguments or fabricate live events. Both stop controls display
+their scope and independent outcome states.
+
+Preserve Cameron's existing Kubernetes and selected auth foundation. Backend
+validates the stable human identity; ephemeral agent credentials require owned
+run/mandate/version/tool/audience/expiry scope. Static mode-separated tokens are
+not equivalent to these scopes. Keep private service authentication, explicit
+Secret allowlists, provider keys out of shopper/MCP/frontend, persistent spool/
+Valkey and tested network/TLS/readiness. Validate actual images, CNI, PVC mounts,
+Secrets/provisioning and running pods; source YAML is not deployment evidence.
+
+Current V2 fixes: owned human run stop/list/status, immutable SQL stop/event and
+same-stopped-ID registration gate; forward CLOSED migration and confirmed-closure
+reconciliation; SINGLE_USE-only provider transport with explicit positive limit
+and caller UUID key; separate profile controls; additional deterministic negative
+tests. **Partial, not complete:** no run financial barrier/card binding, real
+Graph cancellation, scoped launch token, complete payments/issuance ledger,
+trusted owned merchant charge or live sandbox proof. Run stop returns pending
+run binding; account financially_stopped excludes Graph acknowledgment. Shared
+frozen models/events are unchanged. Safe additive H14 contract work, owner tasks
+R13/C11/A14 and full P0 acceptance are in the build plan and audit.
+
+Human JWT logout now commits hashed session revocation and its audit event
+together (migration 0009). Further requests using that JWT are denied; fresh
+logins have unique jti values, while other sessions and confirmed delegations
+remain intact. Logout is not financial Stop and does not undo an in-flight
+operation that already passed authentication. Ambient cookies cannot authorize
+confirmation in the selected Bearer stack; revisit CSRF handling if cookie auth
+is introduced. Ephemeral agent run/audience scopes remain R12 work.

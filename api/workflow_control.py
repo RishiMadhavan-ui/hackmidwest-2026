@@ -65,13 +65,13 @@ def stop_rail(user_id: str) -> dict:
   }
 
 
-def pause_owned_cards(user_id):
-  """Retry the same durable PAUSE intent; never open a card or spend again."""
+def close_owned_cards(user_id):
+  """Reconcile durable CLOSED intents. Historical PAUSE records remain intact."""
   token = os.getenv("WEBHOOK_INTERNAL_TOKEN", "").strip()
   url = os.getenv("WEBHOOK_URL", "").strip().rstrip("/")
   with get_conn() as conn:
     operations = conn.execute(
-      "SELECT * FROM card_control_operations WHERE user_id=%s ORDER BY id", (user_id,)
+      "SELECT * FROM card_control_operations WHERE user_id=%s AND requested_state='CLOSED' ORDER BY id", (user_id,)
     ).fetchall()
   confirmed = 0
   for operation in operations:
@@ -85,21 +85,20 @@ def pause_owned_cards(user_id):
           response = client.post(
             "/internal/lithic/card-state",
             headers={"Authorization": "Bearer " + token},
-            json={"card_token": operation["card_token"], "state": "PAUSED"},
+            json={"card_token": operation["card_token"], "state": "CLOSED"},
           )
         data = response.json()
         if (
           response.is_success
           and data.get("provider") == "lithic_sandbox"
           and data.get("card_token") == operation["card_token"]
-          and data.get("state") in {"PAUSED", "CLOSED"}
+          and data.get("state") == "CLOSED"
         ):
           observed = data["state"]
       except (httpx.HTTPError, ValueError, AttributeError):
         pass
     with get_conn() as conn:
-      # Concurrent retries must not overwrite a prior confirmed pause with an
-      # ambiguous timeout. The same operation ID and PAUSE intent survive retry.
+      # A late timeout cannot overwrite another retry's confirmed closure.
       conn.execute(
         """UPDATE card_control_operations SET outcome=%s,
         observed_state=%s,observed_at=%s WHERE id=%s AND outcome!='confirmed'""",
@@ -111,7 +110,7 @@ def pause_owned_cards(user_id):
         event_type="card.control.outcome",
         data={
           "operation_id": operation["id"],
-          "requested_state": "PAUSED",
+          "requested_state": "CLOSED",
           "outcome": "confirmed" if observed else "unknown",
           "observed_state": observed,
           "provider": "lithic_sandbox",
@@ -123,7 +122,7 @@ def pause_owned_cards(user_id):
   # Read committed state; another concurrent retry may have confirmed an outcome.
   with get_conn() as conn:
     row = conn.execute(
-      "SELECT count(*) total,count(*) FILTER (WHERE outcome='confirmed') confirmed FROM card_control_operations WHERE user_id=%s",
+      "SELECT count(*) total,count(*) FILTER (WHERE outcome='confirmed' AND observed_state='CLOSED') confirmed FROM card_control_operations WHERE user_id=%s AND requested_state='CLOSED'",
       (user_id,),
     ).fetchone()
   return {
@@ -148,11 +147,13 @@ def stop_workflow(
     conn.execute(
       "SELECT id FROM leash_users WHERE id = %s FOR UPDATE", (principal.user_id,)
     )
-    conn.execute(
+    first_stop = conn.execute(
       """INSERT INTO user_workflow_controls (user_id, stopped, changed_at)
-      VALUES (%s,true,%s) ON CONFLICT (user_id) DO UPDATE SET stopped=true""",
+      VALUES (%s,true,%s) ON CONFLICT (user_id) DO UPDATE
+      SET stopped=true,changed_at=EXCLUDED.changed_at
+      WHERE NOT user_workflow_controls.stopped RETURNING user_id""",
       (principal.user_id, now),
-    )
+    ).fetchone()
     heads = conn.execute(
       "SELECT * FROM mandate_heads WHERE user_id = %s ORDER BY id FOR UPDATE",
       (principal.user_id,),
@@ -187,7 +188,7 @@ def stop_workflow(
       operation_id = "ctl_" + uuid4().hex
       created = conn.execute(
         """INSERT INTO card_control_operations
-            (id,user_id,card_token,requested_state,requested_at) VALUES (%s,%s,%s,'PAUSED',%s)
+            (id,user_id,card_token,requested_state,requested_at) VALUES (%s,%s,%s,'CLOSED',%s)
             ON CONFLICT (user_id,card_token,requested_state) DO NOTHING RETURNING id""",
         (operation_id, principal.user_id, card["card_token"], now),
       ).fetchone()
@@ -198,20 +199,21 @@ def stop_workflow(
           event_type="card.control.requested",
           data={
             "operation_id": operation_id,
-            "requested_state": "PAUSED",
+            "requested_state": "CLOSED",
             "provider": "lithic_sandbox",
           },
           auth_user_id=_auth_id(conn, principal.user_id),
         )
-    emit_activity(
-      conn,
-      user_id=principal.user_id,
-      event_type=EventType.KILLSWITCH_CHANGED.value,
-      data={"on": True, "stage": "requested", "mandates_revoked": revoked},
-      auth_user_id=_auth_id(conn, principal.user_id),
-    )
+    if first_stop:
+      emit_activity(
+        conn,
+        user_id=principal.user_id,
+        event_type=EventType.KILLSWITCH_CHANGED.value,
+        data={"on": True, "scope": "account", "stage": "requested", "mandates_revoked": revoked},
+        auth_user_id=_auth_id(conn, principal.user_id),
+      )
   rail = stop_rail(principal.user_id)
-  cards = pause_owned_cards(principal.user_id)
+  cards = close_owned_cards(principal.user_id)
   with get_conn() as conn:
     if rail["status"] == "enforced":
       conn.execute(
@@ -227,12 +229,13 @@ def stop_workflow(
     )
   return {
     "on": True,
-    "status": "stopped"
+    "status": "financially_stopped"
     if rail["status"] == "enforced" and cards["status"] != "pending"
     else "pending_enforcement",
     "mandates_revoked": revoked,
     "rail": rail,
     "run_cancellation": "requested",
+    "graph_cancellation": "not_acknowledged",
     "provider_card_controls": cards,
     "previous_authorizations_reversed": False,
   }
@@ -253,7 +256,7 @@ def get_stop(principal: Annotated[Principal, Depends(require_human)]):
       (principal.user_id,),
     ).fetchone()
     cards = conn.execute(
-      "SELECT count(*) total,count(*) FILTER (WHERE outcome='confirmed') confirmed FROM card_control_operations WHERE user_id=%s",
+      "SELECT count(*) total,count(*) FILTER (WHERE outcome='confirmed' AND observed_state='CLOSED') confirmed FROM card_control_operations WHERE user_id=%s AND requested_state='CLOSED'",
       (principal.user_id,),
     ).fetchone()
   return {
@@ -298,3 +301,76 @@ def run_control(run_id: RunId, principal: Annotated[Principal, Depends(require_a
     "cancel_requested": bool(cancelled),
     "authority_current": bool(allowed),
   }
+
+
+def _owned_run(conn, run_id, user_id):
+  run = conn.execute(
+    "SELECT * FROM agent_runs WHERE id=%s AND user_id=%s", (run_id, user_id)
+  ).fetchone()
+  if run is None:
+    raise AuthorityError(404, "Registered run not found")
+  return run
+
+
+def _run_stop_state(conn, run):
+  cancelled = conn.execute(
+    "SELECT requested_at FROM run_cancellations WHERE run_id=%s", (run["id"],)
+  ).fetchone()
+  return {
+    "run_id": run["id"],
+    "scope": "run",
+    "cancel_requested": bool(cancelled),
+    "requested_at": cancelled["requested_at"] if cancelled else None,
+    "status": "pending_enforcement" if cancelled else "not_requested",
+    # R01 grants/cards have no authoritative run binding. Never broaden a run
+    # stop to an account stop or report a rail barrier that does not exist.
+    "financial_revocation": "pending_run_binding" if cancelled else "not_requested",
+    "graph_cancellation": "not_acknowledged",
+    "provider_card_controls": "pending_run_binding" if cancelled else "not_requested",
+    "previous_authorizations_reversed": False,
+  }
+
+
+@router.get("/agent-runs")
+def list_owned_runs(principal: Annotated[Principal, Depends(require_human)]):
+  with get_conn() as conn:
+    runs = conn.execute(
+      "SELECT * FROM agent_runs WHERE user_id=%s ORDER BY record->>'created_at' DESC,id LIMIT 100",
+      (principal.user_id,),
+    ).fetchall()
+    return {
+      "runs": [
+        {"id": run["id"], "mandate_id": run["mandate_id"],
+         "agent_mode": run["registration"]["agent_mode"],
+         "stop": _run_stop_state(conn, run)} for run in runs
+      ],
+      "limit": 100,
+    }
+
+
+@router.get("/agent-runs/{run_id}/stop")
+def get_run_stop(run_id: RunId, principal: Annotated[Principal, Depends(require_human)]):
+  with get_conn() as conn:
+    return _run_stop_state(conn, _owned_run(conn, run_id, principal.user_id))
+
+
+@router.post("/agent-runs/{run_id}/stop")
+def stop_run(run_id: RunId, principal: Annotated[Principal, Depends(require_human)]):
+  with get_conn() as conn:
+    # Registration/approval/account stop take this same first lock. This
+    # operation never revokes a shared mandate or another run's permissions.
+    conn.execute("SELECT id FROM leash_users WHERE id=%s FOR UPDATE", (principal.user_id,))
+    run = _owned_run(conn, run_id, principal.user_id)
+    created = conn.execute(
+      """INSERT INTO run_cancellations (run_id,user_id,requested_at)
+      VALUES (%s,%s,%s) ON CONFLICT DO NOTHING RETURNING run_id""",
+      (run_id, principal.user_id, utc_now()),
+    ).fetchone()
+    if created:
+      emit_activity(
+        conn, user_id=principal.user_id, event_type="run.stop.requested",
+        data={"run_id": run_id, "scope": "run", "financial_revocation": "pending_run_binding",
+              "graph_cancellation": "not_acknowledged"},
+        auth_user_id=_auth_id(conn, principal.user_id),
+      )
+    return _run_stop_state(conn, run)

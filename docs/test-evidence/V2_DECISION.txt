@@ -1,0 +1,10 @@
+LEASH V2 local test output; collected 2026-10-11T04:25:41.748039+00:00
+Source baseline f2f50a5 plus current main working changes.
+No deployed/provider integration claimed.
+
+test_all_rail_cases (test_decision_cases.RailDecisionCases.test_all_rail_cases) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.097s
+
+OK

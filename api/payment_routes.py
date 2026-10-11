@@ -1,4 +1,4 @@
-"""Agent payment proposals: independent verify + grant, never agent cart proof."""
+"""Agent payment preflight; unfinished financial authority always fails closed."""
 
 from typing import Annotated, Any
 
@@ -17,16 +17,7 @@ Agent = Annotated[Principal, Depends(require_agent)]
 def create_payment(body: PaymentProposal, principal: Agent) -> dict[str, Any]:
   with get_conn() as conn:
     response = request_payment(conn, body, principal)
-    conn.commit()
-  out = response.model_dump(mode="json")
-  instrument = getattr(response, "_instrument_token", None)
-  last4 = getattr(response, "_card_last4", None)
-  if instrument and out.get("status") == "approved":
-    # Once for the approved caller so complete_checkout can present the bound instrument.
-    out["instrument_token"] = instrument
-    if last4:
-      out["card_last4"] = last4
-  return out
+  return response.model_dump(mode="json")
 
 
 @router.get("/payments/{payment_id}")

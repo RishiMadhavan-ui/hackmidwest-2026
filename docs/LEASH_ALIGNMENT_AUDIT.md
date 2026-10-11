@@ -1,6 +1,133 @@
 # LEASH product, architecture and implementation alignment audit
 
-## Current implementation follow-up on main
+## Latest main integration: Cameron d773079 plus V2 containment
+
+The original V2 audit below started at f2f50a5. A later fetch found Cameron's
+`d773079` (PR #14), which is preserved by fast-forward on main, with no reset,
+stash or branch switch. There were no overlapping file conflicts; his committed
+0007 payment migration remains unchanged and the unpublished closure/session
+migrations moved to 0008/0009. Current [integration handoff](MAIN_INTEGRATION_HANDOFF.md)
+supersedes preflight/route status claims in historical sections.
+
+Serious incoming drift was reported before edits: external grant writes preceded
+durable SQL, payments ignored run cancellation, instruments reused old account
+cards, count scope was global, canonical mapping defaulted missing facts/currency,
+reads lacked same-user agent isolation, and completion retried fresh authorization
+IDs with only process-memory outcomes. Narrow authorized fixes preserve retrieval,
+blocked-attempt persistence, storefront and binding primitives while preventing
+unsafe spending. This does not establish a finished local purchase demo.
+
+Now implemented/tested: strict authenticated preflight, registered owned run and
+stop checks, user/agent payment reads, immutable stop requests, exclusive SINGLE_USE
+transport, session revocation and CLOSED intents. Partially implemented: merchant
+ownership/freeze and financial ledger. Missing: actual Graph/cancel/recovery,
+run financial barrier, operation-before-side-effects and reconciliation. External
+configuration/live sandbox/LKE proof remain unverified. The 137-case assessment
+is unchanged; new passing regression methods do not establish full acceptance.
+
+## V2 post-lesson audit and implementation on main
+
+**Verdict: V2 desired-state docs reconciled; implementation remains partial and
+is not ready for a truthful complete three-minute demo.** All four attachments
+were read completely before changes. Main started clean at `f2f50a5`, matching
+fetched origin/main; no teammate push was present at that inspection. Serious
+contradictions were reported before broad edits. User's direct instruction to
+implement safely possible fixes supersedes the synchronization attachment's
+docs-only step; attached test descriptions are requirements, not observed results.
+No branch switch/reset/stash, provider operation, shared database change,
+deployment/provisioning or teammate contact occurred. Frozen R01 models/events
+and existing service ownership remain unchanged.
+
+### Delta verdict and document precedence
+
+| Direction | Before V2 | Current desired state / exact location |
+|---|---|---|
+| Human authority, semantic verifier, exact checkout correlation, atomic one-use grants | Already covered; foundations only partially integrated | Preserve sections 4–6, 23 and 26; [section 27](LEASH_SPEC.md#27-v2-post-lesson-baseline) strengthens stop/issuance gates |
+| Run Stop versus emergency | Earlier singular account Kill Switch blurred scope | Newly explicit: independent owned run Stop This Purchase and account Emergency Kill Switch, section 27.1; unrelated runs/users remain usable |
+| Stop cutover/restart/race | Account latch exists; complete SQL/Valkey issuance synchronization absent | Section 27.2: durable requested command plus separately acknowledged atomic financial barrier, generations or equivalent fencing, loss recovery and original retry semantics |
+| Graph | Real Graph/recovery already mandatory but not implemented | Section 27.3: actual SDK limits, owning-worker local cooperative cancellation plus persisted scope/lease fencing; no invented cross-pod graph.cancel API |
+| Lithic card type/lifecycle | Wrapper allowed/defaulted VIRTUAL; docs preferred SINGLE_USE/PAUSE | Conflicting behavior fixed at transport: exclusive SINGLE_USE, positive explicit limit/stable UUID key, CLOSED intents; one verified checkout/operation per card still missing, section 27.4 |
+| Identity/logout | JWT foundation retained; logout event only | Durable per-session token-hash revocation/new-login jti added. Static shopper tokens still lack expiry/audience/run scope. Logout is not financial Stop. Section 27.5 |
+| Security cases | Component suites and six gated scenarios, no 137-case index | Exact supplied [137-case specification](LEASH_SECURITY_TEST_CASES.md) plus [complete current coverage index](LEASH_SECURITY_COVERAGE.md) |
+
+The AGENTS V2 precedence/invariants/current-handoff blocks, build-plan V2
+precedence and R13/C11/A14/H14 gates, and spec27 are synchronized. Earlier account
+PAUSE-only implementation claims and original audit results below are historical,
+not the current implementation boundary. Under-$40 is normalized to inclusive
+max_cents=3999; no unagreed exclusive-limit field or new reason enum was invented.
+
+### Critical drift, current paths and exact safe fixes
+
+| Severity | Current code boundary / implementation status | Risk / required safe fix and owner |
+|---|---|---|
+| **P0 run financial stop — partial** | [workflow_control.py:stop_run](../api/workflow_control.py) persists owned immutable cancellation/event; [models.py:AuthorizationGrant](../shared/leash_shared/models.py) lacks run/generation binding. Provider card rows lack authoritative run/checkout association. | New financial permission cannot be safely revoked by run without affecting unrelated authority. API explicitly returns pending_run_binding. **Rishi R13/R12 + Cameron C11, Aditya consumer:** agree additive H14 contracts, issuing-generation/run binding and atomic financial barrier; never substitute account stop or close all account cards for a run. |
+| **P0 actual Graph/cancellation — missing** | [runs.py:run_shopper/RunManager](../services/agents/shopper/runs.py) calls a single Agent with in-memory progress; no Graph/limits/clean recovery, control polling, lease/fence or owning-worker cancellation. | Stopped/restarted worker could continue/replace a run; SQL intent does not stop an invocation. **Aditya A11/A12/A14 + Rishi R12:** actual bounded Graph, persisted eligibility, run scopes/human launch, owner dispatch/cooperative cancel and stale-worker fencing. SDK installed capability is not implemented orchestration. |
+| **P0 verified payment chain — missing/partial** | [checkout_verifier.py:verify_checkout](../api/checkout_verifier.py) uses explicit trusted-caller predicates; [payment_service.py:request_payment](../api/payment_service.py) has authenticated retrieval and blocked-attempt persistence, but no spending-enabled issuance/reconciliation path. [store/main.py:get_checkout/complete_checkout](../services/store/main.py) has process-memory binding primitives without owned durable freeze/charge; valid-bound completion remains 503. | Schemas/agent claims/booleans cannot establish independent checkout trust. **Cameron C02 + Rishi R03/R04/R11:** configured authenticated retrieval, owner/revision/freeze and exact protected charge association; durable attempts/issuance keys/reconciliation before external writes. Keep direct issuance/completion blocked until complete. |
+| **P0 cross-store stop/issuance/loss — partial** | [workflow_control.py:stop_workflow](../api/workflow_control.py) commits SQL then separate rail/card calls; [webhook/store.py:RedisGrantStore](../services/webhook/store.py) has account latch/atomic consume/cache/stream but no run generations or durable rehydration protocol. Individual mandate replace/revoke still lacks rail propagation. | Delayed propagation, wiped fast state and stale issuing scope can invalidate the assumption of current authority. **Rishi R11/R13 + Cameron C04/C11:** persist operation/outbox, gate issuance, establish precise Valkey cutover and fail closed until durable generations/revocations rehydrated; race/rebuild tests. AOF/PVC alone is not this guarantee. |
+| **P0 provider lifecycle — transport hardened, integration missing** | [lithic.py:create_virtual_card](../shared/leash_shared/lithic.py) now rejects reusable types/zero/default limits, sends caller UUID key and exposes unknown outcome without retries. [workflow_control.py:close_owned_cards](../api/workflow_control.py) records/retries CLOSED, never counts PAUSED as closure. | Provider idempotency, one verified operation/card, once-only secret delivery, multi-card run inventory and create/charge reconciliation are not proven. **Rishi R04/R11 + Cameron C05/C09:** durable operation before call, sandbox support/idempotency/read-back tests, exact card/run binding; no new key/card on unknown outcome. |
+| **P0 ASA/merchant correlation — blocked approvals** | [handler.py:authorize](../services/webhook/handler.py) and signed ASA adapter deliberately fail closed without trusted checkout/SKU correlation. | HMAC/card type/merchant/amount cannot prove SKU. **Cameron + Rishi H05/C05:** protected merchant association before ASA approvals; verify program/enrollment/HMAC/HTTPS with real signed sandbox traffic, otherwise labeled local rail. Do not populate matching metadata from a grant to fabricate independent charge evidence. |
+| **P0 complete evidence/UI/demo — partial** | [activity.py:stream_activity](../api/activity.py) persists/replays real owned events; [run-stops.tsx](../web/src/components/run-stops.tsx) and [kill-switch.tsx](../web/src/components/kill-switch.tsx) show separate controls with pending states. Product views/Graph/payment lifecycle emitters and genuine live model/injection are missing. | Passing profile/feed tests cannot establish Mission Control, automatic recovery, complete SSE, stop acknowledgments or a live demo. **Rishi R06/R07–R10 + Aditya A13/A07/A10:** real state projections/events, browser acceptance, D1–D4 and timed rehearsal. |
+| **P1 logout — fixed in local SQL/HTTP scope** | [auth.py:logout/token_is_revoked](../api/auth.py), forward migration 0009, unique new-login jti. | Presented JWT now denied on future human routes; no raw token persisted, unrelated sessions/delegations preserved. Existing in-flight mutations that passed auth are not automatically undone; run/account Stop remains required to revoke delegated authority. Deployment and provider/session integration remain unverified. |
+| **P1 zero-price schema — contract conflict retained visibly** | Frozen [models.py:CheckoutItem](../shared/leash_shared/models.py) Cents permits zero; verifier now blocks nonpositive item prices. | CHK-018 requests Pydantic validation-stage rejection. **Rishi with all-three contract review:** decide additive stricter purchase validation without changing legitimate shared zero-valued tax/shipping semantics; current case is NOT_RUN, not PASS. |
+
+### Two-stop design: what is implemented and what is still proposed
+
+Run API is human-owned, idempotent and durably scoped; it leaves another run and
+shared mandate active and rejects registration retry using its same stopped ID.
+It returns financial_revocation=pending_run_binding and Graph=not_acknowledged.
+No effective run financial barrier, card closure or short-lived credential
+revocation is claimed. A new run ID using the same static credential is still a
+gap requiring human-launch scope; do not call RST-018 complete.
+
+Emergency API revokes owned SQL authority/cancel intents before external calls,
+gets acknowledgment from the existing atomic account rail latch, and records
+provider CLOSED intent before requesting closure. Unknown/PAUSED/wrong-card
+responses remain pending, concurrent late timeout cannot overwrite a confirmed
+closure. Top-level financially_stopped means financial acknowledgments only;
+Graph remains unacknowledged. Prior approved cached decisions/history are retained.
+There is no reenable-old-authority route. Multiple-card, simultaneous global Stop,
+provider, pod restart and generation rehydration acceptance remain unproven.
+
+The correct H14 protocol, scoped credentials, race branches, explicit statuses,
+distributed SDK cancellation and exact owner gates are specified in
+[the V2 handoff](../api/v2-stop-handoff.md). This is a proposal needing contract
+review, not a claim those cross-service wires are frozen or implemented.
+
+### Requirements, tests and remaining dependencies
+
+The [137-row implementation index](LEASH_SECURITY_COVERAGE.md) is the complete
+requirement-by-requirement matrix for V2: source path/function, owner, actual or
+planned test, existence, environment/command/evidence, status and remaining fix.
+The original specification bytes have SHA256
+F709498DECB7FC78ECD2846A6F6E786498FFA29658A036D4558F8A9FB28D9D4D.
+Current assessment: **35 PASS in explicitly tested component scopes, 46 NOT_RUN,
+51 MISSING, 5 BLOCKED_EXTERNAL; total 137.** No complete live Graph, sandbox
+payment integration, effective run financial stop or demo is claimed. Current
+test outputs and exact environments are in [V2_TEST_RESULTS.md](V2_TEST_RESULTS.md).
+
+Highest priorities in dependency order: **all three H14** agree run/attempt/
+checkout/grant/card/generation/credential contracts; **Cameron C02/C11 + Rishi
+R03/R04/R11/R13** implement trusted durable financial/stop barriers; **Aditya
+A11/A12/A14** implements real bounded Graph/clean recovery/worker cancellation;
+**Rishi R06/R07–R10 + Aditya A13** complete real events and UI; **Cameron C06/C09/C10
+and all three A07/A10** verify LKE/selected rail/full negative subset/D1–D4.
+Build-plan tasks name artifacts, consumers and completion gates for humans and
+their agents; no lane was reassigned.
+
+External dependencies: sandbox SINGLE_USE program support/idempotency/ASA enrollment,
+HMAC/HTTPS, actual LKE image/source/Secrets/TLS/CNI/PVC/worker bindings, genuine
+Akamai inference tool call and live injection/rehearsal. Missing Graph, ledger,
+run scopes, merchant binding and rehydration are implementation work, not external
+configuration excuses. Use actual local rail labeling while provider proof is absent.
+
+Documents changed: AGENTS V2 rules/status; LEASH_SPEC normative section27;
+Leash-build-plan R13/C11/A14/H14 and dependency gates; this audit; exact security
+case file; coverage index; test-results/evidence; api/v2-stop-handoff and historical
+alignment handoff precedence. Prior valid integrations/contracts/history preserved.
+
+## Historical pre-V2 implementation follow-up on main
+
+### Pre-V2 implementation follow-up on main
 
 The master specification remains the desired-state baseline. This follow-up integrates Cameron's activity/local rail (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with authorized implementation fixes (`09ee628` and the integration change containing this report). Main is retained; teammate commits are preserved. No reset/stash/branch switch, shared database mutation, deployment, provider operation or teammate contact occurred. Frozen R01 `models.py` and `events.py` are unchanged. The original documentation-only audit is retained below as history; it is not current implementation status.
 

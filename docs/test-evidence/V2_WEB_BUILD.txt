@@ -1,0 +1,39 @@
+LEASH V2 local test output; collected 2026-10-11T04:25:41.748039+00:00
+Source baseline f2f50a5 plus current main working changes.
+No deployed/provider integration claimed.
+
+
+> web@0.1.0 build C:\hackmidwest-2026\web
+> next build
+
+▲ Next.js 16.4.0 (Turbopack)
+- Environments: .env.local
+✓ Running next.config.ts took 97ms
+- Cache Components enabled
+- Partial Prefetching enabled
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 2.1s
+  Running TypeScript ...
+  Finished TypeScript in 7.1s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/8) ...
+  Generating static pages using 11 workers (2/8)
+  Generating static pages using 11 workers (4/8)
+  Generating static pages using 11 workers (6/8)
+✓ Generating static pages using 11 workers (8/8) in 2.2s
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /backend/activity/stream
+├ ƒ /backend/internal/[[...path]]
+├ ○ /profile
+├ ○ /signin
+├ ○ /signup
+└ ƒ /store/products/[productId]
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

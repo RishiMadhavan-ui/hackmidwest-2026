@@ -1,5 +1,15 @@
 # Current alignment fixes and remaining handoffs
 
+**Historical pre-V2 handoff:** [v2-stop-handoff.md](v2-stop-handoff.md) supersedes
+the PAUSE-only/singular-stop and reusable-card transport descriptions below.
+Current API has separate human run Stop/status and account Emergency Kill Switch;
+account closure intents require CLOSED, and financially_stopped excludes Graph
+acknowledgment. New purchase transport is SINGLE_USE only with explicit positive
+limit/stable UUID key. Forward migrations 0007/0008 preserve existing history and
+add closure/session revocation. Current evidence is in
+[V2_TEST_RESULTS.md](../docs/V2_TEST_RESULTS.md). Earlier test counts remain
+historical; no live payment/Graph proof is implied.
+
 This implementation follow-up on main integrates Cameron's activity/local rail
 (`674ef75`) and ASA adapter (`a9e8cba`), preserves Rishi's fixes (`09ee628`) and
 adds the tested integration corrections described below. Rishi authorized these

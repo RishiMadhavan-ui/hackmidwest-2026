@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -107,13 +108,13 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_access_token(user_id: str, email: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "email": email, "exp": expire}
+    payload = {"sub": user_id, "email": email, "exp": expire, "jti": uuid.uuid4().hex}
     return jwt.encode(payload, _require_jwt_secret(), algorithm=JWT_ALG)
 
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, _require_jwt_secret(), algorithms=[JWT_ALG])
+        return jwt.decode(token, _require_jwt_secret(), algorithms=[JWT_ALG], options={"require": ["exp", "sub"]})
     except jwt.PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -185,6 +186,8 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         ) from exc
+    if token_is_revoked(credentials.credentials):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been logged out")
     row = get_user_by_id(str(user_id))
     if row is None:
         raise HTTPException(
@@ -192,6 +195,14 @@ def get_current_user(
             detail="User not found",
         )
     return _user_out(row)
+
+
+def token_is_revoked(token: str) -> bool:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT token_hash FROM revoked_sessions WHERE token_hash=%s",
+            (hashlib.sha256(token.encode("utf-8")).hexdigest(),),
+        ).fetchone() is not None
 
 
 def _token_for_row(row: dict) -> TokenResponse:
@@ -286,11 +297,21 @@ def login(body: AuthCredentials) -> TokenResponse:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(user: Annotated[UserOut, Depends(get_current_user)]) -> None:
-    """Record logout for the activity feed. JWTs remain client-discarded (stateless)."""
+def logout(
+    user: Annotated[UserOut, Depends(get_current_user)],
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+) -> None:
+    """Revoke this human session and record logout in the same transaction."""
     from activity import ACCOUNT_LOGOUT, emit_for_auth_user
 
     with get_conn() as conn:
+        payload = decode_token(credentials.credentials)
+        conn.execute(
+            """INSERT INTO revoked_sessions (token_hash,user_id,expires_at)
+            VALUES (%s,%s,%s) ON CONFLICT DO NOTHING""",
+            (hashlib.sha256(credentials.credentials.encode("utf-8")).hexdigest(),
+             user.id, datetime.fromtimestamp(payload["exp"], timezone.utc)),
+        )
         emit_for_auth_user(
             conn,
             auth_user_id=user.id,

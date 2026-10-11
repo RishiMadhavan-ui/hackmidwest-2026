@@ -19,7 +19,7 @@ export function KillSwitch() {
     return () => { active = false; };
   }, []);
   async function stop() {
-    if (!window.confirm("Stop shopping and revoke unused spending permissions? Already authorized payments will not be reversed.")) return;
+    if (!window.confirm("Emergency Kill Switch: stop ALL your purchases and revoke your account's unused spending permissions? Already authorized payments will not be reversed.")) return;
     setBusy(true);
     try {
       const result = await apiFetch<StopResult>("/killswitch", {
@@ -27,19 +27,20 @@ export function KillSwitch() {
       });
       setState({ on: true, rail_enforced: result.rail.status === "enforced", provider_controls_enforced: result.provider_card_controls.status !== "pending" });
       const cards = result.provider_card_controls;
-      setMessage(result.status === "stopped"
-        ? `Mandates revoked and unused rail grants stopped. Run cancellation requested. ${cards.total ? `${cards.confirmed} sandbox card control(s) confirmed.` : "No provider cards require a pause."}`
-        : "Stop requested and mandates revoked. Spending enforcement or sandbox card pause is pending; retry to confirm.");
+      setMessage(result.status === "financially_stopped"
+        ? `Account mandates revoked and unused rail grants stopped. Graph cancellation has not been acknowledged. ${cards.total ? `${cards.confirmed} sandbox card closure(s) confirmed.` : "No provider cards were recorded."}`
+        : "Emergency stop requested and mandates revoked. Spending enforcement or sandbox card closure is pending; retry to confirm. Graph cancellation has not been acknowledged.");
     } catch {
       setMessage("Stop outcome could not be confirmed. Retry this stop request.");
     } finally { setBusy(false); }
   }
   return (
     <section className="flex flex-col gap-2 border-t border-border pt-4">
+      <h3 className="text-sm font-medium">Emergency Kill Switch</h3>
       <Button variant="destructive" onClick={stop} disabled={busy || !!(state?.rail_enforced && state.provider_controls_enforced)}>
-        {busy ? "Stopping…" : state?.rail_enforced && state.provider_controls_enforced ? "Spending stopped" : state?.on ? "Retry stop enforcement" : "Stop shopping"}
+        {busy ? "Requesting emergency stop…" : state?.rail_enforced && state.provider_controls_enforced ? "Account financial stop confirmed" : state?.on ? "Retry emergency enforcement" : "Emergency Kill Switch"}
       </Button>
-      <p className="text-xs text-muted-foreground">Already authorized purchases are not reversed.</p>
+      <p className="text-xs text-muted-foreground">Account-wide: all your runs and mandates. Graph cancellation remains unacknowledged. Already authorized purchases are not reversed.</p>
       {message ? <p className="text-xs" role="status">{message}</p> : null}
     </section>
   );
