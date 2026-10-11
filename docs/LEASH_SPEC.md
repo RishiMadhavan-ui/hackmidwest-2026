@@ -1468,9 +1468,12 @@ trace-spool configuration. The public API health/readiness endpoints return 200.
 Actual Secrets, agent provisioning and PVC attachment remain unverified. R03 is
 not started. [The R02 handoff](../api/r02-handoff.md) records the current fixture/test verification.
 
-Cameron's new `/cards` route permits agent/service credentials to choose a user
-and issue a card without a confirmed mandate, trusted checkout or grant; a
-fixture-only direct call reproduces this. Signup also creates an OPEN VIRTUAL
-card outside the mandate chain. Reconcile this sandbox plumbing with the existing
-firewall invariants; it is not evidence of a guarded payment flow. Rishi should
-coordinate this authority issue with Cameron before purchase integration.
+The direct `/cards` issuance bypass is closed: agent/service credentials cannot
+manage cards, human card reads are scoped to their real authenticated UUID, and
+human direct issuance returns 409 because login is not verified purchase authority.
+No provider issuance or card metadata insert is reachable through `POST /cards`.
+The Lithic wrapper remains available for future internal verified payment issuance;
+R03 is untouched and R04 must integrate confirmed authority, trusted checkout and
+a valid scoped grant before issuing. Existing signup/balance sandbox behavior is
+preserved and is not a verified purchase grant. Previously issued provider cards
+were not revoked; deployment of the patch remains a separate handoff to Cameron.

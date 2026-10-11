@@ -1,7 +1,7 @@
-"""On-demand Lithic sandbox virtual / single-use cards for purchase instruments.
+"""Owner-scoped card metadata; direct card issuance is closed.
 
-Agents and authorized callers issue a fresh card on the user's existing Lithic
-account_token. PAN/CVV are returned once in the create response and never stored.
+Payment instruments must be issued internally after mandate/checkout/grant
+verification. Caller-supplied limits and correlations cannot authorize issuance.
 """
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from auth import decode_token, get_user_by_id
+from auth import get_current_user
 from db import get_conn
-from leash_shared.lithic import LithicError, create_virtual_card
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -28,6 +27,10 @@ SpendDuration = Literal["TRANSACTION", "MONTHLY", "ANNUALLY", "FOREVER"]
 
 
 class IssueCardRequest(BaseModel):
+    """Legacy request shape retained only to return a clear fail-closed error."""
+
+    model_config = ConfigDict(extra="forbid")
+
     spend_limit_cents: int = Field(ge=MIN_SPEND_LIMIT_CENTS, le=MAX_SPEND_LIMIT_CENTS)
     spend_limit_duration: SpendDuration = "TRANSACTION"
     single_use: bool = True
@@ -35,28 +38,10 @@ class IssueCardRequest(BaseModel):
     correlation_id: str | None = Field(
         default=None,
         max_length=128,
-        description="Optional checkout/grant correlation for Lithic tags + local record",
+        description="Legacy caller claim; never authorizes direct issuance",
     )
-    # Required when calling with AGENTS_SERVICE_TOKEN / AGENT_TOKEN_SHOPPER.
+    # Optional compatibility field; never selects another owner.
     user_id: str | None = None
-
-
-class IssuedCardOut(BaseModel):
-    card_token: str
-    last_four: str
-    spend_limit_cents: int
-    spend_limit_duration: str
-    card_type: str
-    state: str
-    account_token: str
-    correlation_id: str | None = None
-    provider: str = "lithic_sandbox"
-    # Once-only sandbox payment details for the merchant / complete_checkout path.
-    pan: str
-    cvv: str
-    exp_month: str
-    exp_year: str
-    details_returned_once: bool = True
 
 
 class CardMetaOut(BaseModel):
@@ -93,118 +78,36 @@ def _resolve_user_id(
     token = credentials.credentials
     service = _service_tokens()
     if token in service:
-        if not body_user_id or not body_user_id.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="user_id is required when calling with an agent service token",
-            )
-        return body_user_id.strip()
-
-    payload = decode_token(token)
-    user_id = payload.get("sub")
-    if not user_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent and service credentials cannot access card management",
         )
-    if body_user_id and body_user_id.strip() and body_user_id.strip() != str(user_id):
+
+    # Use the existing account authenticator: validate the JWT UUID and require
+    # a real user, rather than trusting a token subject or a caller-selected id.
+    user_id = get_current_user(credentials).id
+    if body_user_id is not None and body_user_id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="user_id does not match authenticated user",
         )
-    return str(user_id)
+    return user_id
 
 
-def _account_token_for_user(user_id: str) -> str:
-    row = get_user_by_id(user_id)
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-    account_token = row.get("lithic_account_token")
-    if not account_token:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="User has no Lithic sandbox account; complete signup first",
-        )
-    return str(account_token)
-
-
-@router.post("", response_model=IssuedCardOut, status_code=status.HTTP_201_CREATED)
+@router.post("", deprecated=True, response_model=None, status_code=status.HTTP_409_CONFLICT)
 def issue_card(
     body: IssueCardRequest,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
     ],
-) -> IssuedCardOut:
-    """Issue a fresh sandbox card on the user's Lithic account for one purchase.
-
-    PAN/CVV are returned in this response only and are not persisted.
-    """
-    user_id = _resolve_user_id(credentials, body_user_id=body.user_id)
-    account_token = _account_token_for_user(user_id)
-    card_type = "SINGLE_USE" if body.single_use else "VIRTUAL"
-    tags = {"leash_correlation": body.correlation_id} if body.correlation_id else None
-    memo = body.memo or (
-        f"LEASH instrument · {body.correlation_id}"
-        if body.correlation_id
-        else "LEASH per-transaction instrument"
-    )
-
-    try:
-        card = create_virtual_card(
-            account_token,
-            spend_limit_cents=body.spend_limit_cents,
-            spend_limit_duration=body.spend_limit_duration,
-            card_type=card_type,
-            memo=memo,
-            tags=tags,
-            include_payment_details=True,
-        )
-    except LithicError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Lithic sandbox card issue failed: {exc}",
-        ) from exc
-
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO lithic_cards (
-                card_token, user_id, account_token, last_four,
-                spend_limit_cents, spend_limit_duration, card_type,
-                state, memo, correlation_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                card["card_token"],
-                user_id,
-                card["account_token"],
-                card.get("last_four") or None,
-                int(card["spend_limit_cents"]),
-                card["spend_limit_duration"],
-                card["card_type"],
-                card.get("state"),
-                memo,
-                body.correlation_id,
-            ),
-        )
-        conn.commit()
-
-    return IssuedCardOut(
-        card_token=card["card_token"],
-        last_four=card.get("last_four") or "",
-        spend_limit_cents=int(card["spend_limit_cents"]),
-        spend_limit_duration=card["spend_limit_duration"],
-        card_type=card["card_type"],
-        state=card.get("state") or "OPEN",
-        account_token=card["account_token"],
-        correlation_id=body.correlation_id,
-        pan=card["pan"],
-        cvv=card["cvv"],
-        exp_month=card.get("exp_month") or "",
-        exp_year=card.get("exp_year") or "",
+) -> None:
+    """Reject direct issuance until the verified backend payment flow exists."""
+    _resolve_user_id(credentials, body_user_id=body.user_id)
+    # A human login and arbitrary correlation string are not purchase authority.
+    # No provider or SQL issuance call is reachable through this HTTP route.
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Direct card issuance is disabled; payment instruments require the verified payment flow",
     )
 
 

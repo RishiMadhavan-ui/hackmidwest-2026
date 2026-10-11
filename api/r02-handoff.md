@@ -211,7 +211,7 @@ prior captures remain historical. Signup regression inputs follow the new fields
 with account/card provider calls mocked. Migration replay expects all three SQL
 migrations. No provider, database provisioning or R03 implementation is performed.
 
-A separate authority issue remains in `api/cards.py`: agent/service tokens may
+Historical issue identified before the card-authority fix in `api/cards.py`: agent/service tokens may
 supply another user's UUID and mint a card without a confirmed mandate, trusted
 checkout or grant. A fixture-only HTTP probe returned 201 and invoked the mocked
 issuer once, without mandate context. Signup also creates an OPEN VIRTUAL card
@@ -225,3 +225,27 @@ Refreshed peer capture, correctness lint E4/E7/E9/F and documentation/whitespace
 checks pass. A redundant SQL f-string prefix in auth was removed without changing
 the query. The disposable PostgreSQL instance was stopped; no shared database,
 Secret or provisioning changes were made. R03 remains untouched.
+
+## Direct card authority fix
+
+`POST /cards` is deprecated and cannot issue an instrument. Missing/invalid
+credentials return 401; configured agent/service credentials return 403. A valid
+human JWT is checked against the actual account; another `user_id` returns 403,
+and direct issuance for the owner's account returns 409. Correlations or
+caller-supplied grants cannot activate issuance. No provider call or card insert
+is reachable from this route. Card metadata GET routes use the same human-only
+account check and scope SQL to that UUID; details never include PAN/CVV.
+
+Cameron's Lithic wrapper remains unchanged and available to the future internal
+verified payment flow. Existing signup/balance integration is preserved; its
+sandbox card is not a confirmed purchase grant. No new `/payments` flow, checkout
+verification or R03 implementation is included. Existing provider cards were not
+paused/revoked, and no shared database, credential or deployed service was changed.
+Cameron must deploy the patched API before its HTTP behavior changes in LKE.
+
+Card-fix validation: all 90 API tests pass, including nine new card-authority/
+provider-adapter tests and all 19 disposable PostgreSQL regressions. Correctness
+lint E4/E7/E9/F, documentation links/fences/conflict markers and whitespace pass.
+Frozen shared contracts and teammate services are unchanged. The existing API
+Dockerfile copies `api/*.py`, including the changed cards module. No real provider
+call, hosted deployment or complete Compose boot is claimed; Compose is absent.

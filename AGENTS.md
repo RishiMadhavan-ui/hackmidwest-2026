@@ -80,7 +80,7 @@ hackmidwest-2026/
     signing.py                       [E] Rishi: Ed25519 confirmation
     manage.py                        [E] Rishi: migrations and operator provisioning
     auth.py                          [E] JWT signup/login/me/balance; Lithic card on signup
-    cards.py                         [E] Cameron: on-demand VIRTUAL/SINGLE_USE (once-only PAN)
+    cards.py                         [E] Rishi: owner-only metadata; direct issuance blocked
     db.py                            [E] checksummed PostgreSQL migrations and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
@@ -207,7 +207,7 @@ web/: pnpm build
 deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
 ```
 
-API has health/readiness, auth (including Lithic signup/balance), `POST /cards` / `GET /cards`, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` issues per-purchase `SINGLE_USE` (default) or `VIRTUAL` cards (user JWT, or `AGENTS_SERVICE_TOKEN` / `AGENT_TOKEN_SHOPPER` + `user_id`); PAN/CVV returned once, never persisted. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
+API has health/readiness, auth (including Lithic signup/balance), `POST /cards` / `GET /cards`, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` is deprecated and cannot issue: agents/service tokens get 403; authenticated humans get 409 until the verified payment flow exists. `GET /cards` and `GET /cards/{card_token}` require a human account JWT and return only that owner's metadata. Caller-selected users cannot override the owner; no PAN/CVV are returned. The Lithic wrapper remains server-side for future verified payment issuance. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
 Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
@@ -234,9 +234,12 @@ fields with Lithic mocked and all three migrations. Public `/backend/health` and
 `/backend/readyz` return 200; Secrets, database agent bindings and PVC attachment
 were not inspected. See [the current handoff](api/r02-handoff.md).
 
-**Unresolved authority issue:** `/cards` accepts agent/service tokens plus a
-caller-selected `user_id` and issues an instrument without confirmed mandate,
-trusted checkout or valid grant. The signup path also creates an OPEN VIRTUAL
-card outside the mandate chain. This is sandbox plumbing, not verified firewall
-payment issuance; reconcile it with invariants 1–3 before claiming authorization.
-A mocked direct call confirms the `/cards` bypass. R03 has not been started.
+**Card authority fix:** the direct `/cards` issuance bypass is closed. No HTTP
+caller can mint a card through it; valid human logins are insufficient without
+verified purchase authority. Agent/service access to card metadata is also denied;
+human reads validate the real account and scope SQL to its UUID. Tests cover
+credential roles, owner substitution, caller-claimed grants, unavailable/deleted
+accounts and provider-call exclusion. The provider wrapper and existing signup/
+balance integration remain; signup's sandbox card is not a verified purchase grant.
+Previously issued provider cards are not revoked by this source change. R03 has
+not been started, and deployment of this patch remains Cameron's task.
