@@ -114,6 +114,8 @@ class PaymentServiceTests(unittest.TestCase):
       "STORE_URL": "http://store.test",
       "STORE_API_TOKEN": "s" * 32,
       "STORE_CHARGE_TOKEN": "c" * 32,
+      "WEBHOOK_URL": "http://rail.test",
+      "WEBHOOK_INTERNAL_TOKEN": "w" * 32,
     }
     self.principal = Principal("agent", "usr_" + "a" * 32, "agt_" + "b" * 32)
 

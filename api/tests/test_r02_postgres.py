@@ -12,6 +12,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runtime  # noqa: E402,F401
 import auth  # noqa: E402
 import db  # noqa: E402
@@ -136,12 +137,20 @@ class PostgresAuthorityTests(unittest.TestCase):
       "STORE_URL": "http://isolated-store.test",
       "STORE_API_TOKEN": "s" * 32,
       "STORE_CHARGE_TOKEN": "c" * 32,
+      "WEBHOOK_URL": "http://isolated-rail.test",
+      "WEBHOOK_INTERNAL_TOKEN": "w" * 32,
     })
     env.start()
     self.addCleanup(env.stop)
     trust = patch("payment_service._establish_checkout_trust", side_effect=self._stamp_checkout_trust)
     trust.start()
     self.addCleanup(trust.stop)
+    seed = patch("payment_service._seed_grant")
+    seed.start()
+    self.addCleanup(seed.stop)
+    bind = patch("payment_service._bind_store")
+    bind.start()
+    self.addCleanup(bind.stop)
     return active, run, {"mandate_id": active["id"], "run_id": run["id"], "checkout_id": "ckt_charger"}
 
   def payment_direct(self, body):
@@ -149,7 +158,10 @@ class PostgresAuthorityTests(unittest.TestCase):
     from principals import Principal
     from leash_shared.models import PaymentProposal
     with db.get_conn() as conn:
-      return request_payment(conn, PaymentProposal.model_validate(body), Principal("agent", self.owner, self.agent_id))
+      response, _once = request_payment(
+        conn, PaymentProposal.model_validate(body), Principal("agent", self.owner, self.agent_id)
+      )
+      return response
 
   def payment_operation(self, run):
     with db.get_conn() as conn:
@@ -171,10 +183,10 @@ class PostgresAuthorityTests(unittest.TestCase):
         self.assertIsInstance(operation[key], type(uuid4()))
       self.assertTrue(operation["grant_reference"].startswith("grt_"))
       return _store_checkout()
-    with patch("payment_service._fetch_store_checkout", side_effect=fetch), patch("payment_service._seed_grant") as seed, patch("payment_service._bind_store") as bind:
+    with patch("payment_service._fetch_store_checkout", side_effect=fetch):
       response = self.payment_direct(body)
-      seed.assert_not_called()
-      bind.assert_not_called()
+    self.assertEqual(response.status, "approved")
+    self.assertIsNotNone(response.grant_id)
     with db.get_conn() as conn:
       observation = conn.execute("SELECT * FROM checkout_observations WHERE payment_id=%s", (response.id,)).fetchone()
       self.assertEqual(observation["snapshot"]["items"][0]["sku"], "CHG-65W")
@@ -187,10 +199,11 @@ class PostgresAuthorityTests(unittest.TestCase):
       self.assertEqual(observation["run_id"], run["id"])
       self.assertEqual(observation["evidence_assessment"]["merchant_ownership"], "verified")
       self.assertEqual(observation["evidence_assessment"]["checkout_freeze"], "verified")
-      self.assertFalse(observation["evidence_assessment"]["financial_authority"])
+      self.assertTrue(observation["evidence_assessment"]["financial_authority"])
+      self.assertEqual(self.payment_operation(run)["state"], "authorized")
       events = conn.execute("SELECT record FROM audit_events WHERE record->'data'->>'payment_id'=%s ORDER BY sequence", (response.id,)).fetchall()
       self.assertEqual([row["record"]["type"] for row in events],
-                       ["payment.operation.prepared", "payment.operation.checkout_observed", "payment.denied", "payment.operation.blocked"])
+                       ["payment.operation.prepared", "payment.operation.checkout_observed", "payment.approved", "payment.operation.authorized"])
     for statement in ("UPDATE checkout_observations SET source_hash=repeat('0',64) WHERE payment_id=%s",
                       "DELETE FROM checkout_observations WHERE payment_id=%s",
                       "UPDATE payment_operations SET issuance_key=gen_random_uuid() WHERE id=%s",
@@ -214,7 +227,7 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(fetch.call_count, 1)
     for key in ("id", "grant_reference", "instrument_reference", "issuance_key", "authorization_event_id"):
       self.assertEqual(first[key], final[key])
-    self.assertEqual(final["state"], "blocked")
+    self.assertEqual(final["state"], "authorized")
     self.assertEqual(final["revision"], 2)
 
   def test_unresolved_operation_blocks_another_checkout_and_another_run(self):
@@ -389,7 +402,7 @@ class PostgresAuthorityTests(unittest.TestCase):
     with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()):
       charger = self.payment_direct(body)
     self.assertNotEqual(attacked.id, charger.id)
-    self.assertEqual(charger.status, "blocked")  # Independent owner/freeze and financial gates remain.
+    self.assertEqual(charger.status, "approved")
     self.assertEqual(self.request("GET", f"/mandates/{active['id']}").json()["canonical_payload_hash"], active["canonical_payload_hash"])
 
   def test_checkout_secrets_are_rejected_before_persisting_source_or_snapshot(self):
@@ -487,8 +500,9 @@ class PostgresAuthorityTests(unittest.TestCase):
       seed.assert_not_called()
     self.assertIsNone(self.payment_operation(run))
     history = self.request("GET", f"/payments/{old_id}").json()
-    self.assertEqual(history["payment_execution"], "unavailable")
-    self.assertEqual(history["authorization_status"], "unverified")
+    self.assertEqual(history["status"], "approved")
+    # Legacy approved rows are not re-issuable; instrument is never re-disclosed.
+    self.assertNotIn("instrument_token", history)
 
   def test_restart_safe_migration_and_uuid_identity_mapping(self):
     db.init_db()
@@ -509,6 +523,8 @@ class PostgresAuthorityTests(unittest.TestCase):
       "STORE_URL": "http://isolated-store.test",
       "STORE_API_TOKEN": "s" * 32,
       "STORE_CHARGE_TOKEN": "c" * 32,
+      "WEBHOOK_URL": "http://isolated-rail.test",
+      "WEBHOOK_INTERNAL_TOKEN": "w" * 32,
     }
     with (patch.dict(os.environ, env),
           patch("payment_service._fetch_store_checkout", return_value=_store_checkout()) as fetch,
@@ -522,14 +538,18 @@ class PostgresAuthorityTests(unittest.TestCase):
       fetch.assert_not_called()
       first = self.request("POST", "/payments", body=proposal)
       self.assertEqual(first.status_code, 200, first.text)
-      self.assertEqual(first.json()["status"], "blocked")
-      # Ownership/freeze proof is present; spending remains closed.
-      self.assertEqual(first.json()["reasons"], ["financial_authority_unavailable"])
-      self.assertIsNone(first.json()["grant_id"])
-      self.assertNotIn("instrument_token", first.json())
+      self.assertEqual(first.json()["status"], "approved")
+      self.assertTrue(first.json()["grant_id"])
+      self.assertIn("instrument_token", first.json())
+      seed.assert_called_once()
+      bind.assert_called_once()
       again = self.request("POST", "/payments", body=proposal)
-      self.assertEqual(again.json(), first.json())
+      # Retry replays without re-disclosing once-only instrument secrets.
+      self.assertEqual(again.json()["status"], "approved")
+      self.assertEqual(again.json()["grant_id"], first.json()["grant_id"])
+      self.assertNotIn("instrument_token", again.json())
       self.assertEqual(fetch.call_count, 1)
+      self.assertEqual(seed.call_count, 1)
       path = f"/payments/{first.json()['id']}"
       self.assertEqual(self.request("GET", path).status_code, 200)
       self.assertEqual(self.request("GET", path, token=self.other_agent_token).status_code, 404)
@@ -543,8 +563,8 @@ class PostgresAuthorityTests(unittest.TestCase):
       self.assertEqual(stop.status_code, 200, stop.text)
       self.assertEqual(self.request("POST", "/payments", body=proposal).status_code, 409)
       self.assertEqual(fetch.call_count, 1)
-      seed.assert_not_called()
-      bind.assert_not_called()
+      self.assertEqual(seed.call_count, 1)
+      self.assertEqual(bind.call_count, 1)
     with db.get_conn() as conn:
       row = conn.execute("SELECT count(*) n FROM payment_attempts WHERE run_id=%s", (run["id"],)).fetchone()
       self.assertEqual(row["n"], 1)
@@ -741,15 +761,20 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(self.request("POST",route).status_code,401)
     self.assertEqual(self.request("POST",route,token=self.other_user_token).status_code,404)
     self.assertFalse(self.request("GET",f'/agent-runs/{first["id"]}/control').json()["cancel_requested"])
-    with patch("workflow_control.stop_rail") as rail, patch("workflow_control.close_owned_cards") as cards:
+    with patch("workflow_control.stop_rail_run", return_value={"status": "pending"}) as rail, \
+         patch("workflow_control.close_owned_cards") as cards:
       responses=[self.request("POST",route,token=self.user_token) for _ in range(2)]
-      rail.assert_not_called()
+      self.assertEqual(rail.call_count, 2)
       cards.assert_not_called()
     self.assertEqual(responses[0].json(),responses[1].json())
-    self.assertEqual(responses[0].json()["financial_revocation"],"pending_run_binding")
+    self.assertEqual(responses[0].json()["financial_revocation"],"pending_rail_ack")
     self.assertEqual(responses[0].json()["graph_cancellation"],"not_acknowledged")
     self.assertFalse(responses[0].json()["previous_authorizations_reversed"])
-    self.assertEqual(self.request("GET",route,token=self.user_token).json(),responses[0].json())
+    # GET reports durable cancellation; POST also attaches the latest rail probe.
+    got = self.request("GET",route,token=self.user_token).json()
+    self.assertEqual({k: got[k] for k in got if k != "rail"},
+                     {k: responses[0].json()[k] for k in responses[0].json() if k != "rail"})
+    self.assertIsNone(got["rail"])
     self.assertEqual(self.request("GET",f'/agent-runs/{first["id"]}/control').json()["authority_current"],False)
     self.assertEqual(self.request("GET",f'/agent-runs/{second["id"]}/control').json()["authority_current"],True)
     self.assertEqual(self.request("POST","/agent-runs",body=first).status_code,409)

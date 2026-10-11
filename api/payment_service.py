@@ -1,4 +1,4 @@
-"""Trusted checkout preflight. Spending stays closed until durable controls exist."""
+"""Trusted checkout preflight with local-rail grant activation and store bind."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -23,11 +23,13 @@ from leash_shared.models import (
   CheckoutSnapshot,
   CheckoutSource,
   CheckoutVerification,
+  GrantStatus,
   Merchant,
   PaymentProposal,
   PaymentResponse,
   ProductAttribute,
   PurchaseMandate,
+  VerificationDecision,
   canonical_json,
 )
 from mandate_service import current_mandate, require_role, utc_now
@@ -67,10 +69,18 @@ def _require_integrations() -> None:
   charge = _store_charge_token()
   if len(charge) < 32 or charge == _store_token():
     raise AuthorityError(503, "Trusted merchant STORE_CHARGE_TOKEN must be set and distinct")
+  if not _webhook_url() or len(_webhook_internal_token()) < 32:
+    raise AuthorityError(503, "Local payment rail WEBHOOK_URL/WEBHOOK_INTERNAL_TOKEN is not configured")
   parsed = urlsplit(_store_url())
   if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
       or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
     raise AuthorityError(503, "Trusted merchant must use a configured HTTP origin")
+
+
+def _uuid_text(value: Any) -> str:
+  if isinstance(value, UUID):
+    return value.hex
+  return str(value).replace("-", "")
 
 
 def _checkout_url(checkout_id: str) -> str:
@@ -296,7 +306,9 @@ def _successful_purchases(conn, user_id: str, mandate: PurchaseMandate) -> int:
   return int(row["n"] if row else 0)
 
 
-def _seed_grant(grant: AuthorizationGrant) -> None:
+def _seed_grant(grant: AuthorizationGrant, *, run_id: str) -> None:
+  payload = grant.model_dump(mode="json")
+  payload["run_id"] = run_id
   try:
     with httpx.Client(timeout=5.0) as client:
       res = client.put(
@@ -306,7 +318,7 @@ def _seed_grant(grant: AuthorizationGrant) -> None:
           "Content-Type": "application/json",
           "Accept": "application/json",
         },
-        json=grant.model_dump(mode="json"),
+        json=payload,
       )
   except httpx.HTTPError as exc:
     raise AuthorityError(502, "Payment rail unreachable while seeding grant") from exc
@@ -319,6 +331,7 @@ def _bind_store(
   checkout_id: str,
   payment_id: str,
   grant: AuthorizationGrant,
+  authorization_event_id: str,
 ) -> None:
   body = {
     "payment_id": payment_id,
@@ -328,6 +341,7 @@ def _bind_store(
     "checkout_hash": grant.verified_checkout_hash,
     "authorized_amount_cents": grant.authorized_amount_cents,
     "expires_at": grant.expires_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+    "authorization_event_id": authorization_event_id,
   }
   try:
     with httpx.Client(timeout=5.0) as client:
@@ -340,6 +354,50 @@ def _bind_store(
     raise AuthorityError(502, "Trusted merchant unreachable while binding checkout") from exc
   if res.status_code >= 400:
     raise AuthorityError(502, "Trusted merchant rejected checkout binding")
+
+
+def _build_grant(
+  *,
+  operation: dict[str, Any],
+  mandate: PurchaseMandate,
+  checkout: CheckoutSnapshot,
+  verification: CheckoutVerification,
+  store_facts_hash: str,
+  now: datetime,
+) -> AuthorizationGrant:
+  """One-use local-rail grant bound to frozen merchant facts_hash."""
+  grant_expires = min(
+    now + timedelta(minutes=30),
+    mandate.valid_until,
+    checkout.expires_at,
+  )
+  if grant_expires <= now:
+    raise AuthorityError(409, "Checkout or mandate expired before grant issuance")
+  instrument = "ins_" + _uuid_text(operation["instrument_reference"])
+  return AuthorizationGrant(
+    grant_id=str(operation["grant_reference"]),
+    payment_id=operation["id"],
+    mandate_id=mandate.id,
+    mandate_version=mandate.version,
+    mandate_hash=mandate.canonical_payload_hash,
+    user_id=mandate.user_id,
+    verification_id=verification.id,
+    verified_checkout_id=checkout.checkout_id,
+    verified_checkout_hash=store_facts_hash,
+    payment_instrument_id=instrument,
+    merchant_id=MERCHANT_ID,
+    merchant_descriptor=checkout.merchant.descriptor,
+    mcc=checkout.merchant.mcc,
+    authorized_amount_cents=checkout.total_cents,
+    currency=checkout.currency,
+    merchant_binding_id=f"bind_{operation['id']}",
+    bound_at=now,
+    issued_at=now,
+    expires_at=grant_expires,
+    mandate_expires_at=mandate.valid_until,
+    checkout_expires_at=checkout.expires_at,
+    status=GrantStatus.ISSUED,
+  )
 
 
 def _persist(
@@ -413,14 +471,17 @@ def _persist(
   )
 
 
-def request_payment(conn, body: PaymentProposal, principal: Principal) -> PaymentResponse:
+def request_payment(
+  conn, body: PaymentProposal, principal: Principal
+) -> tuple[PaymentResponse, dict[str, str] | None]:
+  """Returns (response, once-only secrets). Secrets are only set on fresh approve."""
   require_role(principal, "agent")
   if body.run_id is None:
     raise AuthorityError(422, "A registered run_id is required")
   mandate = _lock_payment_authority(conn, body, principal)
   operation = prepare(conn, body, principal, mandate)
   if operation["state"] != "prepared":
-    return _original_response(conn, operation)
+    return _original_response(conn, operation), None
   _require_integrations()
   _checkout_url(body.checkout_id)
   # This is the durability boundary. No merchant request (including read-only
@@ -455,7 +516,7 @@ def request_payment(conn, body: PaymentProposal, principal: Principal) -> Paymen
     # retry does not silently replace the candidate or keep making network calls.
     operation, _ = _relock_operation(conn, body, principal, operation)
     if operation["state"] != "prepared":
-      return _original_response(conn, operation)
+      return _original_response(conn, operation), None
     finish(conn, operation, "blocked", "checkout_source_unavailable", error=error)
     conn.commit()
     raise
@@ -465,7 +526,7 @@ def request_payment(conn, body: PaymentProposal, principal: Principal) -> Paymen
     saved = conn.execute("SELECT source_hash FROM checkout_observations WHERE payment_id=%s", (operation["id"],)).fetchone()
     if saved and saved["source_hash"] != source_facts["facts_hash"]:
       raise AuthorityError(409, "Concurrent checkout observation conflicts with the original evidence")
-    return _original_response(conn, operation)
+    return _original_response(conn, operation), None
   now = utc_now()
   checkout_authenticated = _merchant_trust_present(store) and store.get("user_id") == principal.user_id
   verification = verify_checkout(
@@ -473,19 +534,62 @@ def request_payment(conn, body: PaymentProposal, principal: Principal) -> Paymen
     checkout_authenticated=checkout_authenticated,
     successful_purchases=_successful_purchases(conn, principal.user_id, mandate),
   )
-  reasons = tuple(dict.fromkeys((*verification.reasons, "financial_authority_unavailable")))
-  response = PaymentResponse(
-    id=operation["id"], status="blocked", reasons=reasons, verification_id=verification.id,
+
+  if verification.decision != VerificationDecision.VERIFIED:
+    response = PaymentResponse(
+      id=operation["id"],
+      status="blocked",
+      reasons=verification.reasons,
+      verification_id=verification.id,
+    )
+    persist_observation(conn, operation, checkout, source_facts, financial_authority=False)
+    _persist(
+      conn, payment_id=operation["id"], principal=principal, mandate=mandate,
+      checkout_id=body.checkout_id, run_id=body.run_id, status="blocked",
+      verification=verification, grant=None, instrument_token=None,
+      checkout_hash=checkout.checkout_hash, response=response,
+    )
+    finish(conn, operation, "blocked", verification.reasons[0] if verification.reasons else "verification_blocked")
+    return response, None
+
+  event_id = "evt_" + _uuid_text(operation["authorization_event_id"])
+  grant = _build_grant(
+    operation=operation,
+    mandate=mandate,
+    checkout=checkout,
+    verification=verification,
+    store_facts_hash=str(store["facts_hash"]),
+    now=now,
   )
-  persist_observation(conn, operation, checkout, source_facts)
+  # Merchant bind before Valkey install so a usable grant always has correlation.
+  _bind_store(
+    checkout_id=body.checkout_id,
+    payment_id=operation["id"],
+    grant=grant,
+    authorization_event_id=event_id,
+  )
+  _seed_grant(grant, run_id=body.run_id)
+  response = PaymentResponse(
+    id=operation["id"],
+    status="approved",
+    reasons=(),
+    verification_id=verification.id,
+    grant_id=grant.grant_id,
+  )
+  persist_observation(conn, operation, checkout, source_facts, financial_authority=True)
   _persist(
     conn, payment_id=operation["id"], principal=principal, mandate=mandate,
-    checkout_id=body.checkout_id, run_id=body.run_id, status="blocked",
-    verification=verification, grant=None, instrument_token=None,
+    checkout_id=body.checkout_id, run_id=body.run_id, status="approved",
+    verification=verification, grant=grant, instrument_token=grant.payment_instrument_id,
     checkout_hash=checkout.checkout_hash, response=response,
   )
-  finish(conn, operation, "blocked", "financial_authority_unavailable")
-  return response
+  finish(conn, operation, "authorized", "grant_issued_local_rail")
+  once = {
+    "instrument_token": grant.payment_instrument_id,
+    "authorization_event_id": event_id,
+    "rail": "local_payment_rail_simulator",
+  }
+  return response, once
 
 
 def _lock_payment_authority(conn, body, principal):
@@ -533,8 +637,12 @@ def _original_response(conn, operation):
   if row is None:
     raise AuthorityError(503, "Payment operation outcome is unavailable; no replacement is authorized")
   response = PaymentResponse.model_validate(row["record"])
-  if (response.id != operation["id"] or response.status != "blocked"
-      or response.grant_id is not None or response.payment_result is not None):
+  if response.id != operation["id"] or response.payment_result is not None:
+    raise AuthorityError(503, "Stored preflight outcome failed integrity verification")
+  if operation["state"] == "authorized":
+    if response.status != "approved" or response.grant_id is None:
+      raise AuthorityError(503, "Stored authorization outcome failed integrity verification")
+  elif response.status != "blocked" or response.grant_id is not None:
     raise AuthorityError(503, "Stored preflight outcome failed integrity verification")
   return response
 
@@ -552,11 +660,18 @@ def get_payment(conn, payment_id: str, principal: Principal) -> dict[str, Any]:
     if not legacy:
       raise AuthorityError(404, "Payment not found")
     payload = dict(legacy["record"])
+    authorized = payload.get("status") == "approved"
   else:
     payload = dict(row["record"] or PaymentResponse(id=payment_id, status="blocked",
                    reasons=(row["reason"] or "operation_pending",)).model_dump(mode="json"))
-    payload["operation"] = {"state": row["state"], "revision": row["revision"], "financial_authority": False}
-  # An old grant record is history, not new usable authority or a paid receipt.
-  payload["authorization_status"] = "unverified"
-  payload["payment_execution"] = "unavailable"
+    authorized = row["state"] == "authorized"
+    payload["operation"] = {
+      "state": row["state"],
+      "revision": row["revision"],
+      "financial_authority": authorized,
+    }
+  # Grant approval is not a paid receipt; instrument is never re-disclosed on GET.
+  payload["authorization_status"] = "grant_issued" if authorized else "unverified"
+  payload["payment_execution"] = "awaiting_merchant_complete" if authorized else "unavailable"
+  payload.pop("instrument_token", None)
   return payload
