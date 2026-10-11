@@ -1,47 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
 
-import { ActivityFeed } from "@/components/activity-feed";
-import { KillSwitch } from "@/components/kill-switch";
+import { EventList } from "@/components/event-list";
+import { KillSwitchButton } from "@/components/kill-switch";
 import { AttackLab } from "@/components/mission-control/attack-lab";
 import { AuthorityPanel } from "@/components/mission-control/authority-panel";
 import { ComparisonPanel } from "@/components/mission-control/comparison-panel";
 import { PurchaseHistory } from "@/components/purchase-history";
-import type { ActivityEvent } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { EmptyState } from "@/components/page";
+import { useActivity } from "@/lib/activity";
 import type { PurchaseMandate } from "@/lib/mandates";
 
+// The app shell supplies auth, the shared activity stream and Kill Switch state.
 export default function MissionControlPage() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
+  const { events, status } = useActivity();
   const [mandate, setMandate] = useState<PurchaseMandate | null>(null);
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-
-  useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/signin");
-    }
-  }, [loading, user, router]);
+  const recent = useMemo(() => events.slice(-25).reverse(), [events]);
 
   const onMandateChange = useCallback((next: PurchaseMandate | null) => {
     setMandate(next);
   }, []);
-
-  const onEventsChange = useCallback((next: ActivityEvent[]) => {
-    setEvents(next);
-  }, []);
-
-  if (loading || !user) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-4 py-16">
-        <p className="text-sm text-muted-foreground">
-          {loading ? "Loading Mission Control…" : "Redirecting to sign in…"}
-        </p>
-      </div>
-    );
-  }
 
   const instruction =
     mandate?.description ??
@@ -50,7 +29,7 @@ export default function MissionControlPage() {
     event.type.startsWith("payment.") ? Math.max(latest, event.sequence) : latest, 0);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 md:py-10">
+    <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-3 border-b border-border pb-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -66,7 +45,7 @@ export default function MissionControlPage() {
             Authorization ≠ settlement
           </p>
         </div>
-        <blockquote className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-base leading-snug md:text-lg">
+        <blockquote className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-base leading-snug md:text-lg">
           <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
             Original instruction
           </span>
@@ -77,12 +56,12 @@ export default function MissionControlPage() {
       <AuthorityPanel onMandateChange={onMandateChange} />
       <PurchaseHistory revision={purchaseRevision} />
 
-      <div className="rounded-xl border border-border px-4 py-4 md:px-5">
+      <div className="rounded-lg border border-border px-4 py-4 md:px-5">
         <ComparisonPanel mandate={mandate} events={events} />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-xl border border-border px-4 py-4 md:px-5">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-border px-4 py-4 md:px-5">
           <div className="mb-3">
             <h2 className="text-base font-semibold tracking-tight">
               Kill Switch
@@ -92,20 +71,28 @@ export default function MissionControlPage() {
               reverse committed authorizations.
             </p>
           </div>
-          <KillSwitch />
+          <KillSwitchButton />
         </div>
 
-        <div className="rounded-xl border border-border px-4 py-4 md:px-5">
+        <div className="rounded-lg border border-border px-4 py-4 md:px-5">
           <AttackLab />
         </div>
       </div>
 
-      <div className="rounded-xl border border-border px-4 py-4 md:px-5">
-        <ActivityFeed
-          title="Live activity"
-          description="Persisted backend events — not client-fabricated agent theater"
-          onEventsChange={onEventsChange}
-        />
+      <div className="rounded-lg border border-border">
+        <div className="px-4 pt-4 md:px-5">
+          <h2 className="text-base font-semibold tracking-tight">Live activity</h2>
+          <p className="text-xs text-muted-foreground">
+            Persisted backend events — not client-fabricated agent theater
+          </p>
+        </div>
+        {recent.length ? (
+          <EventList events={recent} className="mt-3 border-t border-border" />
+        ) : (
+          <div className="p-4">
+            <EmptyState title={status === "live" ? "No activity yet" : "Loading activity…"} />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -28,8 +28,8 @@ const fieldClass =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 function statusTone(status: string): string {
-  if (status === "active") return "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300";
-  if (status === "proposed") return "bg-amber-500/15 text-amber-900 dark:text-amber-200";
+  if (status === "active") return "bg-success-soft text-success";
+  if (status === "proposed") return "bg-warning-soft text-warning";
   if (status === "revoked" || status === "expired") {
     return "bg-destructive/10 text-destructive";
   }
@@ -607,7 +607,7 @@ export function AuthorityPanel({
       </div>
 
       {notice ? (
-        <p className="text-xs text-emerald-700 dark:text-emerald-400" role="status">
+        <p className="text-xs text-success" role="status">
           {notice}
         </p>
       ) : null}
