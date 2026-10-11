@@ -392,3 +392,7 @@ def enroll_asa(
       502, "Enrollment outcome is unknown; inspect provider configuration before retry"
     ) from None
   return {"provider": "lithic_sandbox", "enrollment": result, "url": body.url}
+
+
+from execution_routes import router as execution_router  # noqa: E402
+app.include_router(execution_router)

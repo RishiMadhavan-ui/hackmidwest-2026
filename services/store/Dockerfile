@@ -14,6 +14,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY services/store/catalog.py \
      services/store/pages.py \
+     services/store/execution_bridge.py \
      services/store/main.py \
      ./
 COPY shared/leash_shared /shared/leash_shared

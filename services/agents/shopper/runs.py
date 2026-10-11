@@ -6,6 +6,7 @@ and anyone polling a run.
 """
 
 import logging
+import asyncio
 import os
 import threading
 import uuid
@@ -15,16 +16,17 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from leash_shared.llm import model_id, configured_provider
+from leash_shared.models import RunId
 from provenance.redact import redact, redact_text
 from provenance.sink import MemorySink, Sink, api_configured, default_sinks
 from service_auth import require_service_token
-from shopper.agent import build_agent, task_prompt
 from shopper.credentials import credential_for
 from shopper.registration import register_run
 from shopper.scripted import ScriptedShopper
+from shopper.workflow import WorkflowStopped
 
 log = logging.getLogger("leash.shopper")
 
@@ -47,6 +49,11 @@ class StartRun(BaseModel):
   # Scripted mode only: the SKU to check out and the SKU to claim to Leash.
   sku: str | None = None
   claim_sku: str | None = None
+  recovery_sku: str | None = None
+  # Supplied by the human launch API; a service caller cannot fabricate these
+  # into authority. The execution backend must validate and consume the launch.
+  run_id: RunId | None = None
+  launch_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
 
   @model_validator(mode="after")
   def _scripted_needs_target(self):
@@ -83,7 +90,7 @@ def trace_sinks(req: StartRun) -> list[Sink]:
 def make_model_for(req: StartRun):
   if req.agent_mode == "scripted":
     return ScriptedShopper(req.sku, req.mandate_id, req.start_url, req.claim_sku)
-  return None  # build_agent falls back to make_model("shopper")
+  return None  # The runtime constructs the shared shopper model.
 
 
 def mcp_urls() -> tuple[str, str]:
@@ -97,12 +104,18 @@ def mcp_urls() -> tuple[str, str]:
 
 
 def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
-  """Run the shopper with tools from both MCP servers: the store and Leash.
+  """Run the real bounded Graph after a backend-verified human launch/lease."""
+  if not req.launch_id or req.run_id != run_id or not api_configured():
+    raise RuntimeError("human launch and execution backend are required")
+  return asyncio.run(_run_graph(run_id, req, sinks))
 
-  Each server gets its own credential. The Leash token goes only to Leash's
-  server, and the store token only to the store's.
-  """
+
+async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
   from strands.tools.mcp import MCPClient
+  from provenance.workflow import WorkflowEvents
+  from shopper.control import ExecutionControl
+  from shopper.runtime import MCPWorkflowPorts
+  from shopper.workflow import PurchaseWorkflow
 
   # Leash calls carry the credential bound to this run's mode, never the other.
   credential = credential_for(req.agent_mode)
@@ -110,20 +123,40 @@ def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
   if not store_token:
     raise RuntimeError("STORE_MCP_TOKEN is not set")
 
-  leash_url, store_url = mcp_urls()
-  leash = MCPClient(url=leash_url, headers=credential.bearer())
-  store = MCPClient(url=store_url, headers={"Authorization": f"Bearer {store_token}"})
-  with leash, store:
-    agent = build_agent(
-      run_id,
-      sinks,
-      [*store.list_tools_sync(), *leash.list_tools_sync()],
-      model=make_model_for(req),
-      agent_mode=req.agent_mode,
-      agent_id=credential.agent_id,
-    )
-    result = agent(task_prompt(req.task, req.mandate_id, req.start_url))
-  return str(result)
+  control = ExecutionControl(os.environ["API_URL"], credential.token, run_id)
+  try:
+    claim = await control.claim(req.launch_id)
+    # Both MCP services must enforce this same worker scope before tools. These
+    # are correlation/fencing fields, not a substitute for their credentials.
+    scoped = {"X-Leash-Run-Id": run_id, "X-Leash-Worker-Id": control.worker_id,
+              "X-Leash-Generation": str(control.generation)}
+    if claim.get("mcp_scope_enforced") is not True:
+      raise RuntimeError("MCP execution scope enforcement is unavailable")
+    tokens = claim.get("scope_tokens", {})
+    if not all(isinstance(tokens.get(a), str) and len(tokens[a]) >= 32 for a in ("mcp-leash", "mcp-store")):
+      raise RuntimeError("Audience-bound tool credentials are unavailable")
+    events = WorkflowEvents(run_id, credential.agent_id, req.agent_mode, sinks)
+    events.emit("lease.claimed", worker_id=control.worker_id, generation=control.generation)
+    leash_url, store_url = mcp_urls()
+    leash = MCPClient(url=leash_url, headers={**credential.bearer(), **scoped,
+      "X-Leash-Execution-Token": tokens["mcp-leash"]}, startup_timeout=5)
+    store = MCPClient(url=store_url, headers={"Authorization": f"Bearer {store_token}", **scoped,
+      "X-Leash-Execution-Token": tokens["mcp-store"]}, startup_timeout=5)
+    with leash, store:
+      ports = MCPWorkflowPorts(run_id=run_id, mandate_id=req.mandate_id,
+        agent_id=credential.agent_id, mode=req.agent_mode, start_url=req.start_url,
+        control=control, leash=leash, store=store,
+        tools=[*store.list_tools_sync(), *leash.list_tools_sync()],
+        events=events,
+        trace_sinks=sinks,
+        shopper_model=(lambda state: ScriptedShopper(
+          req.recovery_sku, req.mandate_id, "/catalog", req.recovery_sku)
+          if state.attempt > 1 and req.recovery_sku else make_model_for(req))
+          if req.agent_mode == "scripted" else None)
+      outcome = await PurchaseWorkflow(run_id, ports).run()
+    return outcome.outcome
+  finally:
+    await control.close()
 
 
 Runner = Callable[[str, StartRun, list[Sink]], str]
@@ -138,7 +171,9 @@ class RunManager:
     self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="shopper")
 
   def start(self, req: StartRun) -> dict[str, Any]:
-    run_id = new_run_id()
+    if self.runner is run_shopper and not (req.run_id and req.launch_id and req.mandate_id):
+      raise HTTPException(status_code=409, detail="A fresh human launch with run_id and launch_id is required")
+    run_id = req.run_id or new_run_id()
     trace = MemorySink()
     record = {
       "id": run_id,
@@ -153,14 +188,15 @@ class RunManager:
         else "Live Strands shopper"
       ),
       "created_at": _now(),
-      # True once the api has bound this run to its user and mandate. False
-      # means local-only mode (no API_URL): traces go to logs, nowhere else.
+      # True only after the execution backend accepts this run's lease.
       "registered": False,
       "finished_at": None,
       "output": None,
       "error": None,
     }
     with self._lock:
+      if run_id in self.runs:
+        raise HTTPException(status_code=409, detail="run already submitted to this worker")
       self.runs[run_id] = record
       self._traces[run_id] = trace
     self._pool.submit(self._execute, run_id, req, trace)
@@ -173,17 +209,29 @@ class RunManager:
       # Resolving sinks needs this mode's credential; a missing one fails the
       # run with a clear error instead of borrowing another mode's.
       sinks = [trace, *trace_sinks(req)]
-      if register(run_id, req) is not None:
+      if req.launch_id:
+        # Human-launch API already registered the exact immutable run. Do not
+        # autonomously create another registration with a static agent token.
+        pass  # Mark registered only after the backend actually accepts the lease.
+      elif self.runner is run_shopper:
+        raise RuntimeError("a fresh backend-verified human launch is required")
+      elif register(run_id, req) is not None:
         record["registered"] = True
       output = self.runner(run_id, req, sinks)
-      # The model has seen card details, so its final words are redacted too.
+      # Keep output redacted for injected historical runners as well.
       record["output"] = redact_text(output)
-      record["status"] = "completed"
+      record["status"] = output if output in {
+        "blocked", "authorized", "reconciling", "declined", "stopped", "cancelled", "no_candidate"
+      } else "completed"
     except Exception as exc:  # a failed run is reported, not raised
       log.warning("run %s failed (%s)", run_id, type(exc).__name__)
       record["error"] = redact_text(f"{type(exc).__name__}: {exc}")
-      record["status"] = "failed"
+      record["status"] = exc.outcome if isinstance(exc, WorkflowStopped) and exc.outcome else "failed"
+    except asyncio.CancelledError:
+      record["status"] = "cancelled"
     finally:
+      if req.launch_id:
+        record["registered"] = any(e.get("phase") == "lease.claimed" for e in trace.events)
       record["finished_at"] = _now()
 
   def get(self, run_id: str) -> dict[str, Any] | None:

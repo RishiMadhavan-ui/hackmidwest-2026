@@ -69,6 +69,8 @@ def authorize(
     raise StoreUnavailable("state store unavailable") from exc
 
   decision = decide(attempt, grant, state, now=clock)
+  if grant and grant.authorization_event_id and grant.authorization_event_id != attempt.event_id:
+    decision = Decision("DECLINED", "authorization_event_mismatch")
   # Provider ASA does not carry authenticated SKU/checkout correlation. A card
   # matched to a grant cannot distinguish the signature same-price substitution.
   # Keep this adapter fail-closed until a trusted correlation protocol exists.

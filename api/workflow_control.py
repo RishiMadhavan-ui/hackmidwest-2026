@@ -318,17 +318,19 @@ def _run_stop_state(conn, run):
   cancelled = conn.execute(
     "SELECT requested_at FROM run_cancellations WHERE run_id=%s", (run["id"],)
   ).fetchone()
+  execution = conn.execute("SELECT rail_stopped_at,graph_ack_at FROM run_executions WHERE run_id=%s", (run["id"],)).fetchone()
+  enforced = bool(execution and execution["rail_stopped_at"])
   return {
     "run_id": run["id"],
     "scope": "run",
     "cancel_requested": bool(cancelled),
     "requested_at": cancelled["requested_at"] if cancelled else None,
-    "status": "pending_enforcement" if cancelled else "not_requested",
+    "status": "financially_stopped" if cancelled and enforced else "pending_enforcement" if cancelled else "not_requested",
     # R01 grants/cards have no authoritative run binding. Never broaden a run
     # stop to an account stop or report a rail barrier that does not exist.
-    "financial_revocation": "pending_run_binding" if cancelled else "not_requested",
-    "graph_cancellation": "not_acknowledged",
-    "provider_card_controls": "pending_run_binding" if cancelled else "not_requested",
+    "financial_revocation": "enforced" if enforced else "pending_enforcement" if cancelled and execution else "pending_run_binding" if cancelled else "not_requested",
+    "graph_cancellation": "acknowledged" if execution and execution["graph_ack_at"] else "not_acknowledged",
+    "provider_card_controls": "not_required_local_rail" if execution else "pending_run_binding" if cancelled else "not_requested",
     "previous_authorizations_reversed": False,
   }
 

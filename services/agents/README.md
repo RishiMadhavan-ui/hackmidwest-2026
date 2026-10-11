@@ -2,6 +2,14 @@
 
 Owner: Aditya. Port 8001.
 
+**Graph implemented; integration gated.** This branch runs a real bounded Strands
+Graph with investigation and fresh-context recovery. Production launches require
+a backend-verified human launch and execution lease. Current main lacks that
+execution API, so this branch deliberately refuses to start shopping against it.
+See [graph-handoff.md](graph-handoff.md) for proposed interfaces, owner dependencies
+and test evidence. No live recovery, distributed fencing or workflow SSE acceptance
+is claimed.
+
 - `shopper/`: the demo shopper, a real Strands agent that is **gullible on purpose**. Don't add prompt-injection defenses to it; Leash's protection lives in the api, the store, and the rail. All its tools come from two separate MCP services: `services/mcp-store` (`browse`, `create_checkout`, `complete_checkout`) and `services/mcp-leash` (mandates and payments).
 - `provenance/`: before/after tool hooks that emit sanitized trace events, plus a source record for every page the shopper reads, built from the store MCP's evidence (sha256, hidden text, suspicious phrases, redacted snapshot). Raw HTML never enters this service. Events reach the api through a durable outbox.
 - `guardian/`: advisory investigation. It recommends `block` or `review`, or reports `no_findings`; it never approves a payment.
@@ -14,10 +22,13 @@ Owner: Aditya. Port 8001.
 cd services/agents
 uv sync
 PYTHONPATH=../../shared uv run uvicorn main:app --port 8001
-PYTHONPATH=../../shared uv run python -m shopper "Buy a USB-C laptop charger for under \$40. No subscriptions." --mandate mnd_... --start-url http://localhost:8004/products/chg-65w
 ```
 
 In PowerShell, set `$env:PYTHONPATH="../../shared"` first. To keep settings in a file, put them in `services/agents/.env` (gitignored) and use `uv run --env-file .env ...`.
+
+After the execution API is implemented, the CLI additionally takes `--mandate`,
+`--run-id` and `--launch-id` from a fresh authenticated human launch, and optional
+`--start-url`. Do not invent identifiers or reuse an old launch after Stop.
 
 ## On LKE
 
@@ -33,7 +44,7 @@ docker build -f services/agents/Dockerfile .
 
 `GET /health` and `GET /healthz` are open. Everything else needs `Authorization: Bearer $AGENTS_SERVICE_TOKEN`; with no token configured those routes refuse every call (503). Keep the service off the public ingress too, but that alone isn't authentication.
 
-- `POST /runs` with `{task, mandate_id, start_url?, agent_mode?, sku?, claim_sku?}` returns `run_id`.
+- `POST /runs` with `{task, mandate_id, run_id, launch_id, start_url?, agent_mode?, sku?, claim_sku?}` queues the supplied run. Missing launch identifiers return 409; accepting the queue is not evidence that the execution backend accepted the launch.
 - `GET /runs/{run_id}` returns status, whether the run registered with the api, redacted output, and trace events.
 - `POST /guardian/evaluate` with `{mandate, checkout?, proposal?, provenance?, trace?}` returns advisory findings. It can take up to 20 seconds when the model runs, so keep it off the payment's critical path.
 
@@ -42,15 +53,28 @@ docker build -f services/agents/Dockerfile .
 - `"live"` (default): the real model shops.
 - `"scripted"`: a **labeled fixture**. The shopper's choices are scripted (check out `sku`, tell Leash it's buying `claim_sku`), but every tool call is real: store pages, the store's checkout, and the Leash api through MCP. The run and every trace event carry `agent_mode: "scripted"`, and the run is labeled "Simulated compromised agent (scripted fixture)". Never present it as a live model falling for the injection.
 
-The same from the CLI: `--scripted-sku SUB-CARE-MO --claim-sku CHG-65W`.
+The same fixture selector from the CLI: `--scripted-sku SUB-CARE-MO --claim-sku CHG-65W`.
+The Graph records the selected SKU as an agent claim; no claimed SKU substitutes
+for the API's checkout evidence. This fixed-SKU fixture does not select a new
+replacement automatically. Recovery tests supply explicitly separate candidates.
 
 ## Run registration and trace delivery
 
-When `API_URL` is set, every run registers with the api (`POST /agent-runs`) before it emits a single trace event. The api binds the run to the agent's user, the mandate, and the live/scripted label. If registration fails, the run fails and nothing is traced.
+The human launch API must register and bind the run to its owner, mandate and
+mode before dispatch. The Graph claims that exact run through the proposed
+execution API; it cannot autonomously register a replacement with a static token.
+Production requires `API_URL`. There is no local-only production launch. Legacy
+registration remains only for injected test runners.
 
 Each mode is its own Leash agent with its own mode-bound credential (the api binds a credential to exactly one mode): live runs use `AGENT_TOKEN_SHOPPER` as `agt_shopper`, scripted runs use `AGENT_TOKEN_SHOPPER_SCRIPTED` as `agt_shopper_scripted`. A run's registration, Leash MCP calls, and trace delivery all use its own mode's credential, and its trace events name that agent. There's no fallback: a scripted run without its credential fails before sending anything, and the service refuses to use one token for both modes. Each credential's traces spool in their own folder (`TRACE_SPOOL_DIR/live`, `TRACE_SPOOL_DIR/scripted`).
 
-Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST /provenance` in order by a background worker. It retries through api outages, sets aside events the api permanently rejects (`rejected/`), and on restart delivers anything still spooled. The api deduplicates by `event_id`, so retries are safe. Without `API_URL`, the service runs local-only: no registration, traces go to logs.
+Trace events are redacted and fsynced to `TRACE_SPOOL_DIR`. A background worker
+delivers tool/source reports to `POST /provenance` and Graph/inference/investigation/
+recovery reports to the proposed `POST /workflow-events`. The latter endpoint does
+not exist on current main. The outbox retries transient errors, retains permanent
+rejections in `rejected/`, and replays pending files on restart. Backend intake
+must deduplicate by event ID and payload. The process-local `/runs/{id}` view is
+not persisted SSE/history; that integration remains Rishi's owner dependency.
 
 ## Environment
 
@@ -61,7 +85,7 @@ Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST 
 | `AGENT_TOKEN_SHOPPER` | Live runs only: bearer for the Leash MCP, run registration, and trace intake (bound to live mode) |
 | `AGENT_TOKEN_SHOPPER_SCRIPTED` | Scripted runs only: the same uses, as a separate credential bound to scripted mode |
 | `SHOPPER_AGENT_ID`, `SHOPPER_SCRIPTED_AGENT_ID` | Agent ids each credential is bound to (defaults `agt_shopper`, `agt_shopper_scripted`) |
-| `API_URL` | Run registration and trace intake; without it, local-only mode |
+| `API_URL` | Required execution lease/checkpoint API and trace intake |
 | `MCP_LEASH_URL` | Leash MCP service (default `http://localhost:8002/mcp`; `MCP_URL` also accepted) |
 | `MCP_STORE_URL` | Store MCP service (default `http://localhost:8003/mcp`) |
 | `STORE_MCP_TOKEN` | Bearer for the store MCP; never the Leash token |
@@ -70,9 +94,10 @@ Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST 
 ## Test
 
 ```
-uv run pytest
+uv run pytest -m "not live_inference"
 ```
 
-- `tests/test_wiring_local.py` starts both real MCP services as subprocesses with stub api/store servers and runs the scripted shopper over HTTP. The stubs' decisions are canned.
+- `tests/test_workflow.py` exercises the actual SDK Graph with fixture ports. Runtime, control and workflow-event tests cover actual Strands model hooks, clean recovery context, cancellation, strict lease validation and restartable event delivery. Mock API tests do not prove distributed fencing.
+- `tests/test_wiring_local.py` retains the historical single-agent HTTP fixture with both real MCP services and stub API/store servers. Its canned decisions do not prove current Graph or payment acceptance.
 - `tests/test_shopper_loop.py` drives the real Strands event loop with a **scripted fixture model**. It proves the hooks, redaction, and correlation; it is not a live agent run.
 - The two live inference tests in `tests/test_llm.py` run only when an inference endpoint is configured. Every other test has inference, api, and storage settings cleared, even if your shell has them.

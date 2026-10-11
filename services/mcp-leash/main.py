@@ -25,6 +25,7 @@ from starlette.routing import Route
 # The caller's raw "Bearer ..." header for the current request. Set by
 # BearerAuthMiddleware, read by every tool.
 bearer_header: contextvars.ContextVar[str] = contextvars.ContextVar("bearer_header")
+scope_headers: contextvars.ContextVar[dict] = contextvars.ContextVar("scope_headers", default={})
 
 # POST /payments fetches and verifies the checkout with the merchant before it
 # answers, so give the api headroom.
@@ -84,7 +85,23 @@ async def _call_api(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
   Agents can act on {"status": "error", "reason": ...}; a raised exception just
   looks like a broken tool to them.
   """
-  headers = {"Authorization": bearer_header.get("")}
+  headers = {"Authorization": bearer_header.get(""), **scope_headers.get()}
+  action = "request_payment" if method == "POST" and path == "/payments" else (
+    "check_status" if path.startswith("/payments/") else "list_mandates")
+  if action == "request_payment" or scope_headers.get():
+    try:
+      async with httpx.AsyncClient(base_url=_api_url(), timeout=3, follow_redirects=False) as client:
+        checked = await client.post("/execution/authorize", headers=headers,
+          json={"audience": "mcp-leash", "action": action})
+      if not checked.is_success:
+        return {"status": "error", "reason": "Run execution scope is unavailable", "http_status": checked.status_code}
+      binding = checked.json()
+      if action == "request_payment":
+        body = kwargs.get("json", {})
+        if body.get("run_id") != binding.get("run_id") or body.get("mandate_id") != binding.get("mandate_id"):
+          return {"status": "error", "reason": "Payment scope mismatch", "http_status": 403}
+    except (httpx.HTTPError, ValueError):
+      return {"status": "error", "reason": "Execution scope check failed closed"}
   try:
     async with httpx.AsyncClient(base_url=_api_url(), timeout=API_TIMEOUT_SECONDS) as client:
       res = await client.request(method, path, headers=headers, **kwargs)
@@ -295,10 +312,14 @@ class BearerAuthMiddleware:
       return
 
     reset = bearer_header.set(auth)
+    scope_reset = scope_headers.set({k.decode("latin-1"): v.decode("latin-1")
+      for k, v in headers.items() if k in {b"x-leash-run-id", b"x-leash-worker-id",
+        b"x-leash-generation", b"x-leash-execution-token"}})
     try:
       await self.app(scope, receive, send)
     finally:
       bearer_header.reset(reset)
+      scope_headers.reset(scope_reset)
 
 
 def _allowed_hosts() -> list[str]:

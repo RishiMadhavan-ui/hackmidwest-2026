@@ -1,5 +1,13 @@
 # AGENTS.md
 
+**October 11 agent branch update (`aditya/strands-graph`, based on `138d636`):**
+the bounded Strands Graph, fresh-context recovery, local cancellation and genuine
+execution-event spooling are implemented with fixture tests. This is not live
+acceptance: human-launch/worker-fencing APIs, MCP scope enforcement, workflow-event
+intake/SSE integration and the contained merchant/payment flow remain dependencies.
+The client fails closed against today's backend. No API/database/web ownership or
+frozen contract changed. See [Graph handoff](services/agents/graph-handoff.md).
+
 **P0 Attack Lab containment (October 11):** anonymous deployed
 `/store/products/chg-65w?evil=1` served a poisoned listing; `/attack-lab` was 404.
 The source now denies runtime poison selection in both the web route and store,

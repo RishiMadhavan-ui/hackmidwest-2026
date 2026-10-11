@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt
 
 from catalog import get_product, resolve_product_id
 from pages import render_checkout_started, render_product_page
+import execution_bridge
 
 logger = logging.getLogger("leash.store")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
@@ -163,8 +164,8 @@ def healthz() -> dict[str, Any]:
     "merchant": "volt_supply_co_simulated",
     "evil_mode_env": False,
     "attack_lab_execution": "disabled_pending_operator_authorization",
-    "payment_completion": "disabled_pending_durable_controls",
-    "checkout_persistence": "process_memory",
+    "payment_completion": "scoped_local_rail" if execution_bridge.enabled() else "disabled_pending_durable_controls",
+    "checkout_persistence": "api_postgresql" if execution_bridge.enabled() else "process_memory",
     "rail_configured": bool(_webhook_url() and len(_charge_token()) >= 32),
   }
 
@@ -204,7 +205,8 @@ def _open_checkout(product: dict[str, Any], quantity: int) -> dict[str, Any]:
     "payment_id": None,
     "rail_result": None,
   }
-  _CHECKOUTS[checkout_id] = record
+  if not execution_bridge.enabled():
+    _CHECKOUTS[checkout_id] = record
   logger.info(
     "checkout_created id=%s product_id=%s total_cents=%s recurring=%s",
     checkout_id,
@@ -232,6 +234,18 @@ def product_page(
   return HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
 
 
+@app.get("/catalog", response_class=HTMLResponse)
+def clean_catalog():
+  # A separate clean discovery source. It is still untrusted agent evidence;
+  # the API retrieves and checks every resulting checkout independently.
+  from html import escape
+  products = [get_product("CHG-65W"), get_product("SUB-CARE-MO")]
+  rows = [f"<li>{escape(p['name'])}: SKU {escape(p['sku'])}, {p['price_cents']} cents; "
+          f"category {escape(p['category'])}; subscription {bool(p['subscription'])}</li>" for p in products]
+  return HTMLResponse("<h1>Volt Supply canonical catalog</h1><ul>" + "".join(rows) + "</ul>",
+                      headers={"Cache-Control": "no-store"})
+
+
 @app.post("/products/{product_id}/checkout", response_class=HTMLResponse)
 def start_checkout_from_listing(product_id: str) -> HTMLResponse:
   """Human storefront checkout start (no bearer). Bind/complete stay authenticated."""
@@ -251,6 +265,7 @@ def start_checkout_from_listing(product_id: str) -> HTMLResponse:
 @app.post("/api/checkouts")
 def create_checkout(
   body: CheckoutCreate,
+  request: Request,
   authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
   """Create a checkout from the canonical catalog — never from agent claims."""
@@ -263,7 +278,10 @@ def create_checkout(
   product = get_product(raw)
   if not product:
     raise HTTPException(status_code=404, detail="Unknown SKU")
-  return _checkout_public(_open_checkout(product, int(body.quantity)))
+  facts = _checkout_public(_open_checkout(product, int(body.quantity)))
+  if execution_bridge.enabled():
+    return execution_bridge.call("POST", "/checkouts", {"facts": facts}, request.headers)
+  return facts
 
 
 @app.get("/api/checkouts/{checkout_id}")
@@ -272,6 +290,10 @@ def get_checkout(
   authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
   """Trusted read for the API verifier — same record create stored."""
+  if execution_bridge.enabled():
+    execution_bridge.backend_auth(authorization)
+    from urllib.parse import quote
+    return execution_bridge.call("GET", "/checkouts/" + quote(checkout_id, safe=""))
   _require_store_auth(authorization)
   record = _CHECKOUTS.get(checkout_id)
   if not record:
@@ -286,6 +308,8 @@ def bind_checkout(
   authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
   """API-only bind after verify+grant. Stores rail correlation on this checkout."""
+  if execution_bridge.enabled():
+    raise HTTPException(409, "Verified binding is committed by the execution backend")
   _require_store_auth(authorization)
   record = _CHECKOUTS.get(checkout_id)
   if not record:
@@ -336,10 +360,13 @@ def bind_checkout(
 def complete_checkout(
   checkout_id: str,
   body: CompleteBody,
+  request: Request,
   authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
   """Validate binding, then fail closed until durable charge controls exist."""
   _require_store_auth(authorization)
+  if execution_bridge.enabled():
+    return execution_bridge.complete(checkout_id, body.payment_id, request.headers)
   record = _CHECKOUTS.get(checkout_id)
   if not record:
     raise HTTPException(status_code=404, detail="Unknown checkout")

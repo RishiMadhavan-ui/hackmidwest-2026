@@ -57,7 +57,8 @@ def test_workshop_starter_names_work_as_a_pair(clean_env, monkeypatch):
   monkeypatch.setenv("OPENAI_API_KEY", "starter-key")
   monkeypatch.setenv("CHAT_MODEL", "hackathon-chat")
   model = make_model("shopper")
-  assert model.client_args == {"base_url": "https://ws.invalid/v1", "api_key": "starter-key"}
+  assert model.client_args == {"base_url": "https://ws.invalid/v1", "api_key": "starter-key",
+                               "timeout": 20.0, "max_retries": 0}
   assert model.get_config()["model_id"] == "hackathon-chat"
 
 

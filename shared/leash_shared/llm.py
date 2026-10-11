@@ -71,7 +71,9 @@ def make_model(role: Role) -> OpenAIModel:
 
   base_url, api_key = _endpoint()
   return OpenAIModel(
-    client_args={"base_url": base_url, "api_key": api_key},
+    # Bound transport time and disable invisible client retries. The Graph
+    # owns retry/cost budgets and records every actual model attempt.
+    client_args={"base_url": base_url, "api_key": api_key, "timeout": 20.0, "max_retries": 0},
     model_id=model_id(),
     params=dict(ROLE_SETTINGS[role]),
   )

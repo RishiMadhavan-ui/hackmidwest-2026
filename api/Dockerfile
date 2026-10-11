@@ -12,6 +12,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY api/pyproject.toml api/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+# Includes execution.py, workflow_events.py and purchase_execution.py.
 COPY api/*.py ./
 COPY shared/leash_shared /shared/leash_shared
 COPY db/migrations /db/migrations

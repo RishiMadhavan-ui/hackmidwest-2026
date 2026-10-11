@@ -1,5 +1,21 @@
 # LEASH demo script (draft)
 
+**October 11 superseding execution gate:** the deployment snapshots and shell
+commands below are historical notes, not current launch instructions. They omit
+the required fresh human launch and worker lease; do not run them as an acceptance
+test. The [Graph handoff](../services/agents/graph-handoff.md) records implemented
+code, fixture evidence and the missing API/merchant/rail/SSE dependencies. Current
+main blocks financial execution, and this branch refuses unfenced Graph launches.
+No new live injection or purchase/recovery evidence was collected.
+
+Live rehearsal must wait for the operator-authorized, isolated Attack Lab. Never
+enable a poisoned listing through an anonymous query, `STORE_EVIL_MODE`, a frontend
+flag or an ordinary-user toggle. Once the owner gates are complete, demonstrate
+the blocked subscription, investigation, clean alternative and final backend
+authorization in **one bounded Graph run under the unchanged mandate**. Refresh
+Mission Control to verify replay, and separately test Stop and a stale worker.
+Update the commands from the agreed launch API before using this run of show.
+
 Owner: Aditya (A10). Every `<...>` is a value still to fill in from Cameron's deployment (H11) and Rishi's UI (R08/R09). Rehearse against the real deployment and update this file with what actually happened.
 
 **Status: no live injection has been recorded yet.** The signature attack is planned as a live run, and nobody should say "the live agent fell for it" until the [live evidence log](#live-evidence-log) has a real entry with the listing, the agent's resulting action, and the backend's outcome.
@@ -141,7 +157,10 @@ The commands below use `Start-Run`, `$task` and `$listing` from the preflight se
 | 2:00-2:35 | Open the incident. | Listing URL and SHA-256, the hidden instruction excerpt, the agent's claim vs the trusted checkout, failed checks, guardian findings, decision source and latency. | Show the run's trace: `Invoke-RestMethod "$env:AGENTS_URL/runs/<run_id>" -Headers $h`. |
 | 2:35-3:00 | Aditya: Strands for the shopper and guardian, Akamai inference for the models, the FastAPI policy backend on Akamai compute, the selected rail. Limitation in one sentence. | Blocked incident stays on screen. | |
 
-If timing allows, show recovery (S6) in the session where the attack was blocked: turn the attack listing off and run the same mode again on that same mandate. After the live attack: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B; start_url=$listing; agent_mode="live" }`. After the fixture fallback: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B_FIXTURE; start_url=$listing; agent_mode="scripted"; sku="CHG-65W" }`. Either way it's approved under the same unchanged mandate: the blocked attack consumed no purchase authority, and the incident stays in history.
+Recovery (S6) is mandatory within the same Graph execution. Reserve time in the
+three-minute demonstration for automatic investigation, candidate quarantine and
+an independently verified replacement. A second manually started run, changed
+mandate or disabled attack does not satisfy automatic recovery acceptance.
 
 Sessions A and B stay separate, each with its own human-confirmed mandate. A singular "buy a charger" mandate allows one purchase, so A's successful purchase can't be followed by B's attack under the same authority. The same holds for the fallback sessions, which belong to the scripted agent.
 

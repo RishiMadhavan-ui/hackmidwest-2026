@@ -38,7 +38,7 @@ def prepare(conn, body, principal, mandate):
     return existing
   unresolved = conn.execute(
     """SELECT id FROM payment_operations WHERE user_id=%s
-       AND (mandate_id=%s OR run_id=%s) AND state IN ('prepared','reconciling') LIMIT 1""",
+       AND (mandate_id=%s OR run_id=%s) AND state IN ('prepared','reconciling','activating','ready','authorizing','authorized') LIMIT 1""",
     (principal.user_id, mandate.id, body.run_id),
   ).fetchone()
   if unresolved:
@@ -86,6 +86,22 @@ def cancel_prepared(conn, user_id, *, reason, run_id=None, mandate_id=None):
   ).fetchall()
   for operation in operations:
     finish(conn, operation, "cancelled", reason)
+  # Tombstones are monotonic at the rail. Even if this SQL transaction later
+  # rolls back, an old execution cannot regain its spending permission.
+  from execution import rail
+  executions = conn.execute("""SELECT e.run_id FROM run_executions e
+    JOIN agent_runs r ON r.id=e.run_id WHERE r.user_id=%s
+    AND (%s::text IS NULL OR r.id=%s) AND (%s::text IS NULL OR r.mandate_id=%s)
+    AND e.rail_stopped_at IS NULL ORDER BY e.run_id FOR UPDATE OF e""",
+    (user_id, run_id, run_id, mandate_id, mandate_id)).fetchall()
+  for execution in executions:
+    try:
+      result = rail("POST", "/internal/execution/stop", {"run_id": execution["run_id"], "user_id": user_id})
+      if (result.get("run_id") == execution["run_id"] and result.get("user_id") == user_id
+          and result.get("financial_revocation") == "enforced"):
+        conn.execute("UPDATE run_executions SET rail_stopped_at=now() WHERE run_id=%s", (execution["run_id"],))
+    except AuthorityError:
+      pass  # Pending is explicit; SQL revocation and lease expiry still fail closed.
   return len(operations)
 
 

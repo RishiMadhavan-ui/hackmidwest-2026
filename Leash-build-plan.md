@@ -1,5 +1,16 @@
 # LEASH build plan
 
+**October 11 Aditya branch update (`aditya/strands-graph`, base `138d636`):**
+A11/A12 now have an actual bounded SDK Graph and fresh-context recovery validated
+with fixtures. A13 emits genuine execution metadata to a restartable outbox;
+workflow intake/SSE replay is not integrated. A14 has local cancellation and a
+fail-closed execution client; durable leases, direct MCP enforcement and rail
+fencing are not implemented by this branch. These tasks are not accepted as live
+complete. Rishi retains API/database/web ownership; Cameron retains merchant,
+rail and deployment ownership. See [Graph handoff](services/agents/graph-handoff.md)
+for the proposed contracts and remaining owner gates. Production launches remain
+disabled against the current backend; financial and Attack Lab containment stays.
+
 **Urgent P0 Attack Lab:** an anonymous deployed storefront request selected a
 poisoned listing; the dedicated Lab UI is absent. Source containment disables
 runtime poison selection in web/store; deployed remediation remains unverified.

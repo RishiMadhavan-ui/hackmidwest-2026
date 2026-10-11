@@ -65,7 +65,10 @@ class OutboxSink:
     # after a restart.
     name = f"{time.time_ns():020d}-{clean.get('event_id') or uuid.uuid4().hex}.json"
     tmp = self.pending / f".{name}.tmp"
-    tmp.write_text(json.dumps(clean, default=str), encoding="utf-8")
+    with tmp.open("w", encoding="utf-8") as stream:
+      stream.write(json.dumps(clean, default=str))
+      stream.flush()
+      os.fsync(stream.fileno())
     os.replace(tmp, self.pending / name)
     self.start()
     self._wake.set()
@@ -119,7 +122,12 @@ class OutboxSink:
     except (OSError, ValueError):
       return "rejected"
     try:
-      res = httpx.post(self.url, json=body, headers=self.headers, timeout=self.timeout)
+      # Workflow metadata uses a private versioned intake. Frozen R01
+      # /provenance still accepts only genuine tool/source reports.
+      url = self.url
+      if body.get("type") == "agent.step" and body.get("schema_version") == 1:
+        url = self.url.removesuffix(INTAKE_PATH) + "/workflow-events"
+      res = httpx.post(url, json=body, headers=self.headers, timeout=self.timeout)
     except httpx.HTTPError as exc:
       log.warning("trace intake unreachable (%s); will retry", type(exc).__name__)
       return "retry"
