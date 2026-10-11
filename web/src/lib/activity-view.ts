@@ -15,13 +15,17 @@ export function newestRunId(events: ActivityEvent[], mandateId?: string): string
 /** Display filtering only. Audit records, replay cursors and decisions stay intact. */
 export function activityView(events: ActivityEvent[], options: {
   scope: ActivityScope; runId?: string | null; mandateId?: string | null;
-  afterSequence?: number; now?: Date;
+  afterSequence?: number; now?: Date; paymentIds?: string[];
 }): ActivityEvent[] {
   const now = options.now ?? new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   return events.filter((event) => {
     if (event.sequence <= (options.afterSequence ?? 0)) return false;
-    if (options.scope === "run") return !!options.runId && event.data.run_id === options.runId
+    // Some durable payment events predate run_id attribution. Only the
+    // backend-owned attempt list may establish their link to the selected run.
+    if (options.scope === "run") return !!options.runId && (event.data.run_id === options.runId
+      || (!event.data.run_id && typeof event.data.payment_id === "string"
+        && options.paymentIds?.includes(event.data.payment_id)))
       && (!options.mandateId || !event.data.mandate_id || event.data.mandate_id === options.mandateId);
     if (options.scope === "today") return new Date(event.at).getTime() >= today;
     return true;

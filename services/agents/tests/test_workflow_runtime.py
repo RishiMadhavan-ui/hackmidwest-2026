@@ -209,3 +209,74 @@ def test_guardian_model_failure_is_advisory_and_does_not_change_backend_decision
   asyncio.run(ports.investigate(state))
   assert state.decision["status"] == "blocked"
   assert sink.events[-1]["phase"] == "investigation.unavailable"
+
+
+def guardian_state():
+  return State("run_1", candidate={"checkout_id": "chk_1", "source_hashes": ["a" * 64]},
+    reasons=["subscription_prohibited"], decision={"id": "pay_1", "status": "blocked"})
+
+
+def test_offline_scripted_run_never_constructs_a_live_guardian(monkeypatch):
+  ports, sink, _, _ = make_ports()
+  def forbidden(role):
+    raise AssertionError("offline fixture must not invoke inference")
+  monkeypatch.setattr("shopper.runtime.make_model", forbidden)
+  asyncio.run(ports.investigate(guardian_state()))
+  assert sink.events[-1]["data"]["reason"] == "fixture_model_not_configured"
+
+
+def test_lab_scripted_shopper_can_use_independently_attributed_guardian(monkeypatch):
+  ports, sink, control, client = make_ports()
+  ports.allow_live_guardian = True
+  calls = []
+  def model(role):
+    calls.append(role)
+    return ScriptedModel([json.dumps({"intent_match": "mismatch", "injection_suspected": True,
+      "recommendation": "block", "explanation": "The checkout is a subscription."})])
+  monkeypatch.setattr("shopper.runtime.make_model", model)
+  monkeypatch.setattr("provenance.workflow.configured_provider", lambda: "provider-test-double")
+  monkeypatch.setattr("provenance.workflow.model_id", lambda: "guardian-test-double")
+  state = guardian_state()
+  original = deepcopy(state.decision)
+  asyncio.run(ports.investigate(state))
+  assert calls == ["guardian"] and state.decision == original
+  assert client.calls == [] and control.agents == []
+  inference = [event for event in sink.events if event.get("phase") == "inference.completed"]
+  assert len(inference) == 1
+  assert inference[0]["data"]["role"] == "guardian"
+  assert inference[0]["data"]["execution"] == "model_call"
+  assert inference[0]["data"]["provider"] == "provider-test-double"
+  assert sink.events[-1]["phase"] == "investigation.completed"
+  assert sink.events[-1]["data"]["authority"] == "advisory"
+
+
+def test_lab_guardian_outage_does_not_relax_scripted_checkout_block(monkeypatch):
+  ports, sink, _, client = make_ports()
+  ports.allow_live_guardian = True
+  def unavailable(role):
+    raise RuntimeError("private provider failure")
+  monkeypatch.setattr("shopper.runtime.make_model", unavailable)
+  state = guardian_state()
+  original = deepcopy(state.decision)
+  asyncio.run(ports.investigate(state))
+  assert state.decision == original and client.calls == []
+  assert sink.events[-1]["data"]["reason"] == "model_unavailable"
+  assert "private provider" not in json.dumps(sink.events)
+
+
+def test_guardian_stream_failure_is_advisory_but_real_stop_still_propagates():
+  class Broken(ScriptedModel):
+    async def stream(self, *args, **kwargs):
+      raise RuntimeError("private model transport failure")
+      yield  # pragma: no cover
+  ports, sink, control, client = make_ports()
+  ports.guardian_model = lambda: Broken([])
+  state = guardian_state()
+  original = deepcopy(state.decision)
+  asyncio.run(ports.investigate(state))
+  assert state.decision == original and client.calls == []
+  assert sink.events[-1]["data"]["reason"] == "model_unavailable"
+  assert "private model" not in json.dumps(sink.events)
+  control.cancel()
+  with pytest.raises(WorkflowStopped):
+    asyncio.run(ports.investigate(state))

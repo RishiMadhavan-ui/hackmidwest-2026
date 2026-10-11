@@ -92,7 +92,7 @@ export function StartShopping({ mandate, onRunChange, events = [] }: {
       {execution?.progress.reasons?.map((reason) => <p key={reason} className="rounded bg-destructive/10 p-2 text-destructive">{reason.replaceAll("_", " ")}</p>)}
       {execution?.progress.outcome === "authority_ended" && <p className="text-amber-500">The worker stopped renewing its execution lease. No authorization is shown for this run; inspect its recorded startup/error events.</p>}
       {execution?.progress.exclusions && Object.entries(execution.progress.exclusions).map(([kind, items]) => items.length > 0 && <p className="break-all text-xs" key={kind}>Quarantined {kind}: {items.join(", ")}</p>)}
-      {execution?.cancel_requested && <p>Spending stop · rail {execution.rail_stopped ? "enforced" : "pending"} · Graph {execution.graph_acknowledged ? "acknowledged" : "pending"}</p>}
+      {execution?.cancel_requested && <p>{execution.financial_state === "authorized" && execution.state === "terminal" ? "Workflow cleanup: unused authority closed" : "Spending stop"} · rail {execution.rail_stopped ? "enforced" : "pending"} · Graph {execution.graph_acknowledged ? "acknowledged" : "pending"}. Earlier authorization is unchanged.</p>}
       <Button variant="outline" disabled={busy || (execution?.state === "terminal" && execution.rail_stopped)} onClick={() => void stop()}>Stop this purchase</Button>
     </div>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

@@ -60,6 +60,7 @@ const PHASE_LABELS: Record<string, string> = {
   "node.started": "Graph node started", "node.completed": "Graph node completed", "edge.traversed": "Graph transition",
   "inference.started": "Model inference started", "inference.completed": "Model inference completed", "inference.failed": "Model inference failed",
   "verification.result": "Independent verification result", "investigation.started": "Guardian investigating",
+  "investigation.unavailable": "Guardian inference unavailable",
   "investigation.completed": "Guardian findings recorded", "candidate.quarantined": "Candidate quarantined",
   "recovery.started": "Clean recovery started", "payment.started": "Authorization started",
   "payment.authorized": "Authorization recorded", "run.terminal": "Run finished",

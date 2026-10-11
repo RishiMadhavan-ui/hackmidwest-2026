@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, type RunStop } from "@/lib/api";
 import { useActivity } from "@/lib/activity";
+import { activityView } from "@/lib/activity-view";
 import type { PurchaseMandate } from "@/lib/mandates";
 import { Button } from "@/components/ui/button";
+import { EventList } from "@/components/event-list";
 
 type Draft = { mandate: PurchaseMandate; mode: string; scenario: string };
-type History = { attempts: { id: string; checkout_id: string; state: string; reason: string; authorization_status: string }[];
-  runs: { run_id: string; state: string; scenario: string; progress: { node?: string; attempt?: number; outcome?: string } }[] };
+type History = { attempts: { id: string; run_id: string; checkout_id: string; state: string; reason: string;
+    authorization_status: string; result: { reasons: string[] } | null }[];
+  runs: { run_id: string; state: string; scenario: string; rail_stopped_at: string | null; graph_ack_at: string | null;
+    progress: { node?: string; attempt?: number; outcome?: string; reasons?: string[] } }[] };
 
 export function LabScenarios({ namespaceId, enabled, onReset }: { namespaceId: string; enabled: boolean; onReset: () => void }) {
   const { events } = useActivity();
@@ -19,6 +23,10 @@ export function LabScenarios({ namespaceId, enabled, onReset }: { namespaceId: s
   const [history, setHistory] = useState<History | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [stopResult, setStopResult] = useState<RunStop | null>(null);
+  const [page, setPage] = useState(0);
+  const [clearedThrough, setClearedThrough] = useState(0);
   const base = `/attack-lab/namespaces/${encodeURIComponent(namespaceId)}`;
   useEffect(() => {
     let active = true;
@@ -36,10 +44,11 @@ export function LabScenarios({ namespaceId, enabled, onReset }: { namespaceId: s
         setConfirmed(false);
         setDraft(await apiFetch<Draft>(`${base}/draft`, { method: "POST", body: JSON.stringify({ scenario, mode }) }));
       } else if (action === "execute" && draft && confirmed) {
-        await apiFetch(`${base}/execute`, { method: "POST", body: JSON.stringify({
+        const launched = await apiFetch<{ run_id: string }>(`${base}/execute`, { method: "POST", body: JSON.stringify({
           mandate_id: draft.mandate.id, version: draft.mandate.version,
           canonical_payload_hash: draft.mandate.canonical_payload_hash, confirmed: true,
         }) });
+        setSelectedRunId(launched.run_id); setStopResult(null); setPage(0); setClearedThrough(0);
         setDraft(null); setConfirmed(false);
       } else if (action === "reset") {
         await apiFetch(`${base}/reset`, { method: "POST", body: "{}" });
@@ -48,10 +57,20 @@ export function LabScenarios({ namespaceId, enabled, onReset }: { namespaceId: s
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Scenario request failed"); }
     finally { setBusy(false); }
   }
-  const labEvents = events.filter((event) => event.data.lab_namespace_id === namespaceId).slice(-20);
+  const runId = selectedRunId ?? history?.runs[0]?.run_id ?? null;
+  const run = history?.runs.find((item) => item.run_id === runId);
+  const attempts = history?.attempts.filter((item) => item.run_id === runId) ?? [];
+  const scopedEvents = events.filter((event) => event.data.lab_namespace_id === namespaceId);
+  const labEvents = activityView(scopedEvents, { scope: "run", runId, afterSequence: clearedThrough,
+    paymentIds: attempts.map((item) => item.id) });
+  const pages = Math.max(1, Math.ceil(labEvents.length / 25));
+  const currentPage = Math.min(page, pages - 1);
+  const visibleEvents = [...labEvents].reverse().slice(currentPage * 25, (currentPage + 1) * 25);
+  const recordedMode = scopedEvents.findLast((event) => event.data.run_id === runId
+    && typeof event.data.agent_mode === "string")?.data.agent_mode;
   async function stop(runId: string) {
-    setBusy(true);
-    try { await apiFetch(`${base}/runs/${encodeURIComponent(runId)}/stop`, { method: "POST", body: "{}" }); }
+    setBusy(true); setError(null);
+    try { setStopResult(await apiFetch<RunStop>(`${base}/runs/${encodeURIComponent(runId)}/stop`, { method: "POST", body: "{}" })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Stop enforcement pending"); }
     finally { setBusy(false); }
   }
@@ -74,10 +93,48 @@ export function LabScenarios({ namespaceId, enabled, onReset }: { namespaceId: s
       <label className="flex gap-2"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />I confirm these exact demo terms.</label>
       <Button disabled={busy || !enabled || !confirmed} onClick={() => void act("execute")}>Confirm and run scenario</Button>
     </div>}
-    {history?.runs.map((run) => <div key={run.run_id}><p className="break-all text-xs">{run.scenario} · {run.state} · {run.progress.node ?? "waiting"} · candidate {run.progress.attempt ?? 0} · {run.progress.outcome ?? "pending"}</p>
-      {run.state !== "terminal" && <Button variant="outline" disabled={busy} onClick={() => void stop(run.run_id)}>Stop this demo purchase</Button>}</div>)}
-    {history?.attempts.map((attempt) => <p key={attempt.id} className="text-xs">{attempt.checkout_id} · {attempt.state} · {attempt.reason} · authorization {attempt.authorization_status}</p>)}
-    {labEvents.map((event) => <p key={event.event_id} className="text-xs text-muted-foreground">{event.type} · {String(event.data.phase ?? event.data.reported_outcome ?? "persisted event")}</p>)}
+    {history && history.runs.length > 0 && <label className="block text-xs text-muted-foreground">Recorded scenario
+      <select aria-label="Recorded Lab run" className="mt-1 w-full rounded border bg-background p-2 text-sm" value={runId ?? ""}
+        onChange={(event) => { setSelectedRunId(event.target.value); setStopResult(null); setPage(0); setClearedThrough(0); }}>
+        {selectedRunId && !run && <option value={selectedRunId}>Launching new run…</option>}
+        {history.runs.map((item) => <option key={item.run_id} value={item.run_id}>{item.scenario.replaceAll("_", " ")} · {item.progress.outcome ?? item.state} · {item.run_id.slice(-8)}</option>)}
+      </select>
+    </label>}
+    {runId && <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold">{run?.progress.outcome?.replaceAll("_", " ") ?? "Launching"} · candidate {run?.progress.attempt ?? 0}</h4>
+        <span className="rounded border px-2 py-1 text-xs">{recordedMode === "scripted" ? "Scripted shopper fixture" : recordedMode === "live" ? "Live shopper" : "Mode awaiting recorded evidence"}</span>
+      </div>
+      <p className="break-all font-mono text-[11px] text-muted-foreground">{runId}</p>
+      {run && <p className="text-xs">Workflow {run.state} · latest node {run.progress.node ?? "waiting"}</p>}
+      {run?.progress.reasons?.map((reason) => <p key={reason} className="text-xs text-warning">{reason.replaceAll("_", " ")}</p>)}
+      {run?.rail_stopped_at && <p className="text-xs">Unused spending authority revoked. Earlier authorizations remain unchanged.</p>}
+      {run?.progress.outcome === "stopped" && <p role="status" className="text-sm">Purchase stopped · rail {run.rail_stopped_at ? "enforced" : "pending"} · Graph {run.graph_ack_at ? "acknowledged" : "pending"}</p>}
+      {stopResult?.run_id === runId && <p role="status" className="text-xs">Stop request · financial revocation {stopResult.financial_revocation} · Graph {run?.graph_ack_at ? "acknowledged" : stopResult.graph_cancellation}. No prior authorization reversed.</p>}
+      {run?.state !== "terminal" && <Button variant="outline" disabled={busy} onClick={() => void stop(runId)}>Stop this demo purchase</Button>}
+      <div className="grid gap-2 sm:grid-cols-2">
+        {attempts.map((attempt) => <div key={attempt.id} className={`rounded-lg border p-3 ${attempt.state === "blocked" ? "border-destructive/40 bg-destructive/5" : "bg-background"}`}>
+          <p className="text-sm font-medium">{attempt.state === "blocked" ? "Blocked before payment" : attempt.authorization_status === "authorized" ? "Authorization recorded" : attempt.state.replaceAll("_", " ")}</p>
+          <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{attempt.checkout_id}</p>
+          {(attempt.result?.reasons ?? [attempt.reason]).filter(Boolean).map((reason) => <p key={reason} className="mt-1 text-xs">{reason.replaceAll("_", " ")}</p>)}
+          {attempt.authorization_status === "authorized" && <p className="mt-1 text-xs">Local Payment Rail Simulator · authorization is not settlement.</p>}
+        </div>)}
+      </div>
+      {attempts.length === 0 && <p className="text-xs text-muted-foreground">No purchase attempt recorded for this run.</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+        <h4 className="text-sm font-semibold">This run&apos;s persisted evidence</h4>
+        <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => { setClearedThrough(events.at(-1)?.sequence ?? 0); setPage(0); }}>Clear view</Button>
+          {clearedThrough > 0 && <Button variant="outline" size="sm" onClick={() => { setClearedThrough(0); setPage(0); }}>Restore view</Button>}</div>
+      </div>
+      <p className="text-xs text-muted-foreground">Clearing hides entries only. Open rows for recorded reasons, product SKUs, source hashes and Graph evidence. Model failures remain visible.</p>
+      <EventList events={visibleEvents} />
+      {visibleEvents.length === 0 && <p className="text-xs text-muted-foreground">No visible events. History is retained.</p>}
+      {pages > 1 && <div className="flex items-center justify-between gap-2 text-xs">
+        <Button variant="outline" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Newer events</Button>
+        <span>{currentPage + 1} / {pages}</span>
+        <Button variant="outline" size="sm" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>Older events</Button>
+      </div>}
+    </div>}
     <Button variant="outline" disabled={busy} onClick={() => void act("reset")}>Stop and reset isolated fixtures</Button>
     <p className="text-xs text-muted-foreground">Reset disables the workspace, revokes demo authority, and preserves evidence. Scenarios expire after 120 seconds; at most three candidates and one active run.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

@@ -21,7 +21,7 @@ function EventRow({ event, expandable }: { event: ActivityEvent; expandable: boo
         <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
           {eventTitle(event)}
           {scripted ? (
-            <span className="text-xs font-normal text-warning">Simulated compromised agent</span>
+            <span className="text-xs font-normal text-warning">Scripted shopper run</span>
           ) : null}
         </p>
         {summary ? (

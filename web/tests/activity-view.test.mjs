@@ -17,6 +17,14 @@ test('latest run selection stays within the selected mandate', () => {
   assert.equal(newestRunId(events, 'mnd_1'), 'run_1');
   assert.equal(newestRunId(events, 'mnd_3'), null);
 });
+test('legacy payment events require an owned attempt link and cannot override an explicit foreign run', () => {
+  const linked = event(1, 'payment.denied', { payment_id: 'pay_owned' });
+  const foreign = event(2, 'authorization.decided', { payment_id: 'pay_other' });
+  const conflicting = event(3, 'payment.denied', { payment_id: 'pay_owned', run_id: 'run_foreign' });
+  const events = [linked, foreign, conflicting];
+  assert.deepEqual(activityView(events, { scope: 'run', runId: 'run_1' }), []);
+  assert.deepEqual(activityView(events, { scope: 'run', runId: 'run_1', paymentIds: ['pay_owned'] }), [linked]);
+});
 test('clear view preserves the source audit and admits later events', () => {
   const events = [event(1, 'agent.step', { run_id: 'run_1' }), event(2, 'agent.step', { run_id: 'run_1' })];
   const original = structuredClone(events);

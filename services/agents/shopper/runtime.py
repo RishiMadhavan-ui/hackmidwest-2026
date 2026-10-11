@@ -89,13 +89,14 @@ class ScopedMCPTool(AgentTool):
 class MCPWorkflowPorts:
   def __init__(self, *, run_id, mandate_id, agent_id, mode, start_url, control,
                leash, store, tools, events, trace_sinks, limits=None, shopper_model=None,
-               guardian_model=None):
+               guardian_model=None, allow_live_guardian=False):
     self.run_id, self.mandate_id, self.agent_id = run_id, mandate_id, agent_id
     self.mode, self.start_url, self.control = mode, start_url, control
     self.leash, self.store, self.tools = leash, store, tools
     self.events, self.trace_sinks = events, trace_sinks
     self.budget = Budget(limits or Limits())
     self.shopper_model, self.guardian_model = shopper_model, guardian_model
+    self.allow_live_guardian = allow_live_guardian
     self.candidate, self.state = None, None
     self.sources = []
     self._tool_lock = asyncio.Lock()
@@ -212,6 +213,7 @@ class MCPWorkflowPorts:
     return self.candidate
 
   async def _invoke(self, agent, prompt):
+    await self.check()
     self.control.attach(agent)
     task = asyncio.create_task(agent.invoke_async(prompt, cancel_signal=self.control.cancel_signal))
     try:
@@ -233,7 +235,9 @@ class MCPWorkflowPorts:
       if not task.done():
         agent.cancel()
         task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+      # Also retrieve a task that completed while cancellation was observed,
+      # rather than leaving its hook/provider exception unhandled.
+      await asyncio.gather(task, return_exceptions=True)
       self.control.detach(agent)
 
   async def verify(self, state):
@@ -289,13 +293,14 @@ class MCPWorkflowPorts:
       "trusted_checkout": state.decision.get("trusted_checkout"), "untrusted_sources": self.sources[:5]}, sort_keys=True)
     self.emit("investigation.started", attempt=state.attempt,
               source_hashes=state.candidate["source_hashes"], payment_id=state.decision.get("id"))
-    if self.mode == "scripted" and self.guardian_model is None:
+    if self.mode == "scripted" and self.guardian_model is None and not self.allow_live_guardian:
       self.emit("investigation.unavailable", reason="fixture_model_not_configured")
       return
     try:
       model = self.guardian_model() if self.guardian_model else make_model("guardian")
       agent = Agent(model=model, system_prompt=GUARDIAN_PROMPT, callback_handler=None, retry_strategy=None,
-        hooks=[InferenceHooks(self.events, self.budget, self.check, "guardian")])
+        hooks=[InferenceHooks(self.events, self.budget, self.check, "guardian",
+                              fixture=self.guardian_model is not None)])
       # Plain JSON uses the normal inference hooks, unlike SDK structured_output.
       async with asyncio.timeout(20):
         result = await self._invoke(agent, prompt + "\nReturn only JSON matching: " +
@@ -309,8 +314,10 @@ class MCPWorkflowPorts:
         source_hashes=state.candidate["source_hashes"], payment_id=state.decision.get("id"))
     except (TimeoutError, ValidationError):
       self.emit("investigation.unavailable", reason="timeout_or_invalid_output")
-    except WorkflowStopped:
-      raise
+    except WorkflowStopped as exc:
+      if str(exc) != "agent_invocation_failed":
+        raise  # Stop, budget and evidence barriers still terminate the Graph.
+      self.emit("investigation.unavailable", reason="model_unavailable")
     except Exception:
       self.emit("investigation.unavailable", reason="model_unavailable")
 

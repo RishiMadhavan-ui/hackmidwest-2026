@@ -36,10 +36,11 @@ class WorkflowEvents:
 
 
 class InferenceHooks(HookProvider):
-  def __init__(self, events, budget, check, role):
+  def __init__(self, events, budget, check, role, *, fixture=None):
     self.events, self.budget, self.check, self.role = events, budget, check, role
     self.started = None
     self.call_id = None
+    self.fixture = events.mode == "scripted" if fixture is None else fixture
 
   def register_hooks(self, registry, **kwargs):
     registry.add_callback(BeforeModelCallEvent, self.before)
@@ -63,9 +64,9 @@ class InferenceHooks(HookProvider):
   def _metadata(self):
     return {
       "inference_id": self.call_id, "role": self.role,
-      "provider": "fixture" if self.events.mode == "scripted" else configured_provider(),
-      "model": "scripted-fixture" if self.events.mode == "scripted" else model_id(),
-      "execution": "fixture" if self.events.mode == "scripted" else "model_call",
+      "provider": "fixture" if self.fixture else configured_provider(),
+      "model": "scripted-fixture" if self.fixture else model_id(),
+      "execution": "fixture" if self.fixture else "model_call",
     }
 
   def after(self, event):

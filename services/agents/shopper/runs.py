@@ -183,6 +183,10 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
         tools=[*store_tools, *leash_tools],
         events=events,
         trace_sinks=sinks,
+        # Lab scripts only the shopper's choices. Investigation may use the
+        # configured real guardian; its hooks attribute that call separately.
+        # Unconfigured/offline fixtures still report unavailable, never findings.
+        allow_live_guardian=req.lab_execution,
         shopper_model=(lambda state: ScriptedShopper(
           req.recovery_sku, req.mandate_id, "/catalog", req.recovery_sku)
           if state.attempt > 1 and req.recovery_sku else make_model_for(req))
