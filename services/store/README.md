@@ -1,9 +1,11 @@
 # Volt Supply Co. — simulated merchant
 
 The canonical catalog and checkout records are separate from attackable listing
-HTML. CHG-65W (`chg-65w`) is a USB-C 65W laptop charger; SUB-CARE-MO (`voltcare`)
-is a monthly subscription. Both use VOLT SUPPLY CO, MCC 5732, 2999 cents and USD.
-The evil toggle changes listing text only, including JSON-LD and an HTML comment.
+HTML. Core demo pair: CHG-65W (`chg-65w`) USB-C charger and SUB-CARE-MO
+(`voltcare`) monthly protection — same VOLT SUPPLY CO / MCC 5732 / 2999¢ / USD.
+Expanded one-time SKUs: HUB-7P, EAR-ANC, SSD-1TB. Additional subscriptions:
+SUB-CLOUD-MO (`voltcloud`), SUB-SHIELD-MO (`voltshield`). The evil toggle changes
+listing text only on the charger page (JSON-LD + HTML comment).
 
 **Payment completion is disabled and returns 503** until durable payment
 reconciliation exists. Create/read use `STORE_API_TOKEN`. Own/freeze/bind/complete

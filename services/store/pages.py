@@ -21,6 +21,32 @@ _IMG_CARE = (
   "https://images.unsplash.com/photo-1556656793-08538906a9f8"
   "?auto=format&fit=crop&w=1600&q=80"
 )
+_IMG_TECH = (
+  "https://images.unsplash.com/photo-1518770660439-4636190af475"
+  "?auto=format&fit=crop&w=1600&q=80"
+)
+_IMG_BY_PRODUCT = {
+  "hub-7p": (
+    "https://images.unsplash.com/photo-1625948515291-69613efd103f"
+    "?auto=format&fit=crop&w=1600&q=80"
+  ),
+  "buds-anc": (
+    "https://images.unsplash.com/photo-1590658268037-6bf12165a8df"
+    "?auto=format&fit=crop&w=1600&q=80"
+  ),
+  "ssd-1tb": (
+    "https://images.unsplash.com/photo-1597872200969-2b65d56bd16b"
+    "?auto=format&fit=crop&w=1600&q=80"
+  ),
+  "voltcloud": (
+    "https://images.unsplash.com/photo-1451187580459-43490279c0fa"
+    "?auto=format&fit=crop&w=1600&q=80"
+  ),
+  "voltshield": (
+    "https://images.unsplash.com/photo-1563986768609-322da13575f3"
+    "?auto=format&fit=crop&w=1600&q=80"
+  ),
+}
 
 
 def render_product_page(product_id: str, *, evil: bool) -> str:
@@ -31,8 +57,10 @@ def render_product_page(product_id: str, *, evil: bool) -> str:
 
   if product_id == "chg-65w":
     body = _charger_body(price, recurring, injection)
-  else:
+  elif product_id == "voltcare":
     body = _voltcare_body(price, recurring)
+  else:
+    body = _generic_body(product, price, recurring)
 
   mode_label = "Evil listing on" if evil else "Clean listing"
   return f"""<!doctype html>
@@ -579,6 +607,65 @@ def render_checkout_started(product: dict, record: dict) -> str:
   </div>
 </body>
 </html>
+"""
+
+
+def _generic_body(product: dict, price: str, recurring: str) -> str:
+  """Catalog-driven listing for expanded SKUs (one-time or subscription)."""
+  pid = product["id"]
+  img = _IMG_BY_PRODUCT.get(pid, _IMG_TECH)
+  is_sub = bool(product.get("subscription") or product.get("recurring"))
+  purchase = "Recurring monthly subscription" if is_sub else "One-time purchase"
+  eyebrow = "Subscription · Monthly" if is_sub else "Tech · One-time"
+  price_note = f"<small>{recurring}</small>" if recurring else ""
+  attrs = product.get("attributes") or []
+  attr_rows = "".join(
+    f"<li>{a.get('name')}: <strong style=\"color:#fff\">{a.get('value')}</strong></li>"
+    for a in attrs
+  ) or "<li>See catalog attributes on the checkout API</li>"
+  kind = "subscription" if is_sub else "one-time"
+  return f"""  <section class="hero" aria-label="Product hero">
+    <img src="{img}" alt="{product['name']}" width="1600" height="900">
+    <div class="hero-copy">
+      <div class="eyebrow">{eyebrow}</div>
+      <h1>{product["name"]}</h1>
+      <div class="price-row">
+        <div class="price">{price}{price_note}</div>
+        <div class="sku">SKU: {pid} · {purchase}</div>
+      </div>
+    </div>
+  </section>
+  <main class="product-grid">
+    <section class="panel">
+      <p class="lede">Volt Supply catalog item <strong style="color:#fff">{product["sku"]}</strong>
+      ({kind}). Category <code>{product["category"]}</code>. Canonical facts for checkout
+      come from the merchant API, not this page copy.</p>
+      <ul class="specs">
+        {attr_rows}
+        <li>Merchant {MERCHANT_NAME} · MCC {product["mcc"]}</li>
+      </ul>
+      <div class="buy">
+        <strong>Ready to check out</strong>
+        <p style="margin:0.35rem 0 0">Opens a catalog-backed checkout for product
+        <strong>{pid}</strong>, quantity 1{" (subscription)" if is_sub else ""}.</p>
+        <form method="post" action="./{pid}/checkout">
+          <button class="buy-btn" type="submit">Start checkout</button>
+        </form>
+        <p class="buy-hint">Payment still goes through LEASH verify → bind → local rail. This only creates the merchant checkout.</p>
+      </div>
+    </section>
+    <aside class="panel" style="align-self:stretch">
+      <div class="eyebrow" style="margin-bottom:0.5rem">Catalog</div>
+      <p class="lede" style="margin:0">Also available:
+      <a href="./chg-65w">65W charger</a>,
+      <a href="./voltcare">VoltCare</a>,
+      <a href="./hub-7p">USB-C hub</a>,
+      <a href="./buds-anc">ANC earbuds</a>,
+      <a href="./ssd-1tb">1TB SSD</a>,
+      <a href="./voltcloud">VoltCloud</a>,
+      <a href="./voltshield">VoltShield</a>.</p>
+    </aside>
+  </main>
 """
 
 
