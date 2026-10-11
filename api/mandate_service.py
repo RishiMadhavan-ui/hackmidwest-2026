@@ -16,7 +16,7 @@ from leash_shared.models import (
   AgentRun, AgentRunRegistration, MandateProposal, MandateStatus,
   PurchaseMandate, canonical_json,
 )
-from principals import Principal, bind_agent, token_digest
+from principals import Principal, bind_agent
 from signing import sign_confirmation, signing_key, verify_confirmation
 from payment_operations import cancel_prepared
 
@@ -129,24 +129,15 @@ def propose(conn, proposal: MandateProposal, principal: Principal, *, now: datet
 def draft_agent_for_user(conn, user_id: str) -> str:
   """Pick an owned shopper agent for a human-authored draft.
 
-  Prefers the live agent bound to AGENT_TOKEN_SHOPPER when that credential is
-  configured and owned by this human (required for agents-pod claim). Falls back
-  to any owned live agent, then provisions a new binding. Refuses a silent
-  random UI agent when the cluster shopper token belongs to someone else.
+  Prefers the live cluster shopper (AGENT_TOKEN_SHOPPER), including demo idle
+  rebind via ensure_cluster_shopper. Falls back to any owned live agent, then a
+  UI-only binding when the cluster token is not configured.
   """
+  from principals import ensure_cluster_shopper
+
   env_token = os.getenv("AGENT_TOKEN_SHOPPER", "").strip()
   if len(env_token) >= 32:
-    owned = conn.execute(
-      "SELECT id, user_id FROM leash_agents WHERE token_sha256 = %s",
-      (token_digest(env_token),),
-    ).fetchone()
-    if owned is not None:
-      if str(owned["user_id"]) != user_id:
-        raise AuthorityError(
-          409,
-          "Configured AGENT_TOKEN_SHOPPER is bound to another human",
-        )
-      return str(owned["id"])
+    return ensure_cluster_shopper(conn, user_id, "live")
 
   row = conn.execute(
     """SELECT id FROM leash_agents
@@ -157,13 +148,6 @@ def draft_agent_for_user(conn, user_id: str) -> str:
   ).fetchone()
   if row:
     return str(row["id"])
-
-  if len(env_token) >= 32:
-    agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
-    bind_agent(
-      conn, user_id=user_id, agent_id=agent_id, token=env_token, modes=("live",),
-    )
-    return agent_id
 
   agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
   bind_agent(

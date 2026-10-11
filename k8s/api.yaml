@@ -144,6 +144,13 @@ spec:
                   name: app-env
                   key: AGENT_TOKEN_SHOPPER_SCRIPTED
                   optional: true
+            # When 1, idle cluster shopper tokens may rebind to the next demo human.
+            - name: LEASH_DEMO_REBIND
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LEASH_DEMO_REBIND
+                  optional: true
             # Human launch / Graph lease gate (shopping start + execution claim).
             - name: LEASH_EXECUTION_ENABLED
               valueFrom:
