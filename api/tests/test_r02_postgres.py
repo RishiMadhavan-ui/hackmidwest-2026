@@ -991,6 +991,83 @@ class PostgresAuthorityTests(unittest.TestCase):
       responses=list(pool.map(replacement,[2999,3500]))
     self.assertEqual(sorted(r.status_code for r in responses),[200,409])
 
+  def test_human_draft_only_uses_existing_operator_provisioned_live_agent(self):
+    response = self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal)
+    self.assertEqual(response.status_code, 201, response.text)
+    self.assertEqual(response.json()["agent_id"], self.agent_id)
+    self.assertEqual(response.json()["status"], "proposed")
+    self.assertIsNone(response.json()["signature"])
+    with db.get_conn() as conn:
+      conn.execute("UPDATE leash_agents SET enabled=false WHERE id=%s", (self.agent_id,))
+      before = conn.execute("SELECT count(*) AS n FROM leash_agents").fetchone()["n"]
+    with patch.dict(os.environ, {"AGENT_TOKEN_SHOPPER": "unclaimed-deployment-token-"+"x"*32}):
+      denied = self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal)
+    self.assertEqual(denied.status_code, 409)
+    with db.get_conn() as conn:
+      self.assertEqual(conn.execute("SELECT count(*) AS n FROM leash_agents").fetchone()["n"], before)
+
+  def test_human_draft_rejects_scripted_only_and_ambiguous_live_bindings(self):
+    with db.get_conn() as conn:
+      conn.execute("UPDATE leash_agents SET allowed_modes='[\"scripted\"]' WHERE id=%s", (self.agent_id,))
+    self.assertEqual(self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal).status_code, 409)
+    with db.get_conn() as conn:
+      conn.execute("UPDATE leash_agents SET allowed_modes='[\"live\"]' WHERE id=%s", (self.agent_id,))
+      bind_agent(conn, user_id=self.owner, agent_id="agt_second_"+uuid4().hex,
+                 token="second-live-token-"+uuid4().hex, modes=("live",))
+    self.assertEqual(self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal).status_code, 409)
+
+  def test_human_purchase_history_and_immutable_evidence_are_owner_scoped(self):
+    from test_payment_service import _store_checkout
+    active, run, body = self.payment_setup()
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()):
+      attempt = self.payment_direct(body)
+    history = self.request("GET", "/purchase-attempts", token=self.user_token)
+    self.assertEqual(history.status_code, 200, history.text)
+    self.assertEqual(history.json()["attempts"][0]["id"], attempt.id)
+    detail = self.request("GET", f"/purchase-attempts/{attempt.id}", token=self.user_token)
+    self.assertEqual(detail.status_code, 200, detail.text)
+    record = detail.json()
+    self.assertEqual(record["mandate"]["canonical_payload_hash"], active["canonical_payload_hash"])
+    self.assertEqual(record["observation"]["checkout"]["items"][0]["sku"], "CHG-65W")
+    self.assertEqual(record["evidence_status"], "observed_unverified")
+    self.assertFalse(record["attempt"]["financial_authority"])
+    self.assertFalse(record["observation"]["assessment"]["financial_authority"])
+    self.assertEqual(detail.headers["cache-control"], "no-store")
+    for private in ("grant_reference", "instrument_reference", "issuance_key", "authorization_event_id", "token_sha256"):
+      self.assertNotIn(private, detail.text)
+    self.assertEqual(self.request("GET", f"/purchase-attempts/{attempt.id}", token=self.other_user_token).status_code, 404)
+    self.assertEqual(self.request("GET", "/purchase-attempts", token=self.other_user_token).json()["attempts"], [])
+    self.assertEqual(self.request("GET", "/purchase-attempts", token=self.agent_token).status_code, 401)
+    self.assertEqual(self.request("GET", f"/purchase-attempts?before={attempt.id}", token=self.other_user_token).status_code, 404)
+
+  def test_purchase_history_cursor_and_missing_observation_are_truthful(self):
+    from test_payment_service import _store_checkout
+    active, run, body = self.payment_setup()
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()):
+      first = self.payment_direct(body)
+    second_body = {**body, "checkout_id": "ckt_second"}
+    import hashlib
+    from leash_shared.models import canonical_json
+    source = _store_checkout()
+    source["checkout_id"] = "ckt_second"
+    fields = ("checkout_id", "currency", "line_items", "mcc", "merchant_descriptor", "recurring", "total_cents")
+    source["facts_hash"] = hashlib.sha256(canonical_json({key: source[key] for key in fields}).encode()).hexdigest()
+    with patch("payment_service._fetch_store_checkout", return_value=source):
+      second = self.payment_direct(second_body)
+    first_page = self.request("GET", "/purchase-attempts?limit=1", token=self.user_token).json()
+    self.assertEqual(first_page["attempts"][0]["id"], second.id)
+    self.assertEqual(first_page["next_cursor"], second.id)
+    next_page = self.request("GET", f"/purchase-attempts?limit=1&before={second.id}", token=self.user_token).json()
+    self.assertEqual(next_page["attempts"][0]["id"], first.id)
+    self.assertIsNone(next_page["next_cursor"])
+    self.crash_preflight({**body, "checkout_id": "ckt_prepared"})
+    with db.get_conn() as conn:
+      prepared = conn.execute("SELECT id FROM payment_operations WHERE run_id=%s AND state='prepared'", (run["id"],)).fetchone()
+    detail = self.request("GET", f'/purchase-attempts/{prepared["id"]}', token=self.user_token).json()
+    self.assertIsNone(detail["observation"])
+    self.assertEqual(detail["evidence_status"], "not_observed")
+    self.assertEqual(detail["attempt"]["state"], "prepared")
+
 
 if __name__ == "__main__":
   unittest.main()

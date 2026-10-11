@@ -8,6 +8,7 @@ import { KillSwitch } from "@/components/kill-switch";
 import { AttackLab } from "@/components/mission-control/attack-lab";
 import { AuthorityPanel } from "@/components/mission-control/authority-panel";
 import { ComparisonPanel } from "@/components/mission-control/comparison-panel";
+import { PurchaseHistory } from "@/components/purchase-history";
 import type { ActivityEvent } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { PurchaseMandate } from "@/lib/mandates";
@@ -45,6 +46,8 @@ export default function MissionControlPage() {
   const instruction =
     mandate?.description ??
     "Confirm a mandate to lock human purchase authority for the shopper.";
+  const purchaseRevision = events.reduce((latest, event) =>
+    event.type.startsWith("payment.") ? Math.max(latest, event.sequence) : latest, 0);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 md:py-10">
@@ -72,6 +75,7 @@ export default function MissionControlPage() {
       </header>
 
       <AuthorityPanel onMandateChange={onMandateChange} />
+      <PurchaseHistory revision={purchaseRevision} />
 
       <div className="rounded-xl border border-border px-4 py-4 md:px-5">
         <ComparisonPanel mandate={mandate} events={events} />

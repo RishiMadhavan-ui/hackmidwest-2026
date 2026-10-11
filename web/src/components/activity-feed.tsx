@@ -141,7 +141,10 @@ export function ActivityFeed({
   const seen = useRef(new Set<string>());
   const eventsRef = useRef<ActivityEvent[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
-  eventsRef.current = events;
+
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   useEffect(() => {
     // Resume from the highest sequence already held. Clearing `seen` while keeping

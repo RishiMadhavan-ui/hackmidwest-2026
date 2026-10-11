@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
+import { TOKEN_STORAGE_KEY } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { createLabWorkspace, labAccess, labControl, type LabAccess } from "@/lib/attack-lab";
 
 const linkBtn = cn(
   "mt-3 inline-flex h-7 items-center justify-center rounded-lg border px-2.5 text-[0.8rem] font-medium transition-colors",
@@ -13,6 +17,57 @@ const linkBtn = cn(
  * server routes until verified operator authorization and isolation exist.
  */
 export function AttackLab() {
+  const { user } = useAuth();
+  const [storedAccess, setAccess] = useState<LabAccess | null>(null);
+  const [accessActor, setAccessActor] = useState<string | null>(null);
+  const actorRef = useRef(user?.id);
+  const [view, setView] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { actorRef.current = user?.id; }, [user?.id]);
+  const access = accessActor === user?.id ? storedAccess : null;
+  useEffect(() => {
+    let active = true;
+    labAccess().then((state) => { if (active) { setAccess(state); setAccessActor(user?.id ?? null); } })
+      .catch(() => { if (active) { setAccess(null); setView(null); } });
+    return () => { active = false; };
+  }, [user?.id]);
+
+  async function change(enabled?: boolean) {
+    const owner = actorRef.current;
+    setBusy(true);
+    setError(null);
+    setView(null);
+    try {
+      const next = access?.namespace && enabled !== undefined
+        ? await labControl(access.namespace.id, enabled, access.namespace.revision)
+        : await createLabWorkspace();
+      if (owner === actorRef.current) setAccess(next);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Operator control unavailable");
+      try { const next = await labAccess(); if (owner === actorRef.current) setAccess(next); }
+      catch { if (owner === actorRef.current) setAccess(null); }
+    } finally { setBusy(false); }
+  }
+
+  async function openView() {
+    const owner = actorRef.current;
+    setBusy(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+      if (!token) throw new Error("Sign in again to verify operator access");
+      const response = await fetch("/attack-lab/operator-view", {
+        headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+      });
+      if (!response.ok) { setView(null); throw new Error("Operator access unavailable"); }
+      const html = await response.text();
+      if (owner === actorRef.current) setView(html);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Operator view unavailable");
+    } finally { setBusy(false); }
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <header>
@@ -56,6 +111,27 @@ export function AttackLab() {
         Listing toggle is not a payment outcome. Blocked/approved results come
         only from trusted checkout verification and the rail.
       </p>
+      {access && <div className="rounded-lg border border-border p-3">
+        <p className="text-sm font-medium">Operator access verified</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Server controls {access.server_enabled ? "enabled" : "disabled"}.
+          Workspace controls {access.namespace?.enabled ? "enabled" : "disabled"}.
+          Scenario execution remains unavailable.
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {!access.namespace && <button className={linkBtn} disabled={busy || !access.server_enabled}
+            onClick={() => void change()}>Create isolated workspace</button>}
+          {access.namespace && <button className={linkBtn}
+            disabled={busy || (!access.namespace.enabled && !access.server_enabled)}
+            onClick={() => void change(!access.namespace?.enabled)}>
+            {access.namespace.enabled ? "Disable workspace controls" : "Enable workspace controls"}
+          </button>}
+          <button className={linkBtn} disabled={busy} onClick={() => void openView()}>Open verified operator view</button>
+        </div>
+        {view && <iframe title="Server-verified operator view" sandbox="" srcDoc={view}
+          className="mt-3 h-64 w-full rounded border bg-white text-black" />}
+      </div>}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </section>
   );
 }

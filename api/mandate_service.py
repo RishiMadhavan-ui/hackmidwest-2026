@@ -1,8 +1,6 @@
 """Transactional authority lifecycle; no model or merchant content can approve."""
 
 import base64
-import os
-import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -16,7 +14,7 @@ from leash_shared.models import (
   AgentRun, AgentRunRegistration, MandateProposal, MandateStatus,
   PurchaseMandate, canonical_json,
 )
-from principals import Principal, bind_agent, token_digest
+from principals import Principal
 from signing import sign_confirmation, signing_key, verify_confirmation
 from payment_operations import cancel_prepared
 
@@ -117,50 +115,18 @@ def propose(conn, proposal: MandateProposal, principal: Principal, *, now: datet
 
 
 def draft_agent_for_user(conn, user_id: str) -> str:
-  """Pick an owned shopper agent for a human-authored draft.
-
-  Prefers an existing live binding. If the account has no agent yet, provisions a
-  live agent using AGENT_TOKEN_SHOPPER when configured (local/demo), otherwise a
-  random credential so Mission Control can still create drafts before MCP is wired.
-  """
+  """Use existing operator-provisioned live ownership; drafting never binds tokens."""
   row = conn.execute(
     """SELECT id FROM leash_agents
-       WHERE user_id = %s AND enabled
-       ORDER BY CASE WHEN allowed_modes @> %s::jsonb THEN 0 ELSE 1 END, id
-       LIMIT 1""",
+       WHERE user_id = %s AND enabled AND allowed_modes = %s::jsonb
+       ORDER BY id LIMIT 2""",
     (user_id, Jsonb(["live"])),
-  ).fetchone()
-  if row:
-    return str(row["id"])
-
-  env_token = os.getenv("AGENT_TOKEN_SHOPPER", "").strip()
-  if len(env_token) >= 32:
-    owned = conn.execute(
-      "SELECT id, user_id FROM leash_agents WHERE token_sha256 = %s",
-      (token_digest(env_token),),
-    ).fetchone()
-    if owned is not None:
-      if str(owned["user_id"]) != user_id:
-        raise AuthorityError(
-          409,
-          "Configured AGENT_TOKEN_SHOPPER is bound to another human",
-        )
-      return str(owned["id"])
-    agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
-    bind_agent(
-      conn, user_id=user_id, agent_id=agent_id, token=env_token, modes=("live",),
-    )
-    return agent_id
-
-  agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
-  bind_agent(
-    conn,
-    user_id=user_id,
-    agent_id=agent_id,
-    token=secrets.token_hex(32),
-    modes=("live",),
-  )
-  return agent_id
+  ).fetchall()
+  if not row:
+    raise AuthorityError(409, "An operator must bind a live shopper to this account before drafting")
+  if len(row) != 1:
+    raise AuthorityError(409, "An operator must resolve multiple live shopper bindings before drafting")
+  return str(row[0]["id"])
 
 
 def propose_human(
