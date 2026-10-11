@@ -133,6 +133,95 @@ export async function fetchBalance(token?: string | null) {
   return apiFetch<Balance>("/auth/balance", {}, token);
 }
 
+export async function logoutSession(token?: string | null) {
+  return apiFetch<void>("/auth/logout", { method: "POST" }, token);
+}
+
+export type ActivityEvent = {
+  sequence: number;
+  event_id: string;
+  type: string;
+  at: string;
+  user_id: string;
+  data: Record<string, unknown>;
+};
+
+export type ActivityHistory = {
+  events: ActivityEvent[];
+  next_cursor: number | null;
+};
+
+export async function fetchActivity(
+  after = 0,
+  limit = 100,
+  token?: string | null,
+) {
+  const params = new URLSearchParams({
+    after: String(after),
+    limit: String(limit),
+  });
+  return apiFetch<ActivityHistory>(`/activity?${params}`, {}, token);
+}
+
+const ACTIVITY_POLL_MS = 1500;
+
+/**
+ * Live activity for the profile feed.
+ *
+ * Uses short-interval GET /activity polling. On LKE the browser calls
+ * `/backend/...` through the Next rewrite; that path reliably returns JSON but
+ * often buffers long-lived SSE, so polling is the production delivery mode.
+ * (Direct local API SSE remains available at GET /activity/stream for other clients.)
+ */
+export function streamActivity(handlers: {
+  onEvent: (event: ActivityEvent) => void;
+  onStatus?: (status: "connecting" | "live" | "error") => void;
+  onError?: (error: Error) => void;
+  after?: number;
+  token?: string | null;
+  signal?: AbortSignal;
+}): () => void {
+  const controller = new AbortController();
+  if (handlers.signal) {
+    if (handlers.signal.aborted) controller.abort();
+    else {
+      handlers.signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
+  let cursor = handlers.after ?? 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  handlers.onStatus?.("connecting");
+
+  const tick = async () => {
+    try {
+      const history = await fetchActivity(cursor, 100, handlers.token);
+      if (controller.signal.aborted) return;
+      handlers.onStatus?.("live");
+      for (const event of history.events) {
+        handlers.onEvent(event);
+        cursor = Math.max(cursor, event.sequence);
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      handlers.onStatus?.("error");
+      handlers.onError?.(
+        err instanceof Error ? err : new Error("Activity feed unavailable"),
+      );
+    }
+  };
+
+  void tick();
+  timer = setInterval(() => void tick(), ACTIVITY_POLL_MS);
+
+  return () => {
+    controller.abort();
+    if (timer) clearInterval(timer);
+  };
+}
+
 /** Display-only conversion; money stays integer cents on the wire. */
 export function formatUsdFromCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";

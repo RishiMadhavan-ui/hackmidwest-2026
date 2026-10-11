@@ -12,6 +12,7 @@ import {
 
 import {
   login as apiLogin,
+  logoutSession as apiLogout,
   me as apiMe,
   signup as apiSignup,
   TOKEN_STORAGE_KEY,
@@ -24,7 +25,7 @@ type AuthContextValue = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -74,7 +75,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [persist],
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+    try {
+      if (token) await apiLogout(token);
+    } catch {
+      // Still clear local session if the activity write fails.
+    }
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setUser(null);
   }, []);

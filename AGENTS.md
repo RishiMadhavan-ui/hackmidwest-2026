@@ -42,7 +42,8 @@ October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/bu
 - **`services/agents/`:** FastAPI agents service (shopper/guardian/provenance present in-tree; wire against real api/store as those land).
 - **`services/mcp-leash/`:** Streamable HTTP MCP thin adapter with four tools forwarding to api (`propose_mandate`, `list_mandates`, `request_payment`, `check_status`). In-cluster `:8002`; public via web rewrite `/mcp-leash/*`.
 - **`services/mcp-store/`:** Store MCP with `browse`, `create_checkout`, `complete_checkout`; its own `STORE_MCP_TOKEN` auth and a separate store credential; store-only browsing with server-side page inspection and redacted snapshots. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
-- **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `MCP_LEASH_URL` / `MCP_STORE_URL` / agent tokens / image registry. Managed Postgres `hackmidwest-db` + LKE path exist. Root README, Compose, Valkey, and store/webhook HTTP remain planned; R02 domain migrations are implemented. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
+- **`services/webhook/`:** Labeled local payment rail (`POST /local/authorize`) with pure `decide.py` and Valkey-backed grant consume/idempotency. Lithic ASA adapter still pending.
+- **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, valkey, webhook, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `VALKEY_URL` / `WEBHOOK_INTERNAL_TOKEN` / MCP URLs / agent tokens / image registry. Managed Postgres `hackmidwest-db` + in-cluster Valkey exist. Compose and controlled store HTTP remain planned; R02 domain migrations are implemented. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -63,8 +64,8 @@ human confirmation -> immutable mandate -> real Strands Graph
 | Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
 | Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
-| Merchant / payment rail | `services/store/`, `services/webhook/` planned | Cameron | Canonical catalog and checkout API, simulator, Lithic ASA, atomic enforcement |
-| Database / Valkey / deployment | `k8s/`, `scripts/`, `db/migrations/` exist; Valkey and Compose planned | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency/events; Akamai compute |
+| Merchant / payment rail | `services/store/` planned; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail; Lithic ASA later; atomic enforcement |
+| Database / Valkey / deployment | `k8s/` (+ valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
 
 ## Repository tree
 
@@ -80,24 +81,25 @@ hackmidwest-2026/
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
   infra/                             [P] Cameron: Akamai deployment
-  k8s/                               [E] Cameron: api/web/agents/mcp-leash/mcp-store/service
-  scripts/                           [E] Cameron: deploy_lke.sh + lib.sh / PostgreSQL provisioning
+  k8s/                               [E] Cameron: api/web/agents/mcp-leash/mcp-store/valkey/webhook/service
+  scripts/                           [E] Cameron: deploy_lke.sh + lib.sh / PostgreSQL + LKE (Akamai; no AWS)
   mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
-    main.py                          [E] health/readiness, auth, cards, mandate/run routes
+    main.py                          [E] health/readiness, auth, cards, activity, mandate/run routes
+    activity.py                      [E] profile activity history + SSE over audit_events
     mandate_routes.py                [E] Rishi: scoped R02 REST routes
     mandate_service.py               [E] Rishi: transactional authority lifecycle
     principals.py                    [E] Rishi: human/agent ownership
     signing.py                       [E] Rishi: Ed25519 confirmation
     manage.py                        [E] Rishi: migrations and operator provisioning
-    auth.py                          [E] JWT signup/login/me/balance; Lithic card on signup
+    auth.py                          [E] JWT signup/login/me/balance/logout; Lithic card on signup
     cards.py                         [E] Rishi: owner-only metadata; direct issuance blocked
     db.py                            [E] checksummed PostgreSQL migrations and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
     tests/                           [E] Rishi: R01 and R02 signature/HTTP/PostgreSQL tests
     Dockerfile                       [E] root build; COPY api/*.py, shared, db/migrations
-  db/migrations/                     [E] Rishi: users + R02 authority; Cameron: Lithic cards (0003)
+  db/migrations/                     [E] Rishi: users + R02; Cameron: Lithic cards (0003), activity index (0004)
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
@@ -117,9 +119,11 @@ hackmidwest-2026/
       Dockerfile                     [E] amd64; COPY every runtime module when added
     mcp-store/                       [E] Aditya: Store MCP (browse/checkout tools)
       Dockerfile                     [E] amd64; COPY every runtime module when added
-    webhook/                         [P] Cameron: rail responders/atomic state
-      decide.py                      [P] pure domain payment policy
-      tests/                         [P] handler/concurrency/signature tests
+    webhook/                         [E] Cameron: local rail + Valkey grant handler
+      decide.py                      [E] pure domain payment policy (C03)
+      store.py / handler.py / main.py [E] Valkey consume + /local/authorize
+      tests/                         [E] handler/concurrency tests
+      Dockerfile                     [E] amd64; COPY runtime modules
     store/                           [P] Cameron: controlled merchant
       tests/                         [P] catalog/checkout/correlation tests
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
@@ -130,7 +134,7 @@ hackmidwest-2026/
     src/lib/api-types.ts             [P] generated from agreed OpenAPI
   tests/
     decision_cases.yaml              [E] Aditya: independent policy fixtures
-    test_decision_cases.py            [P] Cameron: policy fixture runner
+    test_decision_cases.py           [E] Cameron: rail-stage decide() runner
     e2e/                             [E] Aditya: six gated scenario tests, not yet live proof
   docs/
     LEASH_SPEC.md                    [E] shared detailed specification
@@ -165,7 +169,7 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
 
-If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. This alignment audit authorizes only this file, `Leash-build-plan.md`, `docs/LEASH_SPEC.md` and `docs/LEASH_ALIGNMENT_AUDIT.md`. Do not rewrite application code as part of the audit. Rishi's current instruction is to remain on `main` without committing or pushing; it takes precedence over default branch/PR conventions for this task.
+If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The original alignment audit was documentation-only and is preserved as a historical snapshot. Rishi subsequently authorized implementation of audit fixes, testing, documentation synchronization, integration and pushing on `main`, including necessary narrow cross-lane fixes. This authorization does not transfer ownership or waive frozen-contract review. Preserve teammates' integrations and document remaining owner handoffs.
 
 **Auth coordination:** Cameron leads selection/integration of Clerk, Auth.js or the agreed equivalent; Rishi retains `api/`, `db/`, `web/` path ownership and implements the backend verifier/stable identity adapter and UI wiring through a documented handoff. Current custom UUID/JWT auth is preserved until a migration is agreed. Do not install a competing framework. Existing static user/agent/mode binding is a foundation, not the desired short-lived run/mandate/version/tool/audience scope.
 
@@ -180,12 +184,12 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
-**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, and `services/mcp-store/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
+**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, `services/mcp-store/Dockerfile`, and `services/webhook/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
 
 ## Engineering requirements
 
 - Python 3.12+, FastAPI, Pydantic v2; TypeScript strict mode, Next.js App Router, 2-space indentation for new code. Ruff configuration is planned, not present at root. Do not reformat another owner's files.
-- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, or `services/mcp-store/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
+- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, or `services/webhook/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
 - Money is integer minor units; the USD MVP uses `_cents` fields, never float dollars. Validate amounts, quantities, supported currencies, required checkout fields, and UTC-aware timestamps. Convert only for display.
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
@@ -221,15 +225,17 @@ api/: PYTHONPATH=../shared uv run uvicorn main:app --reload --port 8000
 services/agents/: uv run uvicorn main:app --reload --port 8001
 services/mcp-leash/: uv run uvicorn main:app --reload --port 8002
 services/mcp-store/: uv run uvicorn main:app --reload --port 8003
+services/webhook/: VALKEY_URL=redis://127.0.0.1:6379/0 WEBHOOK_INTERNAL_TOKEN=… uv run uvicorn main:app --reload --port 8005
 web/: pnpm dev
 web/: pnpm lint
 web/: pnpm build
-deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
+rail cases: services/webhook/.venv/bin/python -m unittest tests.test_decision_cases -v
+deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/ (includes Valkey + webhook)
 ```
 
-API has health/readiness, auth (including Lithic signup/balance), `POST /cards` / `GET /cards`, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` is deprecated and cannot issue: agents/service tokens get 403; authenticated humans get 409 until the verified payment flow exists. `GET /cards` and `GET /cards/{card_token}` require a human account JWT and return only that owner's metadata. Caller-selected users cannot override the owner; no PAN/CVV are returned. The Lithic wrapper remains server-side for future verified payment issuance. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
+API has health/readiness, auth (including Lithic signup/balance/logout), `POST /cards` / `GET /cards`, profile activity `GET /activity` + `GET /activity/stream` (SSE over append-only `audit_events`), R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Auth/card/mandate writes emit user-scoped audit rows; the profile page streams them live. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` is deprecated and returns 409 (direct issuance blocked until the verified payment flow); signup still provisions the forever VIRTUAL card. PAN/CVV are never persisted. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
-Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and verify the integrated Kubernetes runtime. Check Compose only when supplied for local development. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
+Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and verify the integrated Kubernetes runtime. Check Compose only when supplied for local development. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose remains absent; rail decision cases and webhook handler tests exist; deployed E2E tests are gated and skipped until the full stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.
 

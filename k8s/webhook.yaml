@@ -1,0 +1,62 @@
+# Local payment rail + Valkey grant handler. ClusterIP only (not public).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhook
+  template:
+    metadata:
+      labels:
+        app: webhook
+    spec:
+      containers:
+        - name: webhook
+          image: ${WEBHOOK_IMAGE}
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: app-env
+          env:
+            - name: VALKEY_URL
+              value: redis://valkey:6379/0
+            - name: API_URL
+              value: http://api:8000
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: webhook
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
