@@ -6,8 +6,8 @@ import logging
 
 from provenance.outbox import OutboxSink
 from provenance.redact import redact_text
-from provenance.sink import MemorySink, default_sinks
-from shopper.runs import StartRun, new_run_id, register, run_shopper
+from provenance.sink import MemorySink
+from shopper.runs import StartRun, new_run_id, register, run_shopper, trace_sinks
 
 
 def main() -> None:
@@ -37,7 +37,7 @@ def main() -> None:
   print(f"run {run_id} [{label}]")
   if register(run_id, req) is None:
     print("  (local-only: API_URL not set, traces go to logs and are not registered)")
-  sinks = [trace, *default_sinks()]
+  sinks = [trace, *trace_sinks(req)]
   output = run_shopper(run_id, req, sinks)
   for sink in sinks:
     if isinstance(sink, OutboxSink) and not sink.flush(timeout=15):

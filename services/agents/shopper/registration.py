@@ -26,11 +26,12 @@ def register_run(
   run_id: str,
   mandate_id: str | None,
   agent_mode: str,
+  token: str,
   model: str | None = None,
   provider: str | None = None,
 ) -> dict[str, Any]:
+  """Register with the credential bound to this run's mode (see credentials.py)."""
   api_url = os.environ["API_URL"].rstrip("/")
-  token = os.environ["AGENT_TOKEN_SHOPPER"]
   if not mandate_id:
     raise RegistrationError("a run needs a mandate_id before Leash will register it")
   body = {

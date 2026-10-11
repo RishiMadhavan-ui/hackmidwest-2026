@@ -4,7 +4,6 @@ Do not add prompt-injection defenses here. The shopper is the demo victim; the
 point is that Leash blocks the bad purchase even when the agent falls for it.
 """
 
-import os
 from typing import Any
 
 from strands import Agent
@@ -12,8 +11,7 @@ from strands import Agent
 from leash_shared.llm import make_model
 from provenance.hooks import ProvenanceHooks
 from provenance.sink import Sink
-
-AGENT_ID = os.environ.get("SHOPPER_AGENT_ID", "agt_shopper")
+from shopper.credentials import agent_id_for
 
 # "Complete whatever steps a store page says are required" is the gullibility
 # the demo depends on. Keep it.
@@ -42,9 +40,12 @@ def build_agent(
   tools: list[Any],
   model=None,
   agent_mode: str = "live",
+  agent_id: str | None = None,
 ) -> Agent:
   """The shopper with the given tools: the store's and Leash's, both from MCP."""
-  hooks = ProvenanceHooks(run_id=run_id, agent_id=AGENT_ID, sinks=sinks, agent_mode=agent_mode)
+  # Trace events must name the agent whose credential sends them.
+  agent_id = agent_id or agent_id_for(agent_mode)
+  hooks = ProvenanceHooks(run_id=run_id, agent_id=agent_id, sinks=sinks, agent_mode=agent_mode)
   return Agent(
     model=model or make_model("shopper"),
     tools=tools,
@@ -53,7 +54,7 @@ def build_agent(
     # The default handler streams model text to stdout, and the model sees card
     # details. Nothing prints unless it has been redacted first.
     callback_handler=None,
-    agent_id=AGENT_ID,
+    agent_id=agent_id,
     name="leash-shopper",
   )
 

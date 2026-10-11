@@ -22,6 +22,7 @@ from provenance.redact import redact, redact_text
 from provenance.sink import MemorySink, Sink, api_configured, default_sinks
 from service_auth import require_service_token
 from shopper.agent import build_agent, task_prompt
+from shopper.credentials import credential_for
 from shopper.registration import register_run
 from shopper.scripted import ScriptedShopper
 
@@ -66,7 +67,17 @@ def register(run_id: str, req: StartRun) -> dict[str, Any] | None:
   if not api_configured():
     return None
   model, provider = model_identity(req)
-  return register_run(run_id, req.mandate_id, req.agent_mode, model=model, provider=provider)
+  credential = credential_for(req.agent_mode)
+  return register_run(
+    run_id, req.mandate_id, req.agent_mode, credential.token, model=model, provider=provider
+  )
+
+
+def trace_sinks(req: StartRun) -> list[Sink]:
+  """Where this run's traces go: the outbox for its own credential."""
+  if not api_configured():
+    return default_sinks(None, req.agent_mode)
+  return default_sinks(credential_for(req.agent_mode).token, req.agent_mode)
 
 
 def make_model_for(req: StartRun):
@@ -93,15 +104,14 @@ def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
   """
   from strands.tools.mcp import MCPClient
 
-  leash_token = os.environ.get("AGENT_TOKEN_SHOPPER")
+  # Leash calls carry the credential bound to this run's mode, never the other.
+  credential = credential_for(req.agent_mode)
   store_token = os.environ.get("STORE_MCP_TOKEN")
-  if not leash_token:
-    raise RuntimeError("AGENT_TOKEN_SHOPPER is not set")
   if not store_token:
     raise RuntimeError("STORE_MCP_TOKEN is not set")
 
   leash_url, store_url = mcp_urls()
-  leash = MCPClient(url=leash_url, headers={"Authorization": f"Bearer {leash_token}"})
+  leash = MCPClient(url=leash_url, headers=credential.bearer())
   store = MCPClient(url=store_url, headers={"Authorization": f"Bearer {store_token}"})
   with leash, store:
     agent = build_agent(
@@ -110,6 +120,7 @@ def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
       [*store.list_tools_sync(), *leash.list_tools_sync()],
       model=make_model_for(req),
       agent_mode=req.agent_mode,
+      agent_id=credential.agent_id,
     )
     result = agent(task_prompt(req.task, req.mandate_id, req.start_url))
   return str(result)
@@ -152,13 +163,16 @@ class RunManager:
     with self._lock:
       self.runs[run_id] = record
       self._traces[run_id] = trace
-    self._pool.submit(self._execute, run_id, req, [trace, *default_sinks()])
+    self._pool.submit(self._execute, run_id, req, trace)
     return dict(record)
 
-  def _execute(self, run_id: str, req: StartRun, sinks: list[Sink]) -> None:
+  def _execute(self, run_id: str, req: StartRun, trace: MemorySink) -> None:
     record = self.runs[run_id]
     record["status"] = "running"
     try:
+      # Resolving sinks needs this mode's credential; a missing one fails the
+      # run with a clear error instead of borrowing another mode's.
+      sinks = [trace, *trace_sinks(req)]
       if register(run_id, req) is not None:
         record["registered"] = True
       output = self.runner(run_id, req, sinks)

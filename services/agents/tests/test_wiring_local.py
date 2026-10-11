@@ -35,8 +35,16 @@ STORE_DIR = AGENTS_DIR.parent / "mcp-store"
 POISONED = (STORE_DIR / "tests/fixtures/listings/charger_poisoned.html").read_text()
 # Credentials each MCP service must NOT be given: the store service never
 # holds the Leash token, and the Leash service never holds store secrets.
-_SECRETS = {"AGENT_TOKEN_SHOPPER", "STORE_MCP_TOKEN", "STORE_API_TOKEN", "API_URL", "STORE_URL"}
-TOKEN = "agent-wiring-token"
+_SECRETS = {
+  "AGENT_TOKEN_SHOPPER",
+  "AGENT_TOKEN_SHOPPER_SCRIPTED",
+  "STORE_MCP_TOKEN",
+  "STORE_API_TOKEN",
+  "API_URL",
+  "STORE_URL",
+}
+TOKEN = "agent-wiring-token"  # the scripted credential these runs use
+LIVE_TOKEN = "live-agent-wiring-token"
 STORE_MCP_TOKEN = "store-mcp-wiring-token"
 PAN = "4111111111111111"
 
@@ -188,7 +196,9 @@ def env(stack, monkeypatch):
   monkeypatch.setenv("STORE_URL", stack["store"])
   monkeypatch.setenv("MCP_LEASH_URL", stack["leash_mcp"])
   monkeypatch.setenv("MCP_STORE_URL", stack["store_mcp"])
-  monkeypatch.setenv("AGENT_TOKEN_SHOPPER", TOKEN)
+  # Both credentials exist, as in the cluster; scripted runs must pick theirs.
+  monkeypatch.setenv("AGENT_TOKEN_SHOPPER", LIVE_TOKEN)
+  monkeypatch.setenv("AGENT_TOKEN_SHOPPER_SCRIPTED", TOKEN)
   monkeypatch.setenv("STORE_MCP_TOKEN", STORE_MCP_TOKEN)
   for key in ("payments", "payment_auth", "trace", "registrations", "order", "store_auth"):
     stack["log"][key].clear()
@@ -204,7 +214,7 @@ def run(req: StartRun) -> dict:
       break
     time.sleep(0.1)
   # Traces go through the durable outbox; wait for them to land.
-  assert shared_outbox(os.environ["API_URL"], TOKEN).flush(timeout=10)
+  assert shared_outbox(os.environ["API_URL"], TOKEN, "scripted").flush(timeout=10)
   return record
 
 
@@ -242,6 +252,10 @@ def test_scripted_attack_over_real_mcp(env):
   types = [e["type"] for e in log["trace"]]
   assert "provenance.source" in types
   assert {e["agent_mode"] for e in log["trace"]} == {"scripted"}
+  # Events name the scripted agent, matching the credential that sent them.
+  assert {e["agent_id"] for e in log["trace"]} == {"agt_shopper_scripted"}
+  everything_sent = json.dumps(log["registrations"]) + str(log["payment_auth"])
+  assert LIVE_TOKEN not in everything_sent and LIVE_TOKEN not in str(log["trace_auth"])
   decisions = [
     e["policy_decision"]
     for e in log["trace"]

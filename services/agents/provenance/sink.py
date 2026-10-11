@@ -37,12 +37,15 @@ class LogSink:
 
 
 def api_configured() -> bool:
-  return bool(os.environ.get("API_URL") and os.environ.get("AGENT_TOKEN_SHOPPER"))
+  return bool(os.environ.get("API_URL"))
 
 
-def default_sinks() -> list[Sink]:
+def default_sinks(token: str | None, lane: str) -> list[Sink]:
+  """Trace delivery for one credential: its outbox lane, or logs if local-only."""
   if api_configured():
-    return [shared_outbox(os.environ["API_URL"], os.environ["AGENT_TOKEN_SHOPPER"])]
+    if not token:
+      raise RuntimeError("an agent credential is required to send traces to the api")
+    return [shared_outbox(os.environ["API_URL"], token, lane)]
   return [LogSink()]
 
 
