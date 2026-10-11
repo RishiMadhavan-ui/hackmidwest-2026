@@ -4,12 +4,15 @@ WORKDIR /app
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/shared"
 
-COPY pyproject.toml uv.lock ./
+COPY api/pyproject.toml api/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY main.py auth.py db.py ./
+COPY api/*.py ./
+COPY shared/leash_shared /shared/leash_shared
+COPY db/migrations /db/migrations
 
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
