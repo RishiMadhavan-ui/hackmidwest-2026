@@ -139,18 +139,27 @@ export function ActivityFeed({
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const seen = useRef(new Set<string>());
+  const eventsRef = useRef<ActivityEvent[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+  eventsRef.current = events;
 
   useEffect(() => {
-    seen.current = new Set();
+    // Resume from the highest sequence already held. Clearing `seen` while keeping
+    // state (React Strict Mode remount) used to replay after=0 and duplicate rows.
+    const held = eventsRef.current;
+    seen.current = new Set(held.map((event) => event.event_id));
+    const after = held.reduce((max, event) => Math.max(max, event.sequence), 0);
 
     const stop = streamActivity({
-      after: 0,
+      after,
       onStatus: (next) => { setStatus(next); if (next === "live") setError(null); },
       onEvent: (event) => {
         if (seen.current.has(event.event_id)) return;
         seen.current.add(event.event_id);
         setEvents((prev) => {
+          if (prev.some((row) => row.event_id === event.event_id || row.sequence === event.sequence)) {
+            return prev;
+          }
           const next = [...prev, event];
           next.sort((a, b) => a.sequence - b.sequence);
           return next.slice(-500);
