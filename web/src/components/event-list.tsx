@@ -6,7 +6,7 @@ import { cn } from "cn";
 
 import { Dot } from "@/components/ui/badge";
 import type { ActivityEvent } from "@/lib/api";
-import { formatWhen, labelFor, summarize, toneFor } from "@/lib/events";
+import { formatWhen, eventTitle, summarize, toneFor } from "@/lib/events";
 
 function EventRow({ event, expandable }: { event: ActivityEvent; expandable: boolean }) {
   const [open, setOpen] = useState(false);
@@ -19,7 +19,7 @@ function EventRow({ event, expandable }: { event: ActivityEvent; expandable: boo
       <Dot tone={tone} className="mt-1.5" />
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
-          {labelFor(event.type)}
+          {eventTitle(event)}
           {scripted ? (
             <span className="text-xs font-normal text-warning">Simulated compromised agent</span>
           ) : null}
@@ -43,11 +43,11 @@ function EventRow({ event, expandable }: { event: ActivityEvent; expandable: boo
   );
 
   if (!expandable) {
-    return <li className="flex items-start gap-3 px-4 py-3">{content}</li>;
+    return <li className="activity-entry flex items-start gap-3 px-4 py-3">{content}</li>;
   }
 
   return (
-    <li>
+    <li className="activity-entry">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

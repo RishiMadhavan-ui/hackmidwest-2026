@@ -25,6 +25,12 @@ const LABELS: Record<string, string> = {
   "agent.run_completed": "Agent run completed",
   "agent.run_failed": "Agent run failed",
   "agent.step": "Agent step",
+  "mandate.interpreted": "Draft terms generated",
+  "execution.launched": "Purchase workflow launched",
+  "execution.claimed": "Worker claimed this run",
+  "execution.authority_ended": "Worker authority ended",
+  "execution.rail_stopped": "Unused spending authority revoked",
+  "execution.worker_finished": "Workflow finished",
   "agent.tool.before": "Tool call",
   "agent.tool.after": "Tool result",
   "provenance.source": "Page fetched",
@@ -48,6 +54,23 @@ const LABELS: Record<string, string> = {
   "shopping.start.requested": "Shopping start requested",
 };
 
+const PHASE_LABELS: Record<string, string> = {
+  "lease.claimed": "Worker ready",
+  "graph.started": "Strands Graph started", "graph.stopped": "Workflow stopped", "graph.failed": "Workflow failed",
+  "node.started": "Graph node started", "node.completed": "Graph node completed", "edge.traversed": "Graph transition",
+  "inference.started": "Model inference started", "inference.completed": "Model inference completed", "inference.failed": "Model inference failed",
+  "verification.result": "Independent verification result", "investigation.started": "Guardian investigating",
+  "investigation.completed": "Guardian findings recorded", "candidate.quarantined": "Candidate quarantined",
+  "recovery.started": "Clean recovery started", "payment.started": "Authorization started",
+  "payment.authorized": "Authorization recorded", "run.terminal": "Run finished",
+};
+
+export function eventTitle(event: ActivityEvent): string {
+  const phase = event.data.phase;
+  return event.type === "agent.step" && typeof phase === "string"
+    ? PHASE_LABELS[phase] ?? phase.replaceAll(".", " ") : labelFor(event.type);
+}
+
 export function labelFor(type: string): string {
   return LABELS[type] ?? type.replace(/[._]/g, " ");
 }
@@ -58,7 +81,8 @@ export function groupFor(type: string): EventGroup {
     type.startsWith("agent.") ||
     type.startsWith("provenance.") ||
     type.startsWith("run.") ||
-    type.startsWith("shopping.")
+    type.startsWith("shopping.") ||
+    type.startsWith("execution.")
   ) {
     return "agent";
   }
@@ -197,6 +221,20 @@ export function summarize(event: ActivityEvent): string | null {
   const d = event.data;
   const parts: string[] = [];
   switch (event.type) {
+    case "agent.step": {
+      const reported = d.reported && typeof d.reported === "object" ? d.reported as Record<string, unknown> : {};
+      const node = str(reported.node);
+      if (node) parts.push(node);
+      const reason = str(reported.reason);
+      if (reason) parts.push(reasonText(reason));
+      const outcome = str(reported.outcome);
+      if (outcome && outcome !== "running") parts.push(outcome);
+      const role = str(reported.role);
+      if (role) parts.push(role);
+      const ms = num(reported.duration_ms);
+      if (ms !== null) parts.push(`${Math.round(ms)} ms`);
+      break;
+    }
     case "agent.tool.before":
     case "agent.tool.after": {
       const tool = str(d.tool_name);

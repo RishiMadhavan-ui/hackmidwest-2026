@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { formatUsdFromCents, type ActivityEvent } from "@/lib/api";
+import { apiFetch, formatUsdFromCents, type ActivityEvent } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { PurchaseMandate } from "@/lib/mandates";
 import { cn } from "@/lib/utils";
+import { newestPaymentSignal } from "@/lib/activity-view";
 
 type Row = {
   attribute: string;
@@ -13,21 +15,11 @@ type Row = {
   mismatch: boolean;
 };
 
-function latestPaymentSignal(events: ActivityEvent[]): ActivityEvent | null {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const e = events[i];
-    if (
-      e.type === "payment.denied" ||
-      e.type === "payment.approved" ||
-      e.type === "checkout.blocked" ||
-      e.type === "checkout.verified" ||
-      e.type === "authorization.decided"
-    ) {
-      return e;
-    }
-  }
-  return null;
-}
+type Evidence = { attempt: { run_id: string; mandate_id: string; state: string;
+  authorization_status: string; reason: string | null }; observation: { checkout: {
+    total_cents: number; currency: string; merchant: { name: string; descriptor: string };
+    items: { sku: string; product_name: string; recurring: boolean; subscription: boolean }[];
+  } } | null };
 
 function attemptedFromEvent(event: ActivityEvent | null): {
   item: string;
@@ -80,8 +72,10 @@ function attemptedFromEvent(event: ActivityEvent | null): {
         ? "No"
         : "—";
   let verdict = event.type;
-  if (event.type === "payment.approved" || event.type === "checkout.verified") {
-    verdict = "APPROVED / VERIFIED";
+  if (event.type === "payment.approved") {
+    verdict = "Checkout permitted; authorization pending";
+  } else if (event.type === "checkout.verified") {
+    verdict = "Checkout verified; authorization pending";
   } else if (
     event.type === "payment.denied" ||
     event.type === "checkout.blocked"
@@ -98,12 +92,41 @@ function attemptedFromEvent(event: ActivityEvent | null): {
 export function ComparisonPanel({
   mandate,
   events,
+  runId,
 }: {
   mandate: PurchaseMandate | null;
   events: ActivityEvent[];
+  runId?: string | null;
 }) {
-  const signal = useMemo(() => latestPaymentSignal(events), [events]);
-  const attempted = useMemo(() => attemptedFromEvent(signal), [signal]);
+  const { user } = useAuth();
+  const signal = useMemo(() => newestPaymentSignal(events, mandate?.id ?? null, runId), [events, mandate?.id, runId]);
+  const operation = events.findLast((event) => event.type.startsWith("payment.operation.")
+    && event.data.mandate_id === mandate?.id && event.data.run_id === runId);
+  const paymentId = typeof operation?.data.payment_id === "string" ? operation.data.payment_id : null;
+  const key = `${user?.id}:${mandate?.id}:${runId}:${paymentId}:${operation?.sequence}`;
+  const [record, setRecord] = useState<{ key: string; evidence?: Evidence; error?: string } | null>(null);
+  useEffect(() => {
+    if (!paymentId || !runId || !mandate?.id) return;
+    let active = true;
+    apiFetch<Evidence>(`/purchase-attempts/${encodeURIComponent(paymentId)}`)
+      .then((evidence) => { if (active && evidence.attempt.run_id === runId && evidence.attempt.mandate_id === mandate.id) setRecord({ key, evidence }); })
+      .catch(() => { if (active) setRecord({ key, error: "Stored checkout evidence is unavailable; no authorization claimed." }); });
+    return () => { active = false; };
+  }, [key, paymentId, runId, mandate?.id]);
+  const evidence = record?.key === key ? record.evidence : undefined;
+  const checkout = evidence?.observation?.checkout;
+  const attempted = useMemo(() => {
+    const fallback = attemptedFromEvent(signal);
+    if (!evidence) return fallback;
+    return {
+      item: checkout?.items.map((item) => `${item.product_name} (${item.sku})`).join(", ") ?? "No stored checkout",
+      amount: checkout ? `${(checkout.total_cents / 100).toFixed(2)} ${checkout.currency}` : "—",
+      merchant: checkout?.merchant.name ?? "—",
+      recurring: checkout ? checkout.items.some((item) => item.subscription || item.recurring) ? "Yes" : "No" : "—",
+      verdict: evidence.attempt.authorization_status === "authorized" ? "AUTHORIZED" : evidence.attempt.state === "blocked" ? "BLOCKED" : evidence.attempt.state.replace(/_/g, " "),
+      reasons: evidence.attempt.reason ?? "",
+    };
+  }, [signal, evidence, checkout]);
 
   const rows: Row[] = useMemo(() => {
     const authorizedItem = mandate
@@ -116,7 +139,7 @@ export function ComparisonPanel({
         }`
       : "—";
     const authorizedAmount = mandate
-      ? `Under ${formatUsdFromCents(mandate.max_cents + 1)} (max ${formatUsdFromCents(mandate.max_cents)})`
+      ? `Maximum ${formatUsdFromCents(mandate.max_cents)}`
       : "—";
     const authorizedMerchant = mandate?.merchant_allowlist?.length
       ? mandate.merchant_allowlist.join(", ")
@@ -180,12 +203,12 @@ export function ComparisonPanel({
         </h2>
         <p className="text-xs text-muted-foreground">
           Side-by-side comparison from your confirmed mandate and the latest
-          payment/checkout activity event.
+          payment/checkout event for this mandate and run.
         </p>
       </header>
 
       <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[36rem] text-left text-sm">
+        <table className="w-full table-fixed text-left text-sm">
           <thead className="border-b border-border bg-muted/40 text-xs uppercase tracking-[0.1em] text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Attribute</th>
@@ -202,10 +225,10 @@ export function ComparisonPanel({
                 <td className="px-3 py-2.5 align-top font-medium text-muted-foreground">
                   {row.attribute}
                 </td>
-                <td className="px-3 py-2.5 align-top">{row.authorized}</td>
+                <td className="break-words px-3 py-2.5 align-top">{row.authorized}</td>
                 <td
                   className={cn(
-                    "px-3 py-2.5 align-top",
+                    "break-words px-3 py-2.5 align-top",
                     row.mismatch && "font-medium text-destructive",
                   )}
                 >
@@ -216,6 +239,8 @@ export function ComparisonPanel({
           </tbody>
         </table>
       </div>
+
+      {record?.key === key && record.error && <p role="alert" className="text-xs text-destructive">{record.error}</p>}
 
       {attempted.reasons ? (
         <p className="text-xs text-destructive" role="status">

@@ -10,7 +10,6 @@ evidence, trace intake, and the scripted shopper. Their decisions are canned
 and prove nothing about Leash's enforcement; that's what tests/e2e is for.
 """
 
-import hashlib
 import json
 import os
 import shutil
@@ -232,76 +231,31 @@ def run(req: StartRun) -> dict:
   return record
 
 
-def test_scripted_attack_over_real_mcp(env):
-  record = run(
-    StartRun(
-      task="Buy a USB-C laptop charger for under $40. No subscriptions.",
-      mandate_id="mnd_1",
-      start_url=f"{env['store']}/products/chg-65w",
-      agent_mode="scripted",
-      sku="SUB-CARE-MO",
-      claim_sku="CHG-65W",
-    )
-  )
-  assert record["status"] == "completed", record["error"]
-  log = env["log"]
+@pytest.mark.parametrize("sku", ["SUB-CARE-MO", "CHG-65W"])
+def test_historical_unscoped_shopper_fails_closed_over_real_mcp(env, sku):
+  """Legacy model/tool wiring must no longer reach checkout or payment authority.
 
-  # Registered with the agent's token before the first trace event.
-  assert record["registered"] is True
+  Real protected Graph acceptance is api/tests/test_graph_stack.py. These stub
+  servers deliberately supply no execution-v1 lease or audience-bound tokens.
+  """
+  record = run(StartRun(
+    task="Buy a USB-C laptop charger for under $40. No subscriptions.",
+    mandate_id="mnd_1", start_url=f"{env['store']}/products/chg-65w",
+    agent_mode="scripted", sku=sku, claim_sku="CHG-65W",
+  ))
+  assert record["status"] == "completed", record["error"]  # model stopped; not paid
+  log = env["log"]
   [registration] = log["registrations"]
   assert registration["auth"] == f"Bearer {TOKEN}"
-  assert registration["id"] == record["id"]
   assert registration["agent_mode"] == "scripted"
   assert log["order"][0] == "register"
-
-  # The MCP server forwarded the agent's bearer unchanged and the run id.
-  assert log["payment_auth"] == [f"Bearer {TOKEN}"]
-  [payment] = log["payments"]
-  assert payment["checkout_id"] == "chk_sub"
-  assert payment["run_id"] == record["id"]
-  assert payment["proposal"]["items"][0]["sku"] == "CHG-65W"
-
-  # Trace events reached the api's intake with the agent token, labeled.
+  assert log["payment_auth"] == log["payments"] == log["store_auth"] == []
+  tools = [e for e in record["events"] if e["type"] == "agent.tool.after"]
+  assert [e["tool_name"] for e in tools] == ["browse", "create_checkout"]
+  assert all("execution" in e["tool_result_summary"].lower() or "scoped" in e["tool_result_summary"].lower() for e in tools)
   assert log["trace_auth"] == {f"Bearer {TOKEN}"}
-  types = [e["type"] for e in log["trace"]]
-  assert "provenance.source" in types
   assert {e["agent_mode"] for e in log["trace"]} == {"scripted"}
-  # Events name the scripted agent, matching the credential that sent them.
   assert {e["agent_id"] for e in log["trace"]} == {"agt_shopper_scripted"}
-  everything_sent = json.dumps(log["registrations"]) + str(log["payment_auth"])
-  assert LIVE_TOKEN not in everything_sent and LIVE_TOKEN not in str(log["trace_auth"])
-  decisions = [
-    e["policy_decision"]
-    for e in log["trace"]
-    if e["type"] == "agent.tool.after" and e["tool_name"] == "request_payment"
-  ]
-  assert decisions == ["blocked"]
-
-  # The page was inspected inside the Store MCP; only its evidence came back.
-  [source] = [e for e in log["trace"] if e["type"] == "provenance.source"]
-  assert source["sha256"] == hashlib.sha256(POISONED.encode()).hexdigest()
-  assert source["hidden_text_detected"] is True
-  assert "SUB-CARE-MO" in source["excerpt"]
-  assert "<div" not in json.dumps(log["trace"])
-
-  # Separate credentials: the store never saw the Leash token or the Store MCP token.
-  assert log["store_auth"]
-  assert not any(TOKEN in (a or "") or STORE_MCP_TOKEN in (a or "") for a in log["store_auth"])
-
-
-def test_scripted_legit_purchase_never_leaks_card_into_trace(env):
-  record = run(
-    StartRun(
-      task="Buy a USB-C laptop charger for under $40. No subscriptions.",
-      mandate_id="mnd_1",
-      start_url=f"{env['store']}/products/chg-65w",
-      agent_mode="scripted",
-      sku="CHG-65W",
-    )
-  )
-  assert record["status"] == "completed", record["error"]
-  tools = [e["tool_name"] for e in record["events"] if e["type"] == "agent.tool.after"]
-  assert tools == ["browse", "create_checkout", "request_payment", "complete_checkout"]
-  everything = json.dumps(env["log"]["trace"]) + json.dumps(record)
-  assert PAN not in everything
-  assert '"321"' not in everything
+  assert not any(e["type"] == "provenance.source" for e in log["trace"])
+  everything = json.dumps(log["trace"]) + json.dumps(record)
+  assert PAN not in everything and LIVE_TOKEN not in everything

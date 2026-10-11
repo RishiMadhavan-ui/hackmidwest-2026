@@ -10,6 +10,7 @@ import asyncio
 import os
 import threading
 import uuid
+from contextlib import ExitStack
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -132,7 +133,7 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
   from provenance.workflow import WorkflowEvents
   from shopper.control import ExecutionControl
   from shopper.runtime import MCPWorkflowPorts
-  from shopper.workflow import PurchaseWorkflow
+  from shopper.workflow import PurchaseWorkflow, State
 
   # Leash calls carry the credential bound to this run's mode, never the other.
   credential = run_credential(req)
@@ -141,6 +142,10 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
     raise RuntimeError("STORE_MCP_TOKEN is not set")
 
   control = ExecutionControl(os.environ["API_URL"], credential.token, run_id)
+  events = WorkflowEvents(run_id, credential.agent_id, req.agent_mode, sinks)
+  stack = ExitStack()
+  workflow_started = False
+  startup_stage = "claim"
   try:
     claim = await control.claim(req.launch_id)
     # Both MCP services must enforce this same worker scope before tools. These
@@ -152,18 +157,30 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
     tokens = claim.get("scope_tokens", {})
     if not all(isinstance(tokens.get(a), str) and len(tokens[a]) >= 32 for a in ("mcp-leash", "mcp-store")):
       raise RuntimeError("Audience-bound tool credentials are unavailable")
-    events = WorkflowEvents(run_id, credential.agent_id, req.agent_mode, sinks)
     events.emit("lease.claimed", worker_id=control.worker_id, generation=control.generation)
     leash_url, store_url = mcp_urls()
-    leash = MCPClient(url=leash_url, headers={**credential.bearer(), **scoped,
-      "X-Leash-Execution-Token": tokens["mcp-leash"]}, startup_timeout=5)
-    store = MCPClient(url=store_url, headers={"Authorization": f"Bearer {store_token}", **scoped,
-      "X-Leash-Execution-Token": tokens["mcp-store"]}, startup_timeout=5)
-    with leash, store:
+    # SDK context entry and tool discovery are synchronous network operations.
+    # Keep them off the owning event loop so the cancellation/lease watcher
+    # continues running while either server starts. Never extend a stale lease.
+    startup_stage = "mcp_leash_startup"
+    try:
+      leash = MCPClient(url=leash_url, headers={**credential.bearer(), **scoped,
+        "X-Leash-Execution-Token": tokens["mcp-leash"]}, startup_timeout=5)
+      store = MCPClient(url=store_url, headers={"Authorization": f"Bearer {store_token}", **scoped,
+        "X-Leash-Execution-Token": tokens["mcp-store"]}, startup_timeout=5)
+      async with asyncio.timeout(20):
+        await asyncio.to_thread(stack.enter_context, leash)
+        startup_stage = "mcp_store_startup"
+        await asyncio.to_thread(stack.enter_context, store)
+        startup_stage = "mcp_store_discovery"
+        store_tools = await asyncio.to_thread(store.list_tools_sync)
+        startup_stage = "mcp_leash_discovery"
+        leash_tools = await asyncio.to_thread(leash.list_tools_sync)
+      await control.check()
       ports = MCPWorkflowPorts(run_id=run_id, mandate_id=req.mandate_id,
         agent_id=credential.agent_id, mode=req.agent_mode, start_url=req.start_url,
         control=control, leash=leash, store=store,
-        tools=[*store.list_tools_sync(), *leash.list_tools_sync()],
+        tools=[*store_tools, *leash_tools],
         events=events,
         trace_sinks=sinks,
         shopper_model=(lambda state: ScriptedShopper(
@@ -173,10 +190,34 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
       from shopper.workflow import Limits
       limits = Limits(total_seconds=120) if req.lab_execution else Limits()
       ports.budget.limits = limits
+      workflow_started = True
       outcome = await PurchaseWorkflow(run_id, ports, limits=limits).run()
-    return outcome.outcome
+      return outcome.outcome
+    except (Exception, asyncio.CancelledError) as exc:
+      if workflow_started:
+        raise
+      reason = str(exc) if isinstance(exc, WorkflowStopped) else startup_stage + "_failed"
+      if isinstance(exc, TimeoutError):
+        reason = "mcp_startup_timeout"
+      # Emit only fixed classifications; provider/transport messages may contain
+      # headers or secrets. No candidate or payment exists before Graph startup.
+      log.warning("run %s stopped before Graph startup (%s)", run_id, reason)
+      try:
+        events.emit("graph.stopped", outcome="stopped", reason=reason)
+      except WorkflowStopped:
+        pass  # Still persist the terminal checkpoint if evidence delivery fails.
+      state = State(run_id, outcome="stopped", next_node="terminal", reasons=[reason], finished=True)
+      try:
+        await control.save(state)
+      except Exception:
+        pass  # Backend expiry remains the barrier if checkpoint delivery fails.
+      control.cancel(reason)
+      raise WorkflowStopped(reason, "stopped") from None
   finally:
-    await control.close()
+    try:
+      await asyncio.to_thread(stack.close)
+    finally:
+      await control.close()
 
 
 Runner = Callable[[str, StartRun, list[Sink]], str]
