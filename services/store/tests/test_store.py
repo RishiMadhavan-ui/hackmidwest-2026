@@ -182,6 +182,7 @@ class StoreTests(unittest.TestCase):
       "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
       .isoformat()
       .replace("+00:00", "Z"),
+      "authorization_event_id": "evt_" + "a" * 32,
     }
     r = self.charge_client.post(f"/api/checkouts/{cid}/bind", json=body)
     self.assertEqual(r.status_code, 200, r.text)
@@ -245,6 +246,7 @@ class StoreTests(unittest.TestCase):
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
         .isoformat()
         .replace("+00:00", "Z"),
+        "authorization_event_id": "evt_" + "b" * 32,
       },
     )
     self.assertEqual(bad_bind.status_code, 409)
@@ -268,6 +270,7 @@ class StoreTests(unittest.TestCase):
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
         .isoformat()
         .replace("+00:00", "Z"),
+        "authorization_event_id": "evt_" + "c" * 32,
       },
     )
     self.assertEqual(r.status_code, 409)
@@ -288,23 +291,49 @@ class StoreTests(unittest.TestCase):
     self.assertEqual(own.status_code, 409)
     self.assertTrue(self.client.get(f"/api/checkouts/{cid}").json()["expired"])
 
-  def test_bound_checkout_cannot_charge_without_durable_controls(self) -> None:
+  def test_bound_checkout_charges_local_rail_with_durable_event_id(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
     cid = created["checkout_id"]
     binding = self._bind(cid)
+
+    class _Resp:
+      status_code = 200
+
+      def json(self):
+        return {
+          "result": "APPROVED",
+          "reason": "ok",
+          "rail": "local_payment_rail_simulator",
+          "decision_source": "local_rail",
+          "latency_ms": 1.2,
+          "event_id": binding["authorization_event_id"],
+        }
+
     with patch.dict("os.environ", {"WEBHOOK_URL": "http://rail.test", "WEBHOOK_CHARGE_TOKEN": "c" * 32}):
       with patch("httpx.Client") as client_cls:
+        post = client_cls.return_value.__enter__.return_value.post
+        post.return_value = _Resp()
         result = self.charge_client.post(
           f"/api/checkouts/{cid}/complete",
           json={"payment_id": binding["payment_id"], "instrument_token": binding["instrument_token"]},
         )
-        self.assertEqual(result.status_code, 503, result.text)
-        self.assertIn("durable payment reconciliation", result.json()["detail"])
-        client_cls.assert_not_called()
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["status"], "completed")
+        self.assertEqual(result.json()["rail_result"]["result"], "APPROVED")
+        posted = post.call_args.kwargs["json"]
+        self.assertEqual(posted["event_id"], binding["authorization_event_id"])
+        self.assertEqual(posted["checkout_hash"], binding["checkout_hash"])
     observed = self.client.get(f"/api/checkouts/{cid}").json()
-    self.assertEqual(observed["status"], "open")
-    self.assertIsNone(observed["rail"])
-    self.assertTrue(observed["ownership_authenticated"])
+    self.assertEqual(observed["status"], "completed")
+    self.assertEqual(observed["rail"], "local_payment_rail_simulator")
+    # Idempotent complete replay does not re-hit the rail.
+    with patch("httpx.Client") as client_cls:
+      again = self.charge_client.post(
+        f"/api/checkouts/{cid}/complete",
+        json={"payment_id": binding["payment_id"]},
+      )
+      self.assertEqual(again.status_code, 200)
+      client_cls.assert_not_called()
 
   def test_complete_wrong_instrument_declines_without_rail(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
@@ -365,14 +394,14 @@ class StoreTests(unittest.TestCase):
                 "number": "4111111111111111",
                 "exp_month": 12,
                 "exp_year": 2030,
-                "cvv": "042",
+                "cvv": "987",
               },
             },
           )
-      self.assertEqual(r.status_code, 503, r.text)
+      self.assertEqual(r.status_code, 200, r.text)
       joined = "\n".join(capture.messages)
       self.assertNotIn("4111111111111111", joined)
-      self.assertNotIn("042", joined)
+      self.assertNotIn("987", joined)
     finally:
       logger.removeHandler(capture)
 

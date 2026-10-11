@@ -1,4 +1,4 @@
-"""Agent payment preflight; unfinished financial authority always fails closed."""
+"""Agent payment preflight; verified checkouts receive a local-rail grant once."""
 
 from typing import Annotated, Any
 
@@ -16,8 +16,12 @@ Agent = Annotated[Principal, Depends(require_agent)]
 @router.post("/payments")
 def create_payment(body: PaymentProposal, principal: Agent) -> dict[str, Any]:
   with get_conn() as conn:
-    response = request_payment(conn, body, principal)
-  return response.model_dump(mode="json")
+    response, once = request_payment(conn, body, principal)
+  payload = response.model_dump(mode="json")
+  if once:
+    # Shown once on the approving response; GET /payments never re-discloses.
+    payload.update(once)
+  return payload
 
 
 @router.get("/payments/{payment_id}")

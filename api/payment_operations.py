@@ -100,7 +100,7 @@ def mark_reconciling(conn, payment_id, user_id, *, expected_revision):
   return finish(conn, operation, "reconciling", "outcome_unknown")
 
 
-def persist_observation(conn, operation, checkout, source_facts):
+def persist_observation(conn, operation, checkout, source_facts, *, financial_authority=False):
   merchant_proof = (
     source_facts.get("ownership_authenticated") is True
     and source_facts.get("frozen") is True
@@ -118,7 +118,7 @@ def persist_observation(conn, operation, checkout, source_facts):
       "merchant_expiry": "verified",
       "checkout_freeze": "verified",
       "normalization": "user_id/session_id/revision/expiry/freeze supplied by merchant charge protocol",
-      "financial_authority": False,
+      "financial_authority": bool(financial_authority),
     }
     evidence_status = "merchant_owned_frozen"
   else:

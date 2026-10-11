@@ -33,6 +33,12 @@ spec:
                   name: app-env
                   key: STORE_API_TOKEN
                   optional: true
+            - name: STORE_CHARGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: STORE_CHARGE_TOKEN
+                  optional: true
             - name: STORE_PUBLIC_URLS
               valueFrom:
                 secretKeyRef:
