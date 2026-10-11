@@ -28,7 +28,17 @@ Further signed-in checks on this deployed version verified Payments shows **Bloc
 
 This is the usable no-redeploy fallback, with explicit limitations. The original fully live injection/guardian/Lithic film cannot be claimed from the current deployed evidence.
 
-## One consolidated message for Cameron
+## Final rollout verified — use this recording path now
+
+The new stage navigation/recorded-run UI is deployed. No further redeploy is requested. The earlier no-redeploy/old-UI instructions above describe the prior snapshot; the consolidated rollout message below is historical and must not trigger another deploy.
+
+1. Mission Control → **1 Mandate** for natural drafting/explicit confirmation; **2 Live run** for shopping and canonical comparison; **3 Evidence** for stored purchases. After refresh, reselect the original mandate under **1 Mandate**, then open **2 Live run** to restore its persisted outcome; selection itself is not retained. Expand **Operator demo controls** to reach Attack Lab. If the header Attack Lab shortcut only scrolls to collapsed controls, expand that summary manually.
+2. A new ordinary live purchase passed: mandate ending **865e88**, run ending **dc1f88**, CHG-65W, $29.99, no recurrence. Record its run/comparison as persisted evidence. This single-purchase mandate has been consumed; create fresh confirmed authority for another launch.
+3. In **Recorded Lab run**, choose the scripted attack run ending **9db274**: it shows candidate 1 blocked and candidate 2 authorized. Keep **Scripted shopper fixture** and **Local Payment Rail Simulator** visible. Older events page **3 / 4** shows the actual guardian call failed with `BadRequestError`; page **2 / 4** shows unavailable investigation, quarantine and recovery. Do not narrate successful guardian AI findings.
+4. Clear/Restore was verified to preserve evidence, and selecting the older stopped run ending **96ef0e** correctly shows rail enforced / Graph acknowledged / no purchase. This is historical replay. The new early Stop run ending **b02a2f** shows rail enforced, no purchase and a persisted `graph.stopped` event, but formal Graph acknowledgement is still absent; do not present its acknowledgement as successful.
+5. Incidents' isolated Lab links now preserve ownership and direct review to Lab. Do not claim Lithic issuance/authorization, successful live shopper manipulation or account-wide enforcement from these recordings.
+
+## Historical consolidated message for Cameron
 
 **Rollout is deferred by Rishi for now.** The incident routing fix is included in the next web batch: mirrored isolated Lab records no longer offer ordinary-account mandate links/comparison, and instead direct review to Attack Lab. Backend owner/namespace restrictions are retained. Until the web image is rebuilt, keep avoiding the deployed Lab comparison link. Mandate lifecycle testing created and revoked only `mnd_d56faf511fe34320bc6e63362a5d7127`; no purchase was launched and the recording account is not killed. Create a fresh confirmed mandate for the next ordinary live recording.
 

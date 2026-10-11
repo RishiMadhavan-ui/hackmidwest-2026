@@ -1,5 +1,21 @@
 # Full-app implementation verification — October 11, 2026
 
+## Final deployed build acceptance — October 11
+
+Rishi reported rollout complete. The first refresh still displayed the old web build; after the subsequent completion message/reload, the new Mission Control stage navigation, recorded Lab selector, run-scoped cards, Clear/Restore and ownership-safe incident routing were visibly present. No image digest/cluster inspection was performed. These UI observations supersede the earlier pending-web-rollout status; no further redeployment or runtime source change was made here.
+
+| Check | Actual deployed evidence | Result / remaining limit |
+|---|---|---|
+| Fresh isolated scripted attack/recovery | `run_66f3860ae5964f02af1779f5f59db274`; subscription checkout `ckt_7e175eb15323901c` blocked, recovered `ckt_57bb6b711a7f0fc9` authorized; payment `pay_a0f6e51be31a493ebdcfdfe59723ea80`, 10:04:03 | PASS for real Graph/MCP/policy/local authorization; scripted shopper choices remain labeled |
+| Actual guardian inference | Persisted `inference.failed`, role guardian, execution `model_call`, provider `akamai-inference`, model `hackathon-chat`, error `BadRequestError`, 1446 ms; then `investigation.unavailable: model_unavailable` | NOT PASS for findings. The actual configured request ran and was rejected. Exact provider rejection detail remains unknown; do not infer a missing credential or a successful AI explanation |
+| Final web presentation | Stage buttons, Recorded Lab run, actual block reasons and local authorization cards; Clear hides evidence/Restore returns it; selecting the earlier stopped run shows no purchase attempt and rail enforced/Graph acknowledged | PASS for observed view isolation/clearing, not audit deletion or a newly executed historical run |
+| Incident routing | Mirrored Lab incidents show the isolated-demo explanation and `/mission-control#attack-lab`; no ordinary mandate comparison/link offered | PASS for deployed source fix; backend ownership remains enforced |
+| Fresh ordinary live purchase | `mnd_96e420b0ce1f4ccca9aa6eba9f865e88`, generated 3999-cent USB-C/no-recurring terms, explicit human confirmation; `run_ea9373bad25b4db08273fe8797dc1f88`, `ckt_f285af85e75eb6b5`, `pay_4259850bc0a7403086a4a4a9a05b4a20`, authorized 10:08:57–10:08:59 | PASS: canonical comparison shows CHG-65W, 2999 USD and no recurrence. Terminal cleanup explicitly preserves earlier authorization. No Lithic/settlement claim |
+| Refresh/readback | Reload, reselect the same owned mandate under 1 Mandate, then open 2 Live run | PASS: original run/authorization restored; Start shopping disabled with purchase permission used. Refresh does not retain the mandate selection automatically, and no new run was launched |
+| Fresh early live Stop | `run_dbf6f485cd3342c798cdc97382b02a2f`, started 10:09:38; `run.stop.enforced` with financial_revocation enforced and `graph.stopped` with execution_scope_rejected/stopped at 10:09:40; no purchase attempt | Financial enforcement PASS; observed Graph stop event. Formal status remains `authority_ended`, candidate 0, `Graph not_acknowledged`. This acknowledgement/status gap is OPEN, not proof of successful final worker acknowledgement |
+
+Owner follow-ups: Aditya diagnoses the guardian request's sanitized BadRequest response; Rishi/Aditya reconcile the early-stop terminal checkpoint/acknowledgement with `api/execution.py` and the owning worker. Neither finding authorizes weakening payment controls. Browser evidence shows safe local decisions, not all 147 cases passed. The guardian error, successful live injection, Lithic, account-wide deployed enforcement and restart/race gates remain open. Only documentation is updated after this acceptance; no additional deploy requested.
+
 ## No-redeploy mandate lifecycle checks — October 11, 09:49–09:54 Central
 
 Actual signed-in UI tests on the existing HTTP deployment, authorized by Rishi. One ordinary test mandate was created, confirmed, replaced, reconfirmed and revoked. No shopper was launched, no checkout/payment attempt occurred, and the account-wide Kill Switch was not engaged. Existing purchase and isolated Lab evidence remains intact.
