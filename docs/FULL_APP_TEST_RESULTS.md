@@ -4,6 +4,14 @@ Source on main integrates teammate work, preserves frozen shared models/events a
 
 ## Actual output and scope
 
+### Urgent mandate generation fix after deployed user testing
+
+The deployed user reported that clicking **Generate draft terms** did nothing while the advanced form could save. The actual installed Base UI button defaults to `type="button"`; `NaturalMandate` attached generation to the form's submit event but omitted `type="submit"`. The generation control now explicitly submits. Example/advanced controls remain non-submit buttons, and human review/save/confirmation requirements are unchanged.
+
+Verification for this narrow frontend fix: actual React server rendering of the installed button and `NaturalMandate` confirmed the default-button cause and corrected submit type; all four mandate interpretation unit tests passed; frontend ESLint and production build both exited 0. This is rendered-control/parser/build evidence, not a signed-in browser click or deployed scenario acceptance. A web image rebuild/redeployment and browser reload are required. Retest with **Buy a USB-C laptop charger under $40. No subscriptions.**; generation should show prefilled review terms with a 3999-cent ceiling, then require saving and explicit confirmation.
+
+The subsequent deployed read-only check returned health/readiness 200, operator access 401 without a session, current isolated Lab draft/execute/history/stop/reset routes in OpenAPI, and the clean recovery SKU with the Local Payment Rail Simulator label. This supersedes the older route inventory under **Deployed read-only inspection** below. The user's operator screenshot shows server controls enabled and workspace controls disabled; that explains the disabled Lab prepare button, without establishing successful scenario execution.
+
 | Check | Actual final result | Environment / limit | Raw output |
 |---|---|---|---|
 | API full suite |193 tests OK,2 skipped | Real SQL/JWT/HTTP plus unit and mocked provider/rail transports. Gated legacy stack and full Graph acceptance excluded from default run; Graph run separately below. | [API](test-evidence/FULL_APP_API.txt) |

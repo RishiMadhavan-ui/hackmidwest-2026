@@ -52,7 +52,7 @@ export function NaturalMandate({ onDraft }: { onDraft: (mandate: PurchaseMandate
     <p className="text-sm text-muted-foreground">Leash generates proposed limits from your instruction. You review and confirm them before your agent can shop.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="flex flex-wrap gap-2">
-      <Button disabled={busy || !instruction.trim()}>{busy ? "Interpreting…" : "Generate draft terms"}</Button>
+      <Button type="submit" disabled={busy || !instruction.trim()}>{busy ? "Interpreting…" : "Generate draft terms"}</Button>
       <Button type="button" variant="outline" disabled={busy} onClick={() => setInstruction("Buy a USB-C laptop charger under $40. No subscriptions.")}>Use charger example</Button>
       <Button type="button" variant="ghost" disabled={busy} onClick={() => setAdvanced(true)}>Advanced form</Button>
     </div>
