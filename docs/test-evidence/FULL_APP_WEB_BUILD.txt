@@ -4,20 +4,20 @@
 
 ▲ Next.js 16.4.0 (Turbopack)
 - Environments: .env.local
-✓ Running next.config.ts took 99ms
+✓ Running next.config.ts took 96ms
 - Cache Components enabled
 - Partial Prefetching enabled
 
   Creating an optimized production build ...
-✓ Compiled successfully in 3.8s
+✓ Compiled successfully in 2.7s
   Running TypeScript ...
-  Finished TypeScript in 23.9s ...
+  Finished TypeScript in 6.6s ...
   Collecting page data using 11 workers ...
   Generating static pages using 11 workers (0/19) ...
   Generating static pages using 11 workers (4/19) 
   Generating static pages using 11 workers (9/19) 
   Generating static pages using 11 workers (14/19) 
-✓ Generating static pages using 11 workers (19/19) in 2.2s
+✓ Generating static pages using 11 workers (19/19) in 1404ms
   Finalizing page optimization ...
 
 Route (app)

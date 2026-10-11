@@ -94,7 +94,11 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   # api image needs shared/leash_shared — build from repo root.
   "$BUILDX" build --platform "$PLATFORM" -f "$REPO/api/Dockerfile" -t "$API_IMAGE" --load "$REPO"
   docker push "$API_IMAGE"
-  "$BUILDX" build --platform "$PLATFORM" -t "$WEB_IMAGE" --build-arg NEXT_PUBLIC_API_URL=/backend --load "$REPO/web"
+  "$BUILDX" build --platform "$PLATFORM" -t "$WEB_IMAGE" \
+    --build-arg NEXT_PUBLIC_API_URL=/backend \
+    --build-arg ENABLE_PUBLIC_MCP_LEASH_PROXY="${ENABLE_PUBLIC_MCP_LEASH_PROXY:-$(get_env ENABLE_PUBLIC_MCP_LEASH_PROXY)}" \
+    --build-arg ENABLE_PUBLIC_MCP_PROXY="${ENABLE_PUBLIC_MCP_PROXY:-$(get_env ENABLE_PUBLIC_MCP_PROXY)}" \
+    --load "$REPO/web"
   docker push "$WEB_IMAGE"
   # Agents build from the repo root: the image also needs shared/leash_shared.
   "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/agents/Dockerfile" -t "$AGENTS_IMAGE" --load "$REPO"

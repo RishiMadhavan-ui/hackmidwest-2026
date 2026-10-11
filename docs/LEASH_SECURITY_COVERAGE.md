@@ -1,6 +1,6 @@
 # LEASH V2 security coverage index
 
-Reviewed October 11, 2026 against integrated main over `7033f4b`, retaining private worker/identity isolation. Original 137 cases remain byte-for-byte in [the supplied matrix](LEASH_SECURITY_TEST_CASES.md); LAB-001–010 makes 147. Original NOT_RUN cells are an immutable specification snapshot. This annex is the current assessment, not a statement that every requirement passed.
+Reviewed October 11, 2026 against integrated main through Cameron's #22 (`bb9f17b`), retaining private worker/identity isolation. Original 137 cases remain byte-for-byte in [the supplied matrix](LEASH_SECURITY_TEST_CASES.md); LAB-001–010 makes 147. Original NOT_RUN cells are an immutable specification snapshot. This annex is the current assessment, not a statement that every requirement passed.
 
 **PASS means the complete stated local/component scope was executed; it never upgrades fixture model choices into live Akamai/Lithic/deployed proof.** NOT_RUN has implemented or partial source and related passing tests, with the exact acceptance stimulus still unexercised. MISSING names an actual unimplemented capability. BLOCKED_EXTERNAL also lists any missing provider code; external configuration never excuses it. IT = implemented/tested in stated scope; PI = partial acceptance/implementation; M = missing full capability; BC = external verification/configuration blocked. No zero-price validation or provider/card behavior is inferred from dependencies.
 
@@ -10,10 +10,10 @@ All actual results/commands and raw logs are linked in [FULL_APP_TEST_RESULTS.md
 
 - T_API: `api/`: `.venv/Scripts/python.exe -m unittest discover -s tests -v` with guarded `LEASH_TEST_DATABASE_URL`. Real SQL/JWT/HTTP plus explicitly mocked provider/transport tests.
 - T_GRAPH: `api/`: enable `LEASH_TEST_STACK=1` and dedicated SQL/Redis; run `python -m unittest discover -s tests -p test_graph_stack.py -v`. Actual SDK Graph + all real local HTTP services/SQL/atomic rail; only model choices scripted.
-- T_AGENTS: `services/agents/`: `python -m pytest -q -m 'not live'`. Real SDK Agent/Graph and fixture/mocked ports; genuine inference tests skipped.
+- T_AGENTS: `services/agents/`: `python -m pytest -q `. Real SDK Agent/Graph and fixture/mocked ports; genuine inference tests skipped.
 - T_RAIL: `services/webhook/`: `python -m unittest discover -s tests -v`, dedicated `LEASH_TEST_VALKEY_URL`. Memory/real Redis, signed HTTP adapter fixtures. T_DECISION: root YAML runner, 16 independent vectors.
 - T_STORE / T_MCP: each service's own `python -m pytest -q` (Store also unittest), merchant/SDK adaptation and explicit scope negatives. Adaptation tests mock accepted scope; T_GRAPH proves actual scope binding across services.
-- T_NODE: `web/`: `node --experimental-strip-types --test tests/attack-lab-boundary.test.mjs tests/operator-view.test.mjs`. Route/session authorization with mocked backend plus local HTTP fixtures. Build/lint are separate verification.
+- T_NODE: `web/`: `node --experimental-strip-types --test tests/attack-lab-boundary.test.mjs tests/operator-view.test.mjs tests/mcp-proxy-config.test.mjs`. Route/session authorization with mocked backend plus local HTTP fixtures. Build/lint are separate verification.
 - Hosted six-case `tests/e2e/` now uses human/operator APIs and one-Graph automatic recovery, never obsolete direct worker launches. It requires `LEASH_E2E=1`, `LEASH_E2E_ISOLATED=1`, API URL and allowlisted real human token. Six cases skipped here. Budget/expiry/replay vectors remain in API/rail suites; hosted bypass checks do not impersonate those financial cases.
 
 Rows link existing grouped suites and exact code boundaries. The cited suite is related evidence when status is NOT_RUN/BLOCKED/MISSING; no planned test filename is presented as an existing test. Check individual stimuli in the original matrix, and extend these meaningful suites rather than generating 147 redundant functions. Frozen shared-contract changes require dedicated agreement; the private execution protocol does not rename them.

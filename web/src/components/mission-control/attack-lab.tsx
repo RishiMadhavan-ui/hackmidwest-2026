@@ -14,8 +14,8 @@ const linkBtn = cn(
 );
 
 /**
- * Disabled placeholder only. Runtime attacks remain blocked by the web/store
- * server routes until verified operator authorization and isolation exist.
+ * Operator controls are rendered only after the backend verifies the current
+ * human session and allowlist. Every mutation rechecks that authority.
  */
 export function AttackLab() {
   const { user } = useAuth();
@@ -69,6 +69,8 @@ export function AttackLab() {
     } finally { setBusy(false); }
   }
 
+  if (!access?.operator_authorized) return null;
+
   return (
     <section id="attack-lab" className="flex flex-col gap-3">
       <header>
@@ -99,8 +101,9 @@ export function AttackLab() {
         <div className="rounded-lg border border-border px-3 py-3">
           <p className="text-sm font-medium">Adversarial listing</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Unavailable until the backend authorization and isolation checks
-            pass. Ordinary sign-in does not authorize attack execution.
+            {access.execution_available
+              ? "Runs only in this isolated workspace through verified checkout and deterministic enforcement."
+              : "Requires enabled server and workspace controls. Ordinary sign-in does not authorize attack execution."}
           </p>
           <p className="mt-3 text-xs font-medium text-muted-foreground">
             {access?.execution_available ? "Use the isolated scenario controls below" : "Attack scenarios disabled"}

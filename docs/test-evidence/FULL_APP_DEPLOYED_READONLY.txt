@@ -1,0 +1,56 @@
+{
+  "inspection": "anonymous read-only HTTP; no user/provider or deployment mutation",
+  "results": [
+    {
+      "path": "/backend/health",
+      "status": 200,
+      "detail": null,
+      "service": "hackmidwest-api",
+      "status_label": "ok"
+    },
+    {
+      "path": "/backend/readyz",
+      "status": 200,
+      "detail": null,
+      "service": "hackmidwest-api",
+      "status_label": "ok"
+    },
+    {
+      "path": "/backend/openapi.json",
+      "status": 200,
+      "new_protocol_routes_present": {
+        "/mandates/interpret": false,
+        "/shopping/start": true,
+        "/shopping/runs": false,
+        "/internal/agent-events": false,
+        "/attack-lab/namespaces/{namespace_id}/execute": false
+      }
+    },
+    {
+      "path": "/backend/attack-lab/access",
+      "status": 404,
+      "detail": "Not Found",
+      "service": null,
+      "status_label": null
+    },
+    {
+      "path": "/attack-lab",
+      "status": 200
+    },
+    {
+      "path": "/store/products/chg-65w?evil=1",
+      "status": 403,
+      "injected_content_present": false,
+      "detail": "Attack Lab execution is disabled",
+      "service": null,
+      "status_label": null
+    },
+    {
+      "path": "/mcp-leash/mcp",
+      "status": 401,
+      "detail": null,
+      "service": null,
+      "status_label": "error"
+    }
+  ]
+}

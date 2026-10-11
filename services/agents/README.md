@@ -69,8 +69,8 @@ Trace events are redacted/fsynced to persistent TRACE_SPOOL_DIR. Private UI/Lab 
 |---|---|
 | `INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, `MODEL_ID` | Akamai inference through `make_model()`. The workshop names `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL` also work, as a matched pair |
 | `AGENTS_SERVICE_TOKEN` | Required bearer for `/runs` and `/guardian/evaluate` |
-| `AGENT_TOKEN_SHOPPER` | Live runs only: bearer for the Leash MCP, run registration, and trace intake (bound to live mode) |
-| `AGENT_TOKEN_SHOPPER_SCRIPTED` | Scripted runs only: the same uses, as a separate credential bound to scripted mode |
+| `AGENT_TOKEN_SHOPPER` | Legacy CLI/test live bearer only (immutable live binding); normal UI gets API-dispatched private credentials |
+| `AGENT_TOKEN_SHOPPER_SCRIPTED` | Legacy CLI/test scripted bearer only (separate immutable scripted binding); current isolated Lab gets a private run credential |
 | `SHOPPER_AGENT_ID`, `SHOPPER_SCRIPTED_AGENT_ID` | Agent ids each credential is bound to (defaults `agt_shopper`, `agt_shopper_scripted`) |
 | `API_URL` | Required execution lease/checkpoint API and trace intake |
 | `MCP_LEASH_URL` | Leash MCP service (default `http://localhost:8002/mcp`; `MCP_URL` also accepted) |

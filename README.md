@@ -2,7 +2,7 @@
 
 The firewall between what you tell your AI to buy and what it actually tries to purchase.
 
-Human-confirmed intent → bounded Strands Graph/MCP shopping → independently verified merchant facts → deterministic one-use financial authority → genuine persisted audit/SSE. The signature2999-cent subscription and legitimate charger share merchant/currency/amount; only verified product identity/recurrence distinguishes them.
+Human-confirmed intent → bounded Strands Graph/MCP shopping → independently verified merchant facts → deterministic one-use financial authority → genuine persisted audit/SSE. The signature 2999-cent subscription and legitimate charger share merchant/currency/amount; only verified product identity/recurrence distinguishes them.
 
 Read [AGENTS.md](AGENTS.md), [spec](docs/LEASH_SPEC.md), [build plan](Leash-build-plan.md), [current handoff](api/full-app-handoff.md) and [test results](docs/FULL_APP_TEST_RESULTS.md). Existing custom JWT and Akamai Kubernetes are retained. Current source implements the actual Local Payment Rail Simulator path, with local real SDK Graph/HTTP/SQL/Redis evidence and scripted model choices. Live Akamai injection, current rollout and complete Lithic purchase path are not claimed.
 
@@ -30,4 +30,4 @@ Attack Lab defaults off. Only current authenticated allowlisted operators may en
 
 ## Validation
 
-[Full test results and commands](docs/FULL_APP_TEST_RESULTS.md) cover actual local SQL/Redis/Graph, service tests, web build/lint and route guards. [Security coverage](docs/LEASH_SECURITY_COVERAGE.md) maps all137 original+10Lab cases with exact limits/gaps; they are not147 passing tests. Hosted opt-in tests require an isolated allowlisted account, never a shared production DB. No unrestricted Lithic ASA approval is enabled until trusted checkout correlation and provider lifecycle are implemented and verified.
+[Full test results and commands](docs/FULL_APP_TEST_RESULTS.md) cover actual local SQL/Redis/Graph, service tests, web build/lint and route guards. [Security coverage](docs/LEASH_SECURITY_COVERAGE.md) maps all 137 original + 10 Lab cases with exact limits/gaps; they are not 147 passing tests. Hosted opt-in tests require an isolated allowlisted account, never a shared production DB. No unrestricted Lithic ASA approval is enabled until trusted checkout correlation and provider lifecycle are implemented and verified.

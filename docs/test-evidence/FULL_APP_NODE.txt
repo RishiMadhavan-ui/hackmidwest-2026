@@ -1,19 +1,26 @@
-(node:24708) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/hackmidwest-2026/web/src/app/store/products/%5BproductId%5D/route.ts is not specified and it doesn't parse as CommonJS.
+(node:39708) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/hackmidwest-2026/web/src/app/store/products/%5BproductId%5D/route.ts is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\hackmidwest-2026\web\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
-✔ LAB-001/002/003/004: public proxy denies attack selectors before upstream access (18.2834ms)
-✔ clean browsing forces evil=0 even against a legacy store with poison enabled (82.6087ms)
-(node:35976) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/hackmidwest-2026/web/src/app/attack-lab/operator-view/route.ts is not specified and it doesn't parse as CommonJS.
+✔ LAB-001/002/003/004: public proxy denies attack selectors before upstream access (20.6407ms)
+✔ clean browsing forces evil=0 even against a legacy store with poison enabled (105.544ms)
+(node:46452) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/hackmidwest-2026/web/next.config.ts is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to C:\hackmidwest-2026\web\package.json.
 (Use `node --trace-warnings ...` to show where the warning was created)
-✔ LAB-001/002/009: operator HTML requires backend-verified Bearer authority (88.6793ms)
-ℹ tests 3
+✔ default and malformed flags expose neither MCP service nor rail controls (4.8465ms)
+✔ Leash-only opt-in exposes the financial adapter and keeps Store MCP private (1.1199ms)
+✔ legacy both-server opt-in is explicitly broader and exposes no private rail wildcard (0.8334ms)
+(node:33576) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/hackmidwest-2026/web/src/app/attack-lab/operator-view/route.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\hackmidwest-2026\web\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ LAB-001/002/009: operator HTML requires backend-verified Bearer authority (104.6676ms)
+ℹ tests 6
 ℹ suites 0
-ℹ pass 3
+ℹ pass 6
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 557.3189
+ℹ duration_ms 663.7721

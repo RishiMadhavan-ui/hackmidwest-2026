@@ -1385,7 +1385,7 @@ The proposal `cart_hash` preserves the original four-field definition. Mandate a
 
 The candidate incorporates main at `1818a43`, including Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP implementation. [The refreshed handoff](../api/agent-interface-handoff.md) records 52 passing contract tests, captured serializer/evaluator/hook/registration outputs, 33 passing locked MCP tests and 126 passing agents tests with one restart-test failure and two live tests deselected. R01 now includes `AgentRunRegistration`; the API derives owner/version/hash/status after authenticated registration. Its accepted intake contract uses 2xx after durable commit, 409 only for identical committed duplicates, 422 for altered duplicates/validation, and 5xx for outages. Current guardian/source/trace/model and semantic mandate fields remain compatible; stored snapshots carry a separate `stored_sha256`. Aditya's endpoint authentication, semantic forwarding, pre-upload redaction, hash preservation and registration/outbox fixes are present. R02 implements mandate routes and durable ownership; R06 provenance intake remains pending. Cameron owns current `k8s/`, `scripts/`, `mise.toml` as deployment paths alongside reserved `infra/`; shared packaging, API image context, persistent trace volume, protected merchant/rail/Valkey and full live acceptance remain pending. The merged shopper now uses Store MCP and the demo is live-first; a recorded live injection remains pending. Latest separate live/scripted credentials on Aditya's branch still need to merge and be provisioned with their own mandates. Do not silently weaken requirements. Section 21 remains the original historical inspection.
 
-These schemas validate shape and content consistency, not human identity, cryptographic authenticity, source trust, current state or atomic consumption. R02 implements real signing/confirmation/persistence, R03 executes independent verification, and Cameron implements trusted merchant binding and atomic rail enforcement. No purchase route, live integration, Compose boot or end-to-end acceptance is claimed by R01. Cameron's C01 packaging and remaining runtime interface coordination remain pending; the initial absence observations in section 21 are historical snapshots.
+These schemas validate shape and content consistency, not human identity, cryptographic authenticity, source trust, current state or atomic consumption. R02 implements real signing/confirmation/persistence, R03 executes independent verification, and Cameron implements trusted merchant binding and atomic rail enforcement. No purchase route, live integration, Compose boot or end-to-end acceptance is claimed by R01. Cameron's C01 packaging and runtime interface coordination were pending in that original snapshot; section 30 and current handoff describe today's integration.
 
 ## 24. Team handoffs and unresolved dependencies
 
@@ -1798,15 +1798,15 @@ not relax any V2 financial, Stop, Graph, SSE or sandbox requirement.
    Local Payment Rail Simulator and recorded replay distinctly; never fabricate
    activity or assert settlement/charges from scripted fixtures.
 
-Current status: [the audit](ATTACK_LAB_SECURITY_AUDIT.md) confirms public deployed
-poison selection, source-level all-caller denial and retained clean browsing.
-Dedicated operator UI/API, isolation, bounds, CSRF acceptance and authorized
-execution are **missing**, not complete. Rollout and deployed checks remain
-unverified. Cases LAB-001–010 supplement the original 137 unchanged cases.
-The later `e52bbde` Mission Control merge is preserved with a disabled Lab
-placeholder; ordinary client sign-in is not operator access. Its human draft
-endpoint is separate from Lab authority. Automatic shared shopper-token binding
-requires identity review before agent/payment activation; see the focused audit.
+Current source implements verified operator UI/API, isolated namespace/demo identity,
+scoped Graph launch, fixed explicit confirmation, rate/time/body bounds, safe
+revocation/cleanup and retained evidence. Local tests and the actual Graph stack
+are listed in [the audit](ATTACK_LAB_SECURITY_AUDIT.md) and [results](FULL_APP_TEST_RESULTS.md).
+The October 11 anonymous deployed check rejects poison with 403, but its API lacks
+the new operator and natural-drafting routes; current source requires a redeploy.
+Full browser/live-model/cluster acceptance remains unverified. LAB-001–010
+supplement the original 137 unchanged cases. Shared shopper owner transfer is
+forbidden; account-owned private run credentials replace that workaround.
 
 
 ## 30. Current integrated execution protocol and acceptance boundary
@@ -1833,7 +1833,7 @@ Human draft provisioning chooses an owned live agent or creates a private accoun
 
 The API registers the human-owned launch and stores hashes of temporary worker credentials. One worker claims the run; 10-second renewable leases are bounded by a 180-second backend deadline, SDK Graph 150-second total/45-second nodes/20 node executions, three candidates, 18 model calls/60,000 estimated input tokens and 30 MCP calls. Lab SDK total is 120 seconds. Opaque per-audience/action scopes bind exact run/worker/generation and expire on authority loss. Late/stale claims, heartbeats and tools fail closed; stopped runs cannot silently resume or obtain a new registration. The process registry holds at most 16 pending/running jobs and retains only recent completed convenience records; durable history remains in PostgreSQL.
 
-Strands invokes both actual MCP transports. Backend `/execution/authorize` validates each tool action; protected API/merchant/rail check independently. Verification retrieves authenticated merchant facts, not model text. Guardian recommendation is advisory and consumes the actual verified snapshot separately from untrusted sources. Recovery uses a fresh shopper context with sanitized reasons/exclusions, never the poisoned transcript. Only a deterministic pre-payment candidate denial can recover. Unknown payment state, authorization, hard failure, Stop, expiry and missing/inconsistent authority terminate recovery.
+Strands invokes both actual MCP transports. Public proxies remain off by default; the optional Leash-only connector from #21 exposes authenticated drafts/reads on a configured HTTPS ingress, and an external static token cannot activate unscoped payment. See [connector scope](external-mcp-connector.md). Backend `/execution/authorize` validates each tool action; protected API/merchant/rail check independently. Verification retrieves authenticated merchant facts, not model text. Guardian recommendation is advisory and consumes the actual verified snapshot separately from untrusted sources. Recovery uses a fresh shopper context with sanitized reasons/exclusions, never the poisoned transcript. Only a deterministic pre-payment candidate denial can recover. Unknown payment state, authorization, hard failure, Stop, expiry and missing/inconsistent authority terminate recovery.
 
 ### 30.3 Financial state, stops and readback
 

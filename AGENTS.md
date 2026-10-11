@@ -12,7 +12,7 @@ historical snapshots remain evidence of their original revision.
 
 Read this whole file before changing anything. [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md) defines product/security requirements; this file defines coding rules and path ownership; [Leash-build-plan.md](Leash-build-plan.md) defines each human's and coding agent's tasks, dependencies, handoffs, and completion gates. Keep all three synchronized in any direction/ownership change. Preserve compatible work; inspect files before treating a proposed component as implemented.
 
-**Desired-state baseline:** the October 10 master alignment specification supplied by Rishi supersedes earlier optional recovery, agent-only orchestration, narrow event streaming, and Compose-first assumptions. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) incorporates that direction; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) preserves the historical `2e0cbe5` audit and current implementation follow-up. Requirements are not completion claims. Preserve historical snapshots as historical; use the audit for current status.
+**Desired-state baseline:** the October 10 master alignment specification supplied by Rishi supersedes earlier optional recovery, agent-only orchestration, narrow event streaming, and Compose-first assumptions. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) incorporates that direction; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) reports current status and links the preserved historical `2e0cbe5` audit. Requirements are not completion claims. Preserve historical snapshots as historical; use the audit for current status.
 
 ## What LEASH is
 
@@ -138,9 +138,17 @@ hackmidwest-2026/
     activity.py                      [E] history/SSE + dedicated rail ingestion
     audit_store.py                   [E] commit-ordered append-only events
     provenance_routes.py             [E] authenticated registered-run evidence
-    checkout_verifier.py             [E] deterministic policy; observed merchant facts remain unverified
-    payment_service.py               [E] committed preflight, configured retrieval, blocked response
+    checkout_verifier.py             [E] deterministic constraints over independently retrieved facts
+    payment_service.py               [E] legacy observations; unscoped financial activation blocked
     payment_operations.py            [E] private identities, immutable observations, scope/cancel barriers
+    mandate_interpretation.py        [E] strict proposal generation; human confirmation required
+    shopping_routes.py / execution.py [E] owned launch, credential/lease/audience/action checks
+    merchant_execution.py            [E] owned durable canonical checkout projection/freeze
+    purchase_execution.py            [E] verified grant/charge operation and original-event readback
+    reconciliation.py               [E] bounded revocation/outcome repair; never new charge
+    purchase_history.py              [E] owner-scoped immutable comparison/history
+    agent_evidence.py / workflow_events.py [E] sanitized registered-run durable evidence intake
+    attack_lab.py / lab_execution.py  [E] authenticated isolated operator scenarios/cleanup
     workflow_control.py              [E] durable stop, rail ack and provider CLOSED intents
     mandate_routes.py                [E] Rishi: scoped R02 REST routes
     mandate_service.py               [E] Rishi: transactional authority lifecycle
@@ -152,9 +160,9 @@ hackmidwest-2026/
     db.py                            [E] checksummed PostgreSQL migrations and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
-    tests/                           [E] Rishi: R01 and R02 signature/HTTP/PostgreSQL tests
+    tests/                           [E] contracts/auth/financial/Stop/operator/real SQL + full Graph stack
     Dockerfile                       [E] root build; COPY api/*.py, shared, db/migrations
-  db/migrations/                     [E] 0001–0004 identity/authority/cards/index; 0005 stop; 0006 historical pause operations; 0007 payment attempts; 0008 closure; 0009 session revocation
+  db/migrations/                     [E] 0001–0012 preserved history; forward 0013 Lab, 0014 private run credentials, 0015 isolated execution
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
@@ -181,8 +189,9 @@ hackmidwest-2026/
       tests/                         [E] handler/concurrency tests
       Dockerfile                     [E] amd64; COPY runtime modules
     store/                           [E] Cameron: simulated Volt Supply merchant
-      catalog.py / pages.py / main.py [E] catalog/listings + authenticated checkouts; charge disabled
-      tests/                         [E] catalog/auth/redaction/disabled-charge tests
+      catalog.py / pages.py / main.py [E] expanded catalog/scoped listings + authenticated checkouts
+      execution_bridge.py            [E] private API projection and protected original charge
+      tests/                         [E] catalog/auth/redaction/correlation/legacy isolation tests
       Dockerfile                     [E] amd64; COPY runtime modules + shared lithic
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
     src/app/(public)/                [E] landing, signup (name/zip), signin
@@ -231,7 +240,7 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 
 If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The original alignment audit was documentation-only and is preserved as a historical snapshot. Rishi subsequently authorized implementation of audit fixes, testing, documentation synchronization, integration and pushing on `main`, including necessary narrow cross-lane fixes. This authorization does not transfer ownership or waive frozen-contract review. Preserve teammates' integrations and document remaining owner handoffs.
 
-**Auth coordination:** Cameron leads selection/integration of Clerk, Auth.js or the agreed equivalent; Rishi retains `api/`, `db/`, `web/` path ownership and implements the backend verifier/stable identity adapter and UI wiring through a documented handoff. Current custom UUID/JWT auth is preserved until a migration is agreed. Do not install a competing framework. Existing static user/agent/mode binding is a foundation, not the desired short-lived run/mandate/version/tool/audience scope.
+**Auth coordination:** Cameron leads selection/integration of Clerk, Auth.js or the agreed equivalent; Rishi retains `api/`, `db/`, `web/` path ownership and implements the backend verifier/stable identity adapter and UI wiring through a documented handoff. Current custom UUID/JWT auth is preserved until a migration is agreed. Do not install a competing framework. Immutable legacy user/agent/mode bindings remain; normal UI workers use private expiring run/mandate/version/action/audience scope, validated by the backend.
 
 **Deployment coordination:** Kubernetes is the selected existing runtime. Extend `k8s/` and owner Dockerfiles; verify images, service authentication, TLS, network isolation, PostgreSQL/Valkey and volumes there. Compose is optional local convenience and cannot replace LKE or block acceptance merely by being absent. Source paths/ports in illustrative diagrams do not require renaming the current two MCP services.
 
@@ -239,7 +248,7 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 **Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** R01 remains the frozen contract baseline. R02 implements mandate ownership, confirmation and `/agent-runs`; API-owned confirmation/identity/version/hash remain forbidden in agent input. Aditya's merged shopper uses `services/mcp-leash/` and `services/mcp-store/`, with no direct Python shopping tools. Store evidence is inspected/redacted/snapshotted server-side and forwarded by hooks. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) distinguishes historical fixture captures from current integration status. Aditya's separate live/scripted agent identities, tokens, mandates and outbox lanes are merged. Cameron's API root build context, readiness and persistent spool configuration are merged. Actual token values, agent bindings and PVC attachment remain unverified; shared installability, protected merchant/payment flow, Graph recovery and comprehensive lifecycle emitters remain pending. The demo is live-first; no successful live injection is claimed.
+**Agent interface alignment:** R01 remains the frozen contract baseline. R02 implements mandate ownership, confirmation and `/agent-runs`; API-owned confirmation/identity/version/hash remain forbidden in agent input. Aditya's merged shopper uses `services/mcp-leash/` and `services/mcp-store/`, with no direct Python shopping tools. Store evidence is inspected/redacted/snapshotted server-side and forwarded by hooks. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) distinguishes historical fixture captures from current integration status. Aditya's separate live/scripted agent identities, tokens, mandates and outbox lanes are merged. Cameron's API root build context, readiness and persistent spool configuration are merged. Actual token values, legacy agent bindings and PVC attachment remain unverified. Protected merchant/payment flow, Graph recovery, private scope and lifecycle emitters are integrated locally; installable shared packaging is optional. Deployed/live-model acceptance remains outstanding. The demo is live-first; no successful live injection is claimed.
 
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
@@ -254,7 +263,7 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use shared `make_model()` with explicit `max_tokens`, text-only Akamai requests and guardian temperature 0. Both matched INFERENCE_* and workshop OPENAI_* environment pairs work. Structured findings/fallback remain advisory; genuine inference smoke evidence is pending.
-- MCP uses the official locked SDK's `MCPServer`, Streamable HTTP and stateless thin adaptation. Aditya owns separate `services/mcp-leash/` and `services/mcp-store/` services, both at `/mcp`, on ports 8002 and 8003. Leash forwards the agent bearer to the API for four tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. Store uses separate `STORE_MCP_TOKEN` authentication and a store-scoped merchant credential for `browse`, `create_checkout`, `complete_checkout`. The shopper loads both MCP clients and operations fail closed when unavailable. Store-only browsing rejects off-store redirects; original HTML stays in Store MCP for inspection/redacted snapshots, returning listing text plus source hashes/evidence. The API independently retrieves canonical checkout facts; Store MCP cannot create payment authority. Cameron owns the underlying merchant and deployment. Public MCP rewrites are disabled unless `ENABLE_PUBLIC_MCP_PROXY=1`; keep agent services private by default. Intentional external clients require an agreed authenticated HTTPS deployment. Only the signed ASA responder has a public rail rewrite; no `/rail/*` wildcard control proxy exists.
+- MCP uses the official locked SDK's `MCPServer`, Streamable HTTP and stateless thin adaptation. Aditya owns separate `services/mcp-leash/` and `services/mcp-store/` services, both at `/mcp`, on ports 8002 and 8003. Leash forwards the agent bearer to the API for four tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. Store uses separate `STORE_MCP_TOKEN` authentication and a store-scoped merchant credential for `browse`, `create_checkout`, `complete_checkout`. The shopper loads both MCP clients and operations fail closed when unavailable. Store-only browsing rejects off-store redirects; original HTML stays in Store MCP for inspection/redacted snapshots, returning listing text plus source hashes/evidence. The API independently retrieves canonical checkout facts; Store MCP cannot create payment authority. Cameron owns the underlying merchant and deployment. Public MCP rewrites are disabled by default. `ENABLE_PUBLIC_MCP_LEASH_PROXY=1` exposes only the authenticated Leash adapter; legacy `ENABLE_PUBLIC_MCP_PROXY=1` exposes both. Static external credentials cannot activate unscoped payment. Read [the connector handoff](docs/external-mcp-connector.md); keep agent services private by default. Intentional external clients require an agreed authenticated HTTPS deployment. Only the signed ASA responder has a public rail rewrite; no `/rail/*` wildcard control proxy exists.
 
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
@@ -299,7 +308,7 @@ Before completing implementation, run the affected service's tests, the security
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.
 
-## R02 status and deployment handoff
+## Historical R02 status and deployment handoff
 
 Historical R02 test counts below describe its original handoff. The original documentation audit ran 90 API tests; current results are in the alignment audit. merged API build-context/readiness, trace volume declarations and mode-separated credentials are no longer pending source changes. Actual cluster configuration/provisioning and the remaining integrated payment/Graph/comprehensive-event work are separate requirements.
 
