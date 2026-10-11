@@ -7,6 +7,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
+from audit_store import append_event
 from authority_errors import AuthorityError
 from leash_shared.events import AuditEvent, EventType
 from leash_shared.models import (
@@ -33,9 +34,7 @@ def audit(conn, event_type: EventType, mandate: PurchaseMandate, *, now: datetim
     "agent_id": mandate.agent_id, "status": mandate.status.value,
     **(extra or {}),
   })
-  conn.execute("INSERT INTO audit_events (event_id, user_id, record) VALUES (%s, %s, %s)",
-               (event.event_id, event.user_id, Jsonb(event.model_dump(mode="json"))))
-  conn.execute("INSERT INTO audit_deliveries (event_id) VALUES (%s)", (event.event_id,))
+  append_event(conn, event.model_dump(mode="json"))
 
 
 def transition(conn, mandate: PurchaseMandate, status: MandateStatus, now: datetime) -> None:
@@ -122,6 +121,8 @@ def require_match(mandate: PurchaseMandate, version: int, content_hash: str) -> 
 def approve(conn, mandate_id: str, principal: Principal, *, version: int,
             content_hash: str, now: datetime) -> PurchaseMandate:
   require_role(principal, "human")
+  from workflow_control import lock_user_authority
+  lock_user_authority(conn, principal.user_id)
   draft = current_mandate(conn, mandate_id, principal, now=now, lock=True)
   now = utc_now()  # Waiting for a lock must not extend the approval window.
   require_match(draft, version, content_hash)
@@ -149,6 +150,8 @@ def approve(conn, mandate_id: str, principal: Principal, *, version: int,
 def replace(conn, mandate_id: str, principal: Principal, *, version: int,
             content_hash: str, proposal: MandateProposal, now: datetime) -> PurchaseMandate:
   require_role(principal, "human")
+  from workflow_control import lock_user_authority
+  lock_user_authority(conn, principal.user_id)
   previous = current_mandate(conn, mandate_id, principal, now=now, lock=True)
   now = utc_now()
   require_match(previous, version, content_hash)
@@ -196,6 +199,8 @@ def list_mandates(conn, principal: Principal, *, status: MandateStatus | None, n
 
 def register_run(conn, registration: AgentRunRegistration, principal: Principal, *, now: datetime) -> AgentRun:
   require_role(principal, "agent")
+  from workflow_control import lock_user_authority
+  lock_user_authority(conn, principal.user_id)
   if registration.agent_mode not in principal.allowed_modes:
     raise AuthorityError(403, "Agent mode is not authorized for this credential")
   # Serializes with replacement/revocation; retries retain the original binding.

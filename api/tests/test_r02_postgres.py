@@ -119,19 +119,20 @@ class PostgresAuthorityTests(unittest.TestCase):
     response = self.request("GET","/identity",token=self.user_token)
     self.assertEqual(response.json(),{"user_id":self.owner,"role":"human"})
     with db.get_conn() as conn:
-      self.assertEqual(conn.execute("SELECT count(*) AS n FROM schema_migrations").fetchone()["n"],3)
+      self.assertEqual(conn.execute("SELECT count(*) AS n FROM schema_migrations").fetchone()["n"],len(list((Path(__file__).resolve().parents[2]/"db/migrations").glob("*.sql"))))
       mapping=conn.execute("SELECT id FROM leash_users WHERE auth_user_id=%s",(self.legacy_auth_id,)).fetchone()
       self.assertEqual(mapping["id"],leash_user_id(str(self.legacy_auth_id)))
 
   def test_signup_login_identity_and_legacy_me_keep_uuid(self):
     email = uuid4().hex + "@example.com"
-    # Exercise current signup/SQL identity mapping without reaching Lithic.
-    with patch("auth.create_account_holder", return_value={
-      "account_token":"fixture-account", "account_holder_token":"fixture-holder"}), \
-        patch("auth.create_virtual_card", return_value={
-          "card_token":"fixture-card", "last_four":"1234", "spend_limit_cents":50000}):
+    # Identity creation must work without provider configuration or issuance.
+    with patch("leash_shared.lithic.create_account_holder") as holder, \
+        patch("leash_shared.lithic.create_virtual_card") as card:
       response = self.client.post("/auth/signup",json={"email":email,"password":"r02-password-valid",
         "first_name":"Demo", "last_name":"User", "postal_code":"64101", "spend_limit_cents":50000})
+      holder.assert_not_called()
+      card.assert_not_called()
+    self.assertFalse(response.json()["user"]["lithic_linked"])
     self.assertEqual(response.status_code,201,response.text)
     payload = response.json()
     identity = self.request("GET","/identity",token=payload["access_token"])
@@ -139,6 +140,100 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(self.request("GET","/auth/me",token=payload["access_token"]).json()["id"],payload["user"]["id"])
     self.assertEqual(self.client.post("/auth/login",json={"email":email,"password":"r02-password-valid"}).status_code,200)
     self.assertEqual(self.client.post("/auth/login",json={"email":email,"password":"wrong"}).status_code,401)
+
+  def registered_trace(self):
+    mandate = self.active()
+    registration = self.run_body(mandate)
+    self.assertEqual(self.request("POST","/agent-runs",body=registration).status_code,201)
+    return {"type":"agent.tool.before", "event_id":"evt_"+uuid4().hex,
+      "run_id":registration["id"],"agent_id":self.agent_id,"agent_mode":"live",
+      "timestamp":utc_now().isoformat(),"tool_name":"browse","tool_use_id":"tool_1",
+      "tool_arguments":{"authorization":"Bearer test-sensitive","pan":"4111111111111111"},
+      "trust_classification":"trusted_checkout"}
+
+  def test_provenance_persist_redact_scope_and_idempotency(self):
+    trace = self.registered_trace()
+    self.assertEqual(self.request("POST","/provenance",body=trace).status_code,201)
+    self.assertEqual(self.request("POST","/provenance",body=trace).status_code,409)
+    self.assertEqual(self.request("POST","/provenance",body={**trace,"tool_name":"request_payment"}).status_code,422)
+    history = self.request("GET","/activity",token=self.user_token).json()["events"]
+    event = next(e for e in history if e["event_id"] == trace["event_id"])
+    self.assertEqual(event["data"]["tool_arguments"]["pan"],"[REDACTED]")
+    self.assertEqual(event["data"]["trust_classification"],"agent_proposal")
+    self.assertFalse(event["data"]["authoritative"])
+    other = self.request("GET","/activity",token=self.other_user_token).json()["events"]
+    self.assertNotIn(trace["event_id"],[e["event_id"] for e in other])
+    self.assertEqual(self.request("GET","/activity").status_code,401)
+
+  def test_provenance_rejects_foreign_run_agent_mode_and_excess_size(self):
+    trace = self.registered_trace()
+    for changes, expected in [({"run_id":"run_unknown"},404),({"agent_id":self.other_agent_id},422),
+                              ({"agent_mode":"scripted"},422),({"type":"payment.approved"},422)]:
+      response=self.request("POST","/provenance",body={**trace,**changes})
+      self.assertEqual(response.status_code,expected,response.text)
+    self.assertEqual(self.request("POST","/provenance",body=trace,token=self.other_agent_token).status_code,404)
+    self.assertEqual(self.request("POST","/provenance",body={**trace,"tool_arguments":{"large":"x"*131072}}).status_code,413)
+
+  def test_kill_switch_is_human_scoped_durable_and_truthful_on_outage(self):
+    trace = self.registered_trace()
+    self.assertEqual(self.request("POST","/killswitch",body={"on":True}).status_code,401)
+    with patch("workflow_control.stop_rail",return_value={"status":"pending","reason":"test outage"}):
+      stopped = self.request("POST","/killswitch",token=self.user_token,body={"on":True})
+    self.assertEqual(stopped.status_code,200,stopped.text)
+    self.assertEqual(stopped.json()["status"],"pending_enforcement")
+    self.assertFalse(stopped.json()["previous_authorizations_reversed"])
+    self.assertEqual(self.request("GET","/killswitch",token=self.user_token).json(),{"on":True,"rail_enforced":False})
+    self.assertEqual(self.request("GET","/killswitch",token=self.other_user_token).json()["on"],False)
+    control=self.request("GET",f'/agent-runs/{trace["run_id"]}/control').json()
+    self.assertEqual(control,{"run_id":trace["run_id"],"cancel_requested":True,"authority_current":False})
+    self.assertEqual(self.request("GET",f'/agent-runs/{trace["run_id"]}/control',token=self.other_agent_token).status_code,404)
+    # Late traces remain deliverable; cancellation must preserve its evidence.
+    self.assertEqual(self.request("POST","/provenance",body=trace).status_code,201)
+    draft=self.draft()
+    self.assertEqual(self.request("POST",f'/mandates/{draft["id"]}/approve',token=self.user_token,
+                                 body={**self.binding(draft),"confirmed":True}).status_code,409)
+    self.assertEqual(self.request("POST","/agent-runs",body=self.run_body(draft)).status_code,409)
+    with patch("workflow_control.stop_rail",return_value={"status":"enforced","unused_grants_revoked":2}):
+      retried=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
+    self.assertEqual(retried.json()["status"],"stopped")
+    self.assertTrue(self.request("GET","/killswitch",token=self.user_token).json()["rail_enforced"])
+
+  def test_actual_http_sse_reconnect_replays_without_starting_runs(self):
+    import threading
+    import time
+    import httpx
+    import uvicorn
+    trace = self.registered_trace()
+    self.assertEqual(self.request("POST","/provenance",body=trace).status_code,201)
+    history=self.request("GET","/activity",token=self.user_token).json()["events"]
+    before=len(history)
+    cursor=history[-2]["sequence"]
+    server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=0,log_level="error",timeout_graceful_shutdown=1))
+    thread=threading.Thread(target=server.run,daemon=True)
+    thread.start()
+    try:
+      deadline=time.monotonic()+5
+      while not server.started and time.monotonic()<deadline:
+        time.sleep(0.02)
+      self.assertTrue(server.started)
+      port=server.servers[0].sockets[0].getsockname()[1]
+      with httpx.Client(base_url=f"http://127.0.0.1:{port}",timeout=3) as client:
+        headers={"Authorization":"Bearer "+self.user_token,"Last-Event-ID":str(cursor)}
+        with client.stream("GET","/activity/stream",headers=headers) as response:
+          self.assertEqual(response.status_code,200)
+          frames=[]
+          for line in response.iter_lines():
+            frames.append(line)
+            if line.startswith("data:") and trace["event_id"] in line:
+              break
+        self.assertIn("id: "+str(history[-1]["sequence"]),frames)
+        self.assertEqual(client.get("/activity/stream",headers={**headers,"Last-Event-ID":"bad"}).status_code,422)
+        self.assertEqual(client.get("/activity/stream").status_code,401)
+      self.assertEqual(len(self.request("GET","/activity",token=self.user_token).json()["events"]),before)
+    finally:
+      server.should_exit=True
+      thread.join(3)
+      self.assertFalse(thread.is_alive())
 
   def test_agent_cannot_use_any_human_mutation_or_history_route(self):
     draft = self.draft()

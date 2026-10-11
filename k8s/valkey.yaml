@@ -1,5 +1,16 @@
 # In-cluster Valkey for grant / idempotency / kill-switch state (C01/C04).
-# Ephemeral: demo-friendly; restart loses in-flight grants (acceptable for hackathon).
+# AOF + PVC preserve consumed grants, revocation and original decisions on restart.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-state
+  namespace: hackmidwest
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,6 +18,8 @@ metadata:
   namespace: hackmidwest
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: valkey
@@ -18,7 +31,10 @@ spec:
       containers:
         - name: valkey
           image: valkey/valkey:8-alpine
-          args: ["--save", "", "--appendonly", "no"]
+          args: ["--save", "", "--appendonly", "yes", "--appendfsync", "always", "--dir", "/data"]
+          volumeMounts:
+            - name: state
+              mountPath: /data
           ports:
             - containerPort: 6379
           readinessProbe:
@@ -37,6 +53,10 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: valkey-state
 ---
 apiVersion: v1
 kind: Service

@@ -137,6 +137,14 @@ class CardAuthorityTests(unittest.TestCase):
 
 
 class InternalLithicIntegrationTests(unittest.TestCase):
+  def test_non_sandbox_endpoints_rejected_before_http_or_credentials(self):
+    for endpoint in ("production", "https://api.lithic.com", "http://attacker.invalid", "sandbbox", ""):
+      with patch.dict(os.environ,{"LITHIC_ENVIRONMENT":endpoint},clear=True), \
+          patch("leash_shared.lithic.httpx.Client") as client:
+        with self.assertRaises(lithic.LithicError):
+          lithic.create_account_holder("test@example.com","Demo","User","64101")
+        client.assert_not_called()
+
   def test_provider_wrapper_remains_available_for_future_verified_backend_issuance(self):
     # Provider transport is mocked; this is adapter compatibility, not grant enforcement.
     with patch.dict(os.environ,{"LITHIC_API_KEY":"fixture-provider-key"},clear=True), \

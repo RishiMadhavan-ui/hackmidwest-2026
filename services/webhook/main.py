@@ -6,14 +6,20 @@ Lithic ASA adapter lands later behind the same decide()/handler path.
 from __future__ import annotations
 
 import os
+import hmac
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 import time
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from leash_shared.models import AuthorizationGrant, Contract, Cents, Text, Mcc, Sha256, UserId
 from decide import GrantSnapshot
 from handler import StoreUnavailable, attempt_from_mapping, authorize
 from store import MemoryGrantStore, RedisGrantStore
@@ -43,7 +49,7 @@ def require_internal(
   if not authorization or not authorization.lower().startswith("bearer "):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
   token = authorization.split(" ", 1)[1].strip()
-  if token != expected:
+  if len(expected) < 32 or not hmac.compare_digest(token, expected):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credential")
 
 
@@ -56,34 +62,30 @@ def get_store() -> MemoryGrantStore | RedisGrantStore:
   return _store
 
 
-class AuthorizeBody(BaseModel):
-  event_id: str = Field(min_length=1, max_length=128)
+def require_merchant(authorization: Annotated[str | None, Header()] = None):
+  expected = os.getenv("WEBHOOK_CHARGE_TOKEN", "").strip()
+  if len(expected) < 32 or expected == _internal_token():
+    raise HTTPException(503, "Distinct merchant charge credential is not configured")
+  if not authorization or not hmac.compare_digest(authorization, "Bearer " + expected):
+    raise HTTPException(401, "Invalid merchant credential")
+
+
+class AuthorizeBody(Contract):
+  event_id: Text = Field(max_length=128)
   request_type: str = "AUTHORIZATION"
-  instrument_token: str = Field(min_length=1, max_length=128)
-  descriptor: str = Field(min_length=1, max_length=200)
-  mcc: str = Field(min_length=2, max_length=8)
-  amount_cents: int = Field(ge=0)
-  currency: str = Field(min_length=3, max_length=3)
-  now: datetime | None = None
+  instrument_token: Text = Field(max_length=128)
+  descriptor: Text = Field(max_length=200)
+  mcc: Mcc
+  amount_cents: Cents
+  currency: Literal["USD"]
+  checkout_id: Text
+  checkout_hash: Sha256
+  merchant_binding_id: Text
 
 
-class GrantBody(BaseModel):
-  grant_id: str
-  status: str = "ISSUED"
-  mandate_id: str
-  mandate_version: int = Field(ge=1)
-  instrument_token: str
-  descriptor: str
-  mcc: str
-  authorized_amount_cents: int = Field(ge=0)
-  currency: str = "USD"
-  expires_at: datetime
-  mandate_status: str = "active"
-  current_mandate_version: int | None = None
-
-
-class KillswitchBody(BaseModel):
-  on: bool
+class KillswitchBody(Contract):
+  user_id: UserId
+  on: Literal[True]
 
 
 @app.on_event("startup")
@@ -93,9 +95,12 @@ def on_startup() -> None:
   if url:
     _store = RedisGrantStore(url)
     _store_mode = "valkey"
-  else:
+  elif os.getenv("ALLOW_MEMORY_RAIL") == "1":
     _store = MemoryGrantStore()
     _store_mode = "memory"
+  else:
+    _store = None
+    _store_mode = "valkey"
 
 
 @app.get("/health")
@@ -118,14 +123,14 @@ def readyz() -> JSONResponse:
 @app.post("/local/authorize")
 def local_authorize(
   body: AuthorizeBody,
-  _: Annotated[None, Depends(require_internal)],
+  _: Annotated[None, Depends(require_merchant)],
   store: Annotated[MemoryGrantStore | RedisGrantStore, Depends(get_store)],
 ) -> dict[str, Any]:
   """Labeled local payment rail. Same decide() path Lithic ASA will use."""
   started = time.perf_counter()
-  attempt = attempt_from_mapping(body.model_dump(exclude={"now"}))
+  attempt = attempt_from_mapping(body.model_dump())
   try:
-    decision = authorize(store, attempt, now=body.now)
+    decision = authorize(store, attempt)
   except StoreUnavailable:
     decision_ms = round((time.perf_counter() - started) * 1000, 2)
     return {
@@ -146,26 +151,37 @@ def local_authorize(
 
 @app.put("/internal/grants")
 def put_grant(
-  body: GrantBody,
+  body: AuthorizationGrant,
   _: Annotated[None, Depends(require_internal)],
   store: Annotated[MemoryGrantStore | RedisGrantStore, Depends(get_store)],
 ) -> dict[str, str]:
   """Operator/API seeding of a short-lived grant into Valkey. Not a public mint."""
+  from datetime import timezone
+
+  if body.status.value != "ISSUED" or body.expires_at <= datetime.now(timezone.utc):
+    raise HTTPException(422, "Only an unexpired verified ISSUED grant may be installed")
   grant = GrantSnapshot(
     grant_id=body.grant_id,
-    status=body.status.upper(),
+    status=body.status.value,
     mandate_id=body.mandate_id,
     mandate_version=body.mandate_version,
-    instrument_token=body.instrument_token,
-    descriptor=body.descriptor,
+    instrument_token=body.payment_instrument_id,
+    descriptor=body.merchant_descriptor,
     mcc=body.mcc,
     authorized_amount_cents=body.authorized_amount_cents,
-    currency=body.currency.upper(),
+    currency=body.currency,
     expires_at=body.expires_at,
+    user_id=body.user_id,
+    mandate_hash=body.mandate_hash,
+    checkout_id=body.verified_checkout_id,
+    checkout_hash=body.verified_checkout_hash,
+    merchant_binding_id=body.merchant_binding_id,
   )
-  store.put_grant(grant)
-  version = body.current_mandate_version or body.mandate_version
-  store.set_mandate(body.mandate_id, status=body.mandate_status, version=version)
+  try:
+    store.set_mandate(body.mandate_id, status="active", version=body.mandate_version)
+    store.put_grant(grant)
+  except ValueError:
+    raise HTTPException(409, "Grant or mandate authority conflicts with existing state") from None
   return {"status": "ok", "grant_id": grant.grant_id}
 
 
@@ -175,5 +191,10 @@ def set_killswitch(
   _: Annotated[None, Depends(require_internal)],
   store: Annotated[MemoryGrantStore | RedisGrantStore, Depends(get_store)],
 ) -> dict[str, Any]:
-  store.set_killswitch(body.on)
-  return {"killswitch_on": body.on}
+  revoked = store.stop_user(body.user_id)
+  return {
+    "user_id": body.user_id,
+    "killswitch_on": True,
+    "unused_grants_revoked": revoked,
+    "previous_authorizations_reversed": False,
+  }

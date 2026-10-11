@@ -29,6 +29,7 @@ REASON_PRECEDENCE = (
   "mcc_mismatch",
   "currency_mismatch",
   "amount_mismatch",
+  "checkout_binding_mismatch",
 )
 
 
@@ -41,6 +42,9 @@ class AuthorizationAttempt:
   mcc: str
   amount_cents: int
   currency: str
+  checkout_id: str = ""
+  checkout_hash: str = ""
+  merchant_binding_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,11 @@ class GrantSnapshot:
   authorized_amount_cents: int
   currency: str
   expires_at: datetime
+  user_id: str = ""
+  mandate_hash: str = ""
+  checkout_id: str = ""
+  checkout_hash: str = ""
+  merchant_binding_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -98,6 +107,8 @@ def decide(
     reasons.append("no_grant")
   else:
     status = grant.status.upper()
+    if status not in {"ISSUED", "REVOKED", "CONSUMED", "EXPIRED"}:
+      return Decision(result="DECLINED", reason="invalid_grant_state")
     if status == "REVOKED":
       reasons.append("grant_revoked")
     if status == "CONSUMED":
@@ -124,6 +135,15 @@ def decide(
       reasons.append("currency_mismatch")
     if authorization.amount_cents != grant.authorized_amount_cents:
       reasons.append("amount_mismatch")
+
+    # Legacy pure fixtures have no checkout binding. The HTTP adapter requires
+    # a complete R01 AuthorizationGrant; bound grants always enforce correlation.
+    if grant.checkout_id and (
+      authorization.checkout_id != grant.checkout_id or
+      authorization.checkout_hash != grant.checkout_hash or
+      authorization.merchant_binding_id != grant.merchant_binding_id
+    ):
+      reasons.append("checkout_binding_mismatch")
 
   if not reasons:
     return Decision(result="APPROVED", reason="approved")

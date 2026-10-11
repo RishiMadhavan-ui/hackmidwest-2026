@@ -14,14 +14,15 @@ from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
+from audit_store import append_event
+from authority_errors import AuthorityError
 from db import get_conn
 from leash_shared.events import AuditEvent, EventType, sanitize_event_data
-from principals import Principal, ensure_user, leash_user_id, require_human
+from principals import Credentials, Principal, ensure_user, human_from_credentials, leash_user_id, require_human
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -70,12 +71,10 @@ def emit_activity(
   now = at or datetime.now(timezone.utc)
   payload = dict(data or {})
 
-  try:
-    known = EventType(event_type)
-    event = AuditEvent(type=known, at=now, user_id=user_id, data=payload)
+  if event_type in EventType._value2member_map_:
+    event = AuditEvent(type=EventType(event_type), at=now, user_id=user_id, data=payload)
     record = event.model_dump(mode="json")
-    event_id = event.event_id
-  except ValueError:
+  else:
     event_id = "evt_" + uuid4().hex
     record = {
       "event_id": event_id,
@@ -85,14 +84,7 @@ def emit_activity(
       "data": sanitize_event_data(payload),
     }
 
-  conn.execute(
-    "INSERT INTO audit_events (event_id, user_id, record) VALUES (%s, %s, %s)",
-    (event_id, user_id, Jsonb(record)),
-  )
-  conn.execute(
-    "INSERT INTO audit_deliveries (event_id) VALUES (%s) ON CONFLICT DO NOTHING",
-    (event_id,),
-  )
+  append_event(conn, record)
   return record
 
 
@@ -121,7 +113,7 @@ def _row_to_out(row: dict) -> ActivityEventOut:
   if isinstance(at, datetime):
     at = _iso(at)
   elif not isinstance(at, str):
-    at = _iso(datetime.now(timezone.utc))
+    raise ValueError("Stored activity timestamp is missing")
   return ActivityEventOut(
     sequence=int(row["sequence"]),
     event_id=str(record.get("event_id") or row["event_id"]),
@@ -167,17 +159,35 @@ def get_activity(
 
 @router.get("/stream")
 async def stream_activity(
+  request: Request,
   principal: Annotated[Principal, Depends(require_human)],
-  after: Annotated[int, Query(ge=0)] = 0,
+  credentials: Credentials,
+  after: Annotated[int | None, Query(ge=0)] = None,
+  last_event_id: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
   """SSE: replay from `after`, then poll Postgres for new rows (Bearer auth via fetch)."""
   user_id = principal.user_id
+  try:
+    cursor_start = after if after is not None else int(last_event_id or "0")
+    if not 0 <= cursor_start <= 9223372036854775807:
+      raise ValueError()
+  except ValueError:
+    raise AuthorityError(422, "Invalid replay cursor") from None
 
   async def generate():
-    cursor = after
+    cursor = cursor_start
+    last_auth = 0.0
     last_ping = asyncio.get_event_loop().time()
     yield f"event: ready\ndata: {json.dumps({'user_id': user_id, 'after': cursor})}\n\n"
-    while True:
+    while not await request.is_disconnected():
+      tick = asyncio.get_running_loop().time()
+      if tick - last_auth >= STREAM_KEEPALIVE_SECONDS:
+        try:
+          await asyncio.to_thread(human_from_credentials, credentials)
+        except Exception:
+          yield 'event: unavailable\ndata: {"detail":"Session or database unavailable"}\n\n'
+          return
+        last_auth = tick
       batch = await asyncio.to_thread(
         list_activity, user_id, after_sequence=cursor, limit=MAX_LIMIT
       )

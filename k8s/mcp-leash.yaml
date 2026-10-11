@@ -18,10 +18,13 @@ spec:
         - name: mcp-leash
           image: ${MCP_LEASH_IMAGE}
           imagePullPolicy: Always
-          envFrom:
-            - secretRef:
-                name: app-env
           env:
+            - name: MCP_ALLOWED_HOSTS
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: MCP_ALLOWED_HOSTS
+                  optional: true
             - name: API_URL
               value: http://api:8000
           ports:

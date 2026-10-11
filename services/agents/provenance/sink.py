@@ -55,4 +55,4 @@ def emit_all(sinks: list[Sink], event: dict[str, Any]) -> None:
     try:
       sink.emit(clean)
     except Exception:  # one broken sink must not stop the others or the run
-      log.exception("trace sink %s failed", type(sink).__name__)
+      log.warning("trace sink %s failed", type(sink).__name__)

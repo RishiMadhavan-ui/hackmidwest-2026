@@ -14,6 +14,8 @@ from authority_errors import AuthorityError, DatabaseUnavailable
 from cards import router as cards_router
 from db import init_db
 from mandate_routes import router as mandate_router
+from provenance_routes import router as provenance_router
+from workflow_control import router as workflow_router
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -37,6 +39,8 @@ app.include_router(auth_router)
 app.include_router(cards_router)
 app.include_router(mandate_router)
 app.include_router(activity_router)
+app.include_router(provenance_router)
+app.include_router(workflow_router)
 
 
 @app.exception_handler(AuthorityError)
@@ -61,10 +65,10 @@ def invalid_request(_, exc):
 def on_startup() -> None:
     app.state.schema_ready = False
     if not os.getenv("DATABASE_URL", "").strip():
-        logger.warning("DATABASE_URL unset — auth routes will fail until Postgres is configured")
+        logger.warning("DATABASE_URL unset - auth routes will fail until Postgres is configured")
         return
     if not os.getenv("JWT_SECRET", "").strip():
-        logger.warning("JWT_SECRET unset — auth token minting will fail until configured")
+        logger.warning("JWT_SECRET unset - auth token minting will fail until configured")
     try:
         init_db()
         app.state.schema_ready = True

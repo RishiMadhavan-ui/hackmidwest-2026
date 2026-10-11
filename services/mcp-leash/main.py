@@ -89,9 +89,9 @@ async def _call_api(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     async with httpx.AsyncClient(base_url=_api_url(), timeout=API_TIMEOUT_SECONDS) as client:
       res = await client.request(method, path, headers=headers, **kwargs)
   except httpx.TimeoutException:
-    return {"status": "error", "reason": "Leash api timed out. Try check_status or retry later."}
+    return {"status": "error", "reason": "Leash api timed out; outcome unknown. Do not retry purchases or request new credentials. Reconcile the same operation before proceeding."}
   except httpx.HTTPError:
-    return {"status": "error", "reason": "Leash api is unreachable. Retry later."}
+    return {"status": "error", "reason": "Leash api is unreachable; outcome unknown. Do not retry financial operations until reconciled."}
 
   try:
     body = res.json()

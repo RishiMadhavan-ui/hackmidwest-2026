@@ -18,10 +18,19 @@ spec:
         - name: webhook
           image: ${WEBHOOK_IMAGE}
           imagePullPolicy: Always
-          envFrom:
-            - secretRef:
-                name: app-env
           env:
+            - name: WEBHOOK_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: WEBHOOK_INTERNAL_TOKEN
+                  optional: true
+            - name: WEBHOOK_CHARGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: WEBHOOK_CHARGE_TOKEN
+                  optional: true
             - name: VALKEY_URL
               value: redis://valkey:6379/0
             - name: API_URL

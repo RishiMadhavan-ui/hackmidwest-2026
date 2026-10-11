@@ -101,7 +101,7 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   docker push "$MCP_LEASH_IMAGE"
   "$BUILDX" build --platform "$PLATFORM" -t "$MCP_STORE_IMAGE" --load "$REPO/services/mcp-store"
   docker push "$MCP_STORE_IMAGE"
-  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/webhook/Dockerfile" -t "$WEBHOOK_IMAGE" --load "$REPO/services/webhook"
+  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/webhook/Dockerfile" -t "$WEBHOOK_IMAGE" --load "$REPO"
   docker push "$WEBHOOK_IMAGE"
   echo "$(elapsed): images pushed ($PLATFORM)."
 else
@@ -143,6 +143,7 @@ fi
 # 7. Apply workloads. Restart on rerun so new images/env are picked up.
 existed=$(kubectl -n "$NAMESPACE" get deployment api -o name 2>/dev/null || true)
 kubectl apply -f k8s/valkey.yaml
+kubectl apply -f k8s/financial-boundaries.yaml
 render_manifest k8s/webhook.yaml | kubectl apply -f -
 render_manifest k8s/agents.yaml | kubectl apply -f -
 render_manifest k8s/mcp-leash.yaml | kubectl apply -f -

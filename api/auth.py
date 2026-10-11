@@ -13,8 +13,6 @@ from pydantic import BaseModel, EmailStr, Field
 from db import get_conn
 from leash_shared.lithic import (
     LithicError,
-    create_account_holder,
-    create_virtual_card,
     get_spend_limit_balance,
 )
 
@@ -49,10 +47,11 @@ class SignupRequest(BaseModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     postal_code: str = Field(min_length=3, max_length=12)
-    spend_limit_cents: int = Field(
+    spend_limit_cents: int | None = Field(
+        default=None,
         ge=MIN_SPEND_LIMIT_CENTS,
         le=MAX_SPEND_LIMIT_CENTS,
-        description="Forever virtual-card spend limit in integer cents",
+        description="Deprecated compatibility field; never creates spending authority",
     )
 
 
@@ -252,72 +251,11 @@ def signup(body: SignupRequest) -> TokenResponse:
             """,
             (user_id, email, password_hash, first_name, last_name, postal_code),
         )
-        conn.commit()
-
-    try:
-        tokens = create_account_holder(
-            email,
-            first_name,
-            last_name,
-            postal_code,
-            external_id=str(user_id),
-        )
-        card = create_virtual_card(
-            tokens["account_token"],
-            spend_limit_cents=body.spend_limit_cents,
-            memo=f"LEASH sandbox · {email}",
-        )
-    except LithicError as exc:
-        delete_user(user_id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Lithic sandbox provisioning failed: {exc}",
-        ) from exc
-
-    with get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE users SET
-                lithic_account_token = %s,
-                lithic_account_holder_token = %s,
-                lithic_card_token = %s,
-                lithic_card_last_four = %s,
-                lithic_spend_limit_cents = %s
-            WHERE id = %s
-            """,
-            (
-                tokens["account_token"],
-                tokens["account_holder_token"],
-                card["card_token"],
-                card.get("last_four") or None,
-                int(card["spend_limit_cents"]),
-                user_id,
-            ),
-        )
-        # Lazy import avoids auth ↔ activity ↔ principals cycle at module load.
+        # Account creation is identity only. Spending needs a confirmed mandate,
+        # independent checkout and one-use grant; never call the provider here.
         from activity import ACCOUNT_CREATED, emit_for_auth_user
-        from leash_shared.events import EventType
-
-        auth_id = str(user_id)
-        emit_for_auth_user(
-            conn,
-            auth_user_id=auth_id,
-            event_type=ACCOUNT_CREATED,
-            data={"email": email, "provider": "lithic_sandbox"},
-        )
-        emit_for_auth_user(
-            conn,
-            auth_user_id=auth_id,
-            event_type=EventType.CARD_ISSUED.value,
-            data={
-                "last_four": card.get("last_four") or None,
-                "spend_limit_cents": int(card["spend_limit_cents"]),
-                "spend_limit_duration": "FOREVER",
-                "card_type": "VIRTUAL",
-                "source": "signup",
-                "provider": "lithic_sandbox",
-            },
-        )
+        emit_for_auth_user(conn, auth_user_id=str(user_id), event_type=ACCOUNT_CREATED,
+                           data={"email": email, "provider": "leash_auth"})
         conn.commit()
 
     row = get_user_by_id(str(user_id))

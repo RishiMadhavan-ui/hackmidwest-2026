@@ -30,10 +30,67 @@ spec:
         - name: agents
           image: ${AGENTS_IMAGE}
           imagePullPolicy: Always
-          envFrom:
-            - secretRef:
-                name: app-env
           env:
+            - name: AGENTS_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: AGENTS_SERVICE_TOKEN
+                  optional: true
+            - name: AGENT_TOKEN_SHOPPER
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: AGENT_TOKEN_SHOPPER
+                  optional: true
+            - name: AGENT_TOKEN_SHOPPER_SCRIPTED
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: AGENT_TOKEN_SHOPPER_SCRIPTED
+                  optional: true
+            - name: STORE_MCP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: STORE_MCP_TOKEN
+                  optional: true
+            - name: OPENAI_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: OPENAI_BASE_URL
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: OPENAI_API_KEY
+                  optional: true
+            - name: CHAT_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: CHAT_MODEL
+                  optional: true
+            - name: INFERENCE_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: INFERENCE_BASE_URL
+                  optional: true
+            - name: INFERENCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: INFERENCE_API_KEY
+                  optional: true
+            - name: MODEL_ID
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: MODEL_ID
+                  optional: true
             - name: API_URL
               value: http://api:8000
             - name: AGENTS_URL

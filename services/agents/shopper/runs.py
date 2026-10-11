@@ -180,7 +180,7 @@ class RunManager:
       record["output"] = redact_text(output)
       record["status"] = "completed"
     except Exception as exc:  # a failed run is reported, not raised
-      log.exception("run %s failed", run_id)
+      log.warning("run %s failed (%s)", run_id, type(exc).__name__)
       record["error"] = redact_text(f"{type(exc).__name__}: {exc}")
       record["status"] = "failed"
     finally:

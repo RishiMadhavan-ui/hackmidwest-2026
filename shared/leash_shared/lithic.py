@@ -51,12 +51,8 @@ def _api_key() -> str:
 
 def _base_url() -> str:
     env = os.environ.get("LITHIC_ENVIRONMENT", "sandbox").strip().lower()
-    if env in ("", "sandbox"):
-        return "https://sandbox.lithic.com"
-    if env == "production":
-        return "https://api.lithic.com"
-    if env.startswith("http://") or env.startswith("https://"):
-        return env.rstrip("/")
+    if env != "sandbox":
+        raise LithicError("Only LITHIC_ENVIRONMENT=sandbox is supported")
     return "https://sandbox.lithic.com"
 
 
@@ -157,7 +153,7 @@ def create_virtual_card(
 
     By default returns token metadata only (no PAN/CVV). When
     ``include_payment_details=True`` (sandbox once-only delivery to an
-    authorized caller), pan/exp/cvv are included in the return dict — never log them.
+    authorized caller), pan/exp/cvv are included in the return dict â€” never log them.
     """
     limit = default_spend_limit_cents() if spend_limit_cents is None else spend_limit_cents
     if limit < 0:

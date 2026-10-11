@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { KillSwitch } from "@/components/kill-switch";
 import { ActivityFeed } from "@/components/activity-feed";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,7 @@ export default function ProfilePage() {
   const router = useRouter();
   const [balance, setBalance] = useState<Balance | null>(null);
   const [balanceError, setBalanceError] = useState<string | null>(null);
-  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceLoading, setBalanceLoading] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
@@ -35,10 +36,8 @@ export default function ProfilePage() {
   }, [loading, user, router]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.lithic_linked) return;
     let cancelled = false;
-    setBalanceLoading(true);
-    setBalanceError(null);
     fetchBalance()
       .then((b) => {
         if (!cancelled) setBalance(b);
@@ -92,6 +91,7 @@ export default function ProfilePage() {
             <CardDescription>Your sandbox identity</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
+            <KillSwitch />
             <dl className="grid gap-3 text-sm">
               {displayName ? (
                 <div className="grid gap-1">

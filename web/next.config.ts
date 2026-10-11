@@ -26,14 +26,14 @@ const nextConfig: NextConfig = {
         source: "/backend/:path*",
         destination: `${apiOrigin}/:path*`,
       },
-      {
+      ...(process.env.ENABLE_PUBLIC_MCP_PROXY === "1" ? [{
         source: "/mcp-leash/:path*",
         destination: `${mcpLeashOrigin}/:path*`,
       },
       {
         source: "/mcp-store/:path*",
         destination: `${mcpStoreOrigin}/:path*`,
-      },
+      }] : []),
     ];
   },
 };

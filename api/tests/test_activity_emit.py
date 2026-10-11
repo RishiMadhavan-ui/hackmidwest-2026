@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import unittest
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import runtime  # noqa: F401,E402
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 

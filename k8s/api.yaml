@@ -19,14 +19,87 @@ spec:
         - name: api
           image: ${API_IMAGE}
           imagePullPolicy: Always
-          envFrom:
-            - secretRef:
-                name: app-env
           env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: DATABASE_URL
+                  optional: true
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: JWT_SECRET
+                  optional: true
+            - name: JWT_EXPIRE_MINUTES
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: JWT_EXPIRE_MINUTES
+                  optional: true
+            - name: MANDATE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: MANDATE_SIGNING_KEY
+                  optional: true
+            - name: USER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: USER_TOKEN
+                  optional: true
+            - name: DEMO_USER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: DEMO_USER_ID
+                  optional: true
+            - name: CORS_ORIGINS
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: CORS_ORIGINS
+                  optional: true
+            - name: LITHIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LITHIC_API_KEY
+                  optional: true
+            - name: LITHIC_ENVIRONMENT
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LITHIC_ENVIRONMENT
+                  optional: true
+            - name: WEBHOOK_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: WEBHOOK_INTERNAL_TOKEN
+                  optional: true
+            - name: OBJ_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: OBJ_BUCKET
+                  optional: true
+            - name: STORE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: STORE_API_TOKEN
+                  optional: true
             - name: AGENTS_URL
               value: http://agents:8000
             - name: API_URL
               value: http://api:8000
+            - name: WEBHOOK_URL
+              value: http://webhook:8000
+            - name: STORE_URL
+              value: http://store:8000
           ports:
             - containerPort: 8000
           readinessProbe:

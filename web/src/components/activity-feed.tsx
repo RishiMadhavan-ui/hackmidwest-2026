@@ -121,19 +121,17 @@ export function ActivityFeed() {
 
   useEffect(() => {
     seen.current = new Set();
-    setEvents([]);
-    setError(null);
 
     const stop = streamActivity({
       after: 0,
-      onStatus: setStatus,
+      onStatus: (next) => { setStatus(next); if (next === "live") setError(null); },
       onEvent: (event) => {
         if (seen.current.has(event.event_id)) return;
         seen.current.add(event.event_id);
         setEvents((prev) => {
           const next = [...prev, event];
           next.sort((a, b) => a.sequence - b.sequence);
-          return next;
+          return next.slice(-500);
         });
       },
       onError: (err) => setError(err.message),
@@ -189,7 +187,7 @@ export function ActivityFeed() {
           <p className="py-8 text-center text-sm text-muted-foreground">
             {status === "connecting"
               ? "Loading activity…"
-              : "No activity yet — sign up, sign in, or issue a card to see events here."}
+              : "No recorded activity yet."}
           </p>
         ) : null}
 

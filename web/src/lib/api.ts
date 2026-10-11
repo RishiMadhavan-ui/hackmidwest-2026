@@ -99,8 +99,8 @@ export type SignupInput = {
   first_name: string;
   last_name: string;
   postal_code: string;
-  /** Forever virtual-card spend limit in integer cents. */
-  spend_limit_cents: number;
+  /** Deprecated compatibility field; signup does not issue a card. */
+  spend_limit_cents?: number;
 };
 
 export async function signup(input: SignupInput) {
@@ -163,16 +163,7 @@ export async function fetchActivity(
   return apiFetch<ActivityHistory>(`/activity?${params}`, {}, token);
 }
 
-const ACTIVITY_POLL_MS = 1500;
-
-/**
- * Live activity for the profile feed.
- *
- * Uses short-interval GET /activity polling. On LKE the browser calls
- * `/backend/...` through the Next rewrite; that path reliably returns JSON but
- * often buffers long-lived SSE, so polling is the production delivery mode.
- * (Direct local API SSE remains available at GET /activity/stream for other clients.)
- */
+/** Authenticated SSE with a durable replay cursor. Reconnect never starts a run. */
 export function streamActivity(handlers: {
   onEvent: (event: ActivityEvent) => void;
   onStatus?: (status: "connecting" | "live" | "error") => void;
@@ -182,44 +173,70 @@ export function streamActivity(handlers: {
   signal?: AbortSignal;
 }): () => void {
   const controller = new AbortController();
-  if (handlers.signal) {
-    if (handlers.signal.aborted) controller.abort();
-    else {
-      handlers.signal.addEventListener("abort", () => controller.abort(), {
-        once: true,
+  const abort = () => controller.abort();
+  handlers.signal?.addEventListener("abort", abort, { once: true });
+  if (handlers.signal?.aborted) abort();
+  let cursor = handlers.after ?? 0;
+  let retryMs = 1000;
+  async function connect() {
+    while (!controller.signal.aborted) {
+      handlers.onStatus?.("connecting");
+      try {
+        const headers = new Headers({ Accept: "text/event-stream" });
+        const token = handlers.token === undefined ? getStoredToken() : handlers.token;
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+        const response = await fetch(`${API_URL}/activity/stream?after=${cursor}`, {
+          headers, signal: controller.signal, cache: "no-store",
+        });
+        if (!response.ok || !response.body) throw new ApiError(response.status, "Activity stream unavailable");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          while (!controller.signal.aborted) {
+            const chunk = await reader.read();
+            if (chunk.done) throw new Error("Activity connection closed");
+            buffer += decoder.decode(chunk.value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, "\n");
+            if (buffer.length > 1024 * 1024) throw new Error("Activity frame exceeds limit");
+            let end: number;
+            while ((end = buffer.indexOf("\n\n")) >= 0) {
+              const frame = buffer.slice(0, end);
+              buffer = buffer.slice(end + 2);
+              const lines = frame.split("\n");
+              const type = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+              const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+              if (type === "unavailable") throw new Error("Session or activity service unavailable");
+              if (type === "ready") { handlers.onStatus?.("live"); retryMs = 1000; }
+              if (type !== "activity" || !data) continue;
+              const event = JSON.parse(data) as ActivityEvent;
+              if (!Number.isSafeInteger(event.sequence) || event.sequence <= 0 || typeof event.event_id !== "string") {
+                throw new Error("Invalid persisted activity event");
+              }
+              if (event.sequence <= cursor) continue;
+              handlers.onEvent(event);
+              cursor = event.sequence;
+              handlers.onStatus?.("live");
+            }
+          }
+        } finally { await reader.cancel().catch(() => {}); }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        handlers.onStatus?.("error");
+        handlers.onError?.(error instanceof Error ? error : new Error("Activity stream unavailable"));
+        if (error instanceof ApiError && [401, 403].includes(error.status)) return;
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, retryMs);
+        function done() { clearTimeout(timer); controller.signal.removeEventListener("abort", done); resolve(); }
+        controller.signal.addEventListener("abort", done, { once: true });
+        if (controller.signal.aborted) done();
       });
+      retryMs = Math.min(retryMs * 2, 10000);
     }
   }
-
-  let cursor = handlers.after ?? 0;
-  let timer: ReturnType<typeof setInterval> | null = null;
-  handlers.onStatus?.("connecting");
-
-  const tick = async () => {
-    try {
-      const history = await fetchActivity(cursor, 100, handlers.token);
-      if (controller.signal.aborted) return;
-      handlers.onStatus?.("live");
-      for (const event of history.events) {
-        handlers.onEvent(event);
-        cursor = Math.max(cursor, event.sequence);
-      }
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      handlers.onStatus?.("error");
-      handlers.onError?.(
-        err instanceof Error ? err : new Error("Activity feed unavailable"),
-      );
-    }
-  };
-
-  void tick();
-  timer = setInterval(() => void tick(), ACTIVITY_POLL_MS);
-
-  return () => {
-    controller.abort();
-    if (timer) clearInterval(timer);
-  };
+  void connect();
+  return () => { abort(); handlers.signal?.removeEventListener("abort", abort); };
 }
 
 /** Display-only conversion; money stays integer cents on the wire. */

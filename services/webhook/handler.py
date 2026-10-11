@@ -29,6 +29,9 @@ def authorize(
     "mcc": attempt.mcc,
     "amount_cents": attempt.amount_cents,
     "currency": attempt.currency,
+    "checkout_id": attempt.checkout_id,
+    "checkout_hash": attempt.checkout_hash,
+    "merchant_binding_id": attempt.merchant_binding_id,
   }
   fingerprint = event_fingerprint(payload)
 
@@ -58,6 +61,8 @@ def authorize(
       fingerprint=fingerprint,
       decision=decision,
       consume=consume,
+      now=clock,
+      grant=grant,
     )
   except Exception as exc:
     raise StoreUnavailable("state store unavailable") from exc
@@ -76,4 +81,7 @@ def attempt_from_mapping(data: dict[str, Any]) -> AuthorizationAttempt:
     mcc=str(data["mcc"]),
     amount_cents=int(data["amount_cents"]),
     currency=str(data["currency"]),
+    checkout_id=str(data.get("checkout_id", "")),
+    checkout_hash=str(data.get("checkout_hash", "")),
+    merchant_binding_id=str(data.get("merchant_binding_id", "")),
   )

@@ -19,7 +19,6 @@ services/mcp
 services/mcp-leash
 services/mcp-store
 services/store
-services/webhook
 tests
 docs
 infra
