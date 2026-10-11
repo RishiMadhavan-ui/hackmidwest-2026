@@ -1,6 +1,26 @@
 # AGENTS.md
 
-**Current main integration (`d773079`):** Cameron's checkout/payment work is
+**Current R03/R11 foundation (over `11d6696`, on main):** payment operations
+now commit before merchant retrieval, with immutable human/agent/run/mandate
+version/hash and stable private grant/instrument/issuance/authorization references.
+Identical retries retain one operation; changed claims conflict; unresolved
+operations block replacement purchases across mandate versions. Full canonical
+observations, source hash, normalized snapshot/hash and verification are persisted
+atomically with the blocked result/events. Stop, replacement, revocation and
+expiry cancel prepared work; unknown outcomes remain reconciling and cannot be
+cleared by a retry or Stop. No financial write is enabled.
+
+Current store responses lack verified checkout owner/session, revision, expiry
+and freeze. A service credential authenticates transport only. Evidence is
+explicitly observed_unverified; the verifier receives checkout_authenticated=False.
+A charger returns blocked with checkout_source_unavailable_or_wrong_owner plus
+financial_authority_unavailable; subscription failures remain explicit. Reserved
+UUIDs are not issued cards or usable grants. R03/R11 are **partially implemented**;
+merchant proof, financial activation/reconciliation workers, atomic run revocation,
+real Graph/recovery and the complete product UI remain required. See [R03/R11 handoff](api/r03-r11-handoff.md).
+Frozen shared models/events, historical migrations, team lanes and LKE are preserved.
+
+**Historical containment baseline (`d773079` + fixes committed at `11d6696`):** Cameron's checkout/payment work is
 preserved with security containment. Authenticated configured merchant retrieval,
 strict canonical facts/hash validation and durable blocked payment preflight exist.
 `POST /payments` requires the agent's owned registered uncancelled run, current
@@ -88,7 +108,7 @@ October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/bu
 - **`api/`:** JWT identity, signed immutable mandates, registered runs; `POST /provenance`; owner `GET /activity` and `/activity/stream`; `POST/GET /killswitch`; agent-owned `/agent-runs/{id}/control`; dedicated rail `POST /internal/activity`. `payment_service.py` retrieves configured authenticated merchant facts for preflight and persists blocked attempts. `/payments` requires an owned registered uncancelled run; financial authority remains unavailable. Verified issuance/reconciliation remain absent. `/health[z]` is liveness; `/readyz` checks schema/database.
 - **`web/`:** signup/signin/profile, genuine fetch SSE/stream proxy, human stop control and legacy-only card headroom. Signup never presents spending authority. Mission Control/confirmation/comparison/incidents/Attack Lab remain pending; existing custom JWT is preserved.
 - **`services/agents/`:** single Strands shopper Agent, guardian and durable provenance spool. Real Graph, automatic containment/recovery, durable progress/fencing and cancellation-control polling remain Aditya's work. Configured provider attribution never proves live inference.
-- **`services/mcp-leash/`:** four thin financial tools on internal `:8002/mcp`, forwarding the agent bearer. Payment timeout reports unknown and forbids another purchase until reconciled; durable payment-operation IDs remain pending.
+- **`services/mcp-leash/`:** four thin financial tools on internal `:8002/mcp`, forwarding the agent bearer. Payment timeout reports unknown and forbids another purchase until reconciled; private durable payment-operation IDs now exist; financial activation/reconciliation remain pending.
 - **`services/mcp-store/`:** authenticated browse/create/complete tools on internal `:8003/mcp`, distinct store credential, store-only redirects and sanitized evidence. Cameron's simulated merchant create/read target exists; bind primitives exist; protected durable completion remains unavailable.
 - **`services/webhook/`:** strict local charge credential; complete frozen grants with checkout binding and <=30-minute lifetime; Valkey atomic consume/cache/event + human stop latch. Separate signed ASA adapter requires HMAC and always fails closed without trusted checkout correlation. Provider pause/close accepts only confirmed card identity/state; simulation HTTP route is unavailable until durable payment operations exist. Rail stream relay writes through API with an event-only credential outside the hot path.
 - **`services/store/`:** simulated Volt Supply Co. catalog/listings and process-memory checkout create/read. `STORE_API_TOKEN` is mandatory (>=32 characters); `/readyz` checks configuration. Same-merchant/2999/USD charger and subscription have distinct canonical SKU/category/attributes/recurrence. Unbound completion is 403; valid-bound completion is 503 without rail/provider side effects. Owned sessions, durable freeze/revision and protected charge remain Cameron's C02 work. Public proxy exposes listings only.
@@ -138,7 +158,9 @@ hackmidwest-2026/
     activity.py                      [E] history/SSE + dedicated rail ingestion
     audit_store.py                   [E] commit-ordered append-only events
     provenance_routes.py             [E] authenticated registered-run evidence
-    checkout_verifier.py             [E] pure deterministic policy; retrieval pending
+    checkout_verifier.py             [E] deterministic policy; observed merchant facts remain unverified
+    payment_service.py               [E] committed preflight, configured retrieval, blocked response
+    payment_operations.py            [E] private identities, immutable observations, scope/cancel barriers
     workflow_control.py              [E] durable stop, rail ack and provider CLOSED intents
     mandate_routes.py                [E] Rishi: scoped R02 REST routes
     mandate_service.py               [E] Rishi: transactional authority lifecycle

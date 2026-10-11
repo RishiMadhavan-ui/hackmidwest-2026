@@ -14,6 +14,7 @@ from leash_shared.models import Contract, RunId, MandateStatus
 from mandate_service import utc_now, version_record, transition, audit
 from leash_shared.events import EventType
 from principals import Principal, require_human, require_agent
+from payment_operations import cancel_prepared
 
 router = APIRouter(tags=["workflow control"])
 
@@ -177,6 +178,7 @@ def stop_workflow(
       SELECT id,user_id,%s FROM agent_runs WHERE user_id=%s ON CONFLICT DO NOTHING""",
       (now, principal.user_id),
     )
+    cancel_prepared(conn, principal.user_id, reason="account_stopped")
     owned_cards = conn.execute(
       """SELECT c.card_token FROM lithic_cards c
           JOIN leash_users l ON l.auth_user_id=c.user_id WHERE l.id=%s
@@ -366,6 +368,7 @@ def stop_run(run_id: RunId, principal: Annotated[Principal, Depends(require_huma
       VALUES (%s,%s,%s) ON CONFLICT DO NOTHING RETURNING run_id""",
       (run_id, principal.user_id, utc_now()),
     ).fetchone()
+    cancel_prepared(conn, principal.user_id, run_id=run_id, reason="run_stopped")
     if created:
       emit_activity(
         conn, user_id=principal.user_id, event_type="run.stop.requested",

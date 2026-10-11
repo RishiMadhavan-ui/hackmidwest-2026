@@ -1,6 +1,26 @@
 # LEASH — Product and MVP Implementation Specification
 
-**Current main integration (`d773079`):** Cameron's checkout/payment work is
+**Current R03/R11 foundation (over `11d6696`, on main):** payment operations
+now commit before merchant retrieval, with immutable human/agent/run/mandate
+version/hash and stable private grant/instrument/issuance/authorization references.
+Identical retries retain one operation; changed claims conflict; unresolved
+operations block replacement purchases across mandate versions. Full canonical
+observations, source hash, normalized snapshot/hash and verification are persisted
+atomically with the blocked result/events. Stop, replacement, revocation and
+expiry cancel prepared work; unknown outcomes remain reconciling and cannot be
+cleared by a retry or Stop. No financial write is enabled.
+
+Current store responses lack verified checkout owner/session, revision, expiry
+and freeze. A service credential authenticates transport only. Evidence is
+explicitly observed_unverified; the verifier receives checkout_authenticated=False.
+A charger returns blocked with checkout_source_unavailable_or_wrong_owner plus
+financial_authority_unavailable; subscription failures remain explicit. Reserved
+UUIDs are not issued cards or usable grants. R03/R11 are **partially implemented**;
+merchant proof, financial activation/reconciliation workers, atomic run revocation,
+real Graph/recovery and the complete product UI remain required. See [R03/R11 handoff](../api/r03-r11-handoff.md).
+Frozen shared models/events, historical migrations, team lanes and LKE are preserved.
+
+**Historical containment baseline (`d773079` + fixes committed at `11d6696`):** Cameron's checkout/payment work is
 preserved with security containment. Authenticated configured merchant retrieval,
 strict canonical facts/hash validation and durable blocked payment preflight exist.
 `POST /payments` requires the agent's owned registered uncancelled run, current
@@ -1757,3 +1777,36 @@ remain intact. Logout is not financial Stop and does not undo an in-flight
 operation that already passed authentication. Ambient cookies cannot authorize
 confirmation in the selected Bearer stack; revisit CSRF handling if cookie auth
 is introduced. Ephemeral agent run/audience scopes remain R12 work.
+
+## 28. R03/R11 durable preflight foundation and enablement gates
+
+The current implementation is detailed in [the API handoff](../api/r03-r11-handoff.md).
+Persist the operation identity and audit event before external work; persist
+verified evidence before any external financial write. Natural retry scope binds
+human/agent/run/mandate version/checkout and hashes the entire agent request.
+Exact retries use the original IDs/outcome; changed content conflicts. An unresolved
+operation bars a different checkout/run under the same mandate, including newer
+versions. Stable instrument/issuance/authorization references are reservations,
+not provider-issued instruments or financial authority.
+
+Canonical observations are append-only and carry their source hash, full itemized
+facts, normalized snapshot/hash, owner/run/mandate version/hash and truthful trust
+assessment. The current configured service bearer proves transport only; synthetic
+normalization user/session/revision/expiry cannot stand in for merchant ownership,
+revision, expiry or frozen charge facts. Therefore checkout_authenticated remains
+false and all preflights stay blocked. No positive model/human review can bypass it.
+
+Release SQL locks during merchant retrieval, then reacquire user -> mandate ->
+operation locks and recheck run/account Stop, version/hash, signed confirmation
+and expiry before advancing. Cancel prepared operations in the same transaction
+as run Stop/account Kill/replacement/revoke. Unknown financial outcomes must stay
+reconciling across controls and mandate versions and bar replacement purchases.
+Cancellation is not proof that an earlier provider authorization was reversed.
+
+Current private states are prepared/blocked/cancelled/reconciling only. Any future
+financial activate/authorized/settled transitions, workers, leases, side-effect
+outbox, provider read-back and atomic SQL/Valkey barrier require forward migrations,
+owner protocol agreement and crash/race/replay evidence. H14 frozen-contract review
+is still required. Keep dormant issuance/grant/bind/charge paths disabled until
+C02 ownership/freeze, R03 proof, R04/R11 execution/correlation and C11/R13 run barrier
+are implemented together. Actual Strands Graph remains Aditya's required work.

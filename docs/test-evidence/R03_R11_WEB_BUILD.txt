@@ -1,0 +1,40 @@
+R03/R11 foundation over main 11d669659ca3991760efc7fee0af48414cdf5ead
+Collected 2026-10-11T05:39:26.928888+00:00
+Isolated localhost / fixtures only; no deployed or provider execution.
+
+
+> web@0.1.0 build C:\hackmidwest-2026\web
+> next build
+
+▲ Next.js 16.4.0 (Turbopack)
+- Environments: .env.local
+✓ Running next.config.ts took 92ms
+- Cache Components enabled
+- Partial Prefetching enabled
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 1552ms
+  Running TypeScript ...
+  Finished TypeScript in 6.7s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/8) ...
+  Generating static pages using 11 workers (2/8)
+  Generating static pages using 11 workers (4/8)
+  Generating static pages using 11 workers (6/8)
+✓ Generating static pages using 11 workers (8/8) in 1176ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /backend/activity/stream
+├ ƒ /backend/internal/[[...path]]
+├ ○ /profile
+├ ○ /signin
+├ ○ /signup
+├ ƒ /store/products/[productId]
+└ ƒ /store/products/[productId]/checkout
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

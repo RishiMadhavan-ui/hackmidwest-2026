@@ -1,5 +1,13 @@
 # Main integration: V2 and Cameron's checkout/payment merge
 
+**R03/R11 follow-up:** [the current API handoff](../api/r03-r11-handoff.md)
+supersedes ledger/snapshot-absence and retry-lock statements below. Private
+operations commit before GET, full observations are immutable, scope barriers and
+prepared-work cancellation are tested. A merchant bearer still cannot prove
+checkout ownership; evidence is observed_unverified and spending remains blocked.
+The rest of this file preserves incoming d773079 defects and enablement gates.
+
+
 Baseline: main fast-forwarded from `f2f50a5` to Cameron's `d773079` (PR #14).
 All teammate commits, storefront changes and Kubernetes configuration are retained.
 No deployed service, provider, shared database or teammate credential was used.

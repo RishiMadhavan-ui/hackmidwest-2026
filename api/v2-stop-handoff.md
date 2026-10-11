@@ -1,5 +1,12 @@
 # V2 stop controls and SINGLE_USE handoff
 
+**R03/R11 follow-up:** [current preflight handoff](r03-r11-handoff.md) adds
+transactional cancellation of prepared payment operations to both Stop controls
+and mandate replacement/revocation. Unknown outcomes stay reconciling. This does
+not complete run financial revocation, provider reconciliation or Graph cancel;
+those independent acknowledgment states remain unchanged.
+
+
 This is a source/test handoff on main integrating Cameron's `d773079` onto the V2 batch, not a deployment or full
 payment workflow. The V2 master and [137-case coverage index](../docs/LEASH_SECURITY_COVERAGE.md)
 are authoritative. R01 models/events have not changed. No provider call, shared

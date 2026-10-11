@@ -1,0 +1,6 @@
+R03/R11 foundation over main 11d669659ca3991760efc7fee0af48414cdf5ead
+Collected 2026-10-11T05:39:26.928888+00:00
+Isolated localhost / fixtures only; no deployed or provider execution.
+
+........................................                                 [100%]
+40 passed in 9.23s

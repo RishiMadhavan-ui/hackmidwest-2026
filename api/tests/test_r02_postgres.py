@@ -6,7 +6,7 @@ from datetime import timedelta
 import os
 from pathlib import Path
 import sys
-from threading import Barrier
+from threading import Barrier, Event
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -114,6 +114,355 @@ class PostgresAuthorityTests(unittest.TestCase):
     return {"id":"run_" + uuid4().hex,"mandate_id":mandate["id"],"agent_mode":mode,
             "model":"reported-model","provider":"reported-provider"}
 
+  def payment_setup(self):
+    active = self.active()
+    run = self.run_body(active)
+    self.assertEqual(self.request("POST", "/agent-runs", body=run).status_code, 201)
+    env = patch.dict(os.environ, {"STORE_URL": "http://isolated-store.test", "STORE_API_TOKEN": "s" * 32})
+    env.start()
+    self.addCleanup(env.stop)
+    return active, run, {"mandate_id": active["id"], "run_id": run["id"], "checkout_id": "ckt_charger"}
+
+  def payment_direct(self, body):
+    from payment_service import request_payment
+    from principals import Principal
+    from leash_shared.models import PaymentProposal
+    with db.get_conn() as conn:
+      return request_payment(conn, PaymentProposal.model_validate(body), Principal("agent", self.owner, self.agent_id))
+
+  def payment_operation(self, run):
+    with db.get_conn() as conn:
+      return conn.execute("SELECT * FROM payment_operations WHERE run_id=%s", (run["id"],)).fetchone()
+
+  def crash_preflight(self, body):
+    with patch("payment_service._fetch_store_checkout", side_effect=RuntimeError("simulated worker crash")):
+      with self.assertRaises(RuntimeError):
+        self.payment_direct(body)
+
+  def test_payment_identity_is_committed_before_fetch_and_full_evidence_is_immutable(self):
+    from test_payment_service import _store_checkout
+    active, run, body = self.payment_setup()
+    def fetch(_):
+      operation = self.payment_operation(run)  # A separate real connection.
+      self.assertEqual(operation["state"], "prepared")
+      self.assertEqual(operation["mandate_hash"], active["canonical_payload_hash"])
+      for key in ("instrument_reference", "issuance_key", "authorization_event_id"):
+        self.assertIsInstance(operation[key], type(uuid4()))
+      self.assertTrue(operation["grant_reference"].startswith("grt_"))
+      return _store_checkout()
+    with patch("payment_service._fetch_store_checkout", side_effect=fetch), patch("payment_service._seed_grant") as seed, patch("payment_service._bind_store") as bind:
+      response = self.payment_direct(body)
+      seed.assert_not_called()
+      bind.assert_not_called()
+    with db.get_conn() as conn:
+      observation = conn.execute("SELECT * FROM checkout_observations WHERE payment_id=%s", (response.id,)).fetchone()
+      self.assertEqual(observation["snapshot"]["items"][0]["sku"], "CHG-65W")
+      self.assertEqual(observation["source_facts"], _store_checkout())
+      self.assertEqual(observation["run_id"], run["id"])
+      self.assertEqual(observation["evidence_assessment"]["merchant_ownership"], "unverified")
+      self.assertFalse(observation["evidence_assessment"]["financial_authority"])
+      events = conn.execute("SELECT record FROM audit_events WHERE record->'data'->>'payment_id'=%s ORDER BY sequence", (response.id,)).fetchall()
+      self.assertEqual([row["record"]["type"] for row in events],
+                       ["payment.operation.prepared", "payment.operation.checkout_observed", "payment.denied", "payment.operation.blocked"])
+    for statement in ("UPDATE checkout_observations SET source_hash=repeat('0',64) WHERE payment_id=%s",
+                      "DELETE FROM checkout_observations WHERE payment_id=%s",
+                      "UPDATE payment_operations SET issuance_key=gen_random_uuid() WHERE id=%s",
+                      "DELETE FROM payment_operations WHERE id=%s",
+                      "UPDATE payment_attempts SET status='approved' WHERE id=%s",
+                      "DELETE FROM payment_attempts WHERE id=%s"):
+      with self.subTest(statement=statement), self.assertRaises(psycopg.errors.CheckViolation), db.get_conn() as conn:
+        conn.execute(statement, (response.id,))
+
+  def test_crash_after_prepare_resumes_read_only_with_all_original_references(self):
+    from test_payment_service import _store_checkout
+    _, run, body = self.payment_setup()
+    self.crash_preflight(body)
+    first = self.payment_operation(run)
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()) as fetch:
+      result = self.payment_direct(body)
+      again = self.payment_direct(body)
+    final = self.payment_operation(run)
+    self.assertEqual(first["id"], result.id)
+    self.assertEqual(result, again)
+    self.assertEqual(fetch.call_count, 1)
+    for key in ("id", "grant_reference", "instrument_reference", "issuance_key", "authorization_event_id"):
+      self.assertEqual(first[key], final[key])
+    self.assertEqual(final["state"], "blocked")
+    self.assertEqual(final["revision"], 2)
+
+  def test_unresolved_operation_blocks_another_checkout_and_another_run(self):
+    active, _, body = self.payment_setup()
+    self.crash_preflight(body)
+    next_run = self.run_body(active)
+    self.assertEqual(self.request("POST", "/agent-runs", body=next_run).status_code, 201)
+    with patch("payment_service._fetch_store_checkout") as fetch:
+      for candidate in ({**body, "checkout_id": "ckt_other"}, {**body, "run_id": next_run["id"]}):
+        result = self.request("POST", "/payments", body=candidate)
+        self.assertEqual(result.status_code, 409, result.text)
+      fetch.assert_not_called()
+
+  def test_payment_retry_cannot_change_agent_claims(self):
+    from test_payment_service import _store_checkout
+    _, _, body = self.payment_setup()
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()) as fetch:
+      self.assertEqual(self.request("POST", "/payments", body=body).status_code, 200)
+      changed = {**body, "proposal": {"merchant_name": "spoofed", "total_cents": 2999,
+                    "items": [{"name": "charger", "sku": "CHG-65W", "quantity": 1, "unit_cents": 2999}]}}
+      self.assertEqual(self.request("POST", "/payments", body=changed).status_code, 409)
+      self.assertEqual(fetch.call_count, 1)
+
+  def test_concurrent_identical_payment_requests_commit_one_outcome(self):
+    from test_payment_service import _store_checkout
+    _, run, body = self.payment_setup()
+    barrier = Barrier(2)
+    def fetch(_):
+      barrier.wait(timeout=10)
+      return _store_checkout()
+    with patch("payment_service._fetch_store_checkout", side_effect=fetch), ThreadPoolExecutor(max_workers=2) as pool:
+      results = list(pool.map(lambda _: self.payment_direct(body), range(2)))
+    self.assertEqual(results[0], results[1])
+    with db.get_conn() as conn:
+      self.assertEqual(conn.execute("SELECT count(*) n FROM payment_operations WHERE run_id=%s", (run["id"],)).fetchone()["n"], 1)
+      self.assertEqual(conn.execute("SELECT count(*) n FROM checkout_observations WHERE run_id=%s", (run["id"],)).fetchone()["n"], 1)
+      self.assertEqual(conn.execute("SELECT count(*) n FROM payment_attempts WHERE run_id=%s", (run["id"],)).fetchone()["n"], 1)
+
+  def test_concurrent_changed_checkout_evidence_cannot_overwrite_original(self):
+    from test_payment_service import _store_checkout
+    from leash_shared.models import canonical_json
+    import hashlib
+    _, _, body = self.payment_setup()
+    barrier = Barrier(2)
+    def fetch(_):
+      store = _store_checkout()
+      store["line_items"][0]["name"] = "Charger " + uuid4().hex
+      store["facts_hash"] = hashlib.sha256(canonical_json({key: store[key] for key in (
+        "checkout_id", "currency", "line_items", "mcc", "merchant_descriptor", "recurring", "total_cents"
+      )}).encode()).hexdigest()
+      barrier.wait(timeout=10)
+      return store
+    def call(_):
+      try:
+        self.payment_direct(body)
+        return 200
+      except AuthorityError as error:
+        return error.status
+    with patch("payment_service._fetch_store_checkout", side_effect=fetch), ThreadPoolExecutor(max_workers=2) as pool:
+      self.assertEqual(sorted(pool.map(call, range(2))), [200, 409])
+
+  def test_merchant_error_is_persisted_and_replayed_without_another_fetch(self):
+    _, run, body = self.payment_setup()
+    with patch("payment_service._fetch_store_checkout", side_effect=AuthorityError(502, "Trusted merchant unreachable")) as fetch:
+      for _ in range(2):
+        response = self.request("POST", "/payments", body=body)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json(), {"detail": "Trusted merchant unreachable"})
+      self.assertEqual(fetch.call_count, 1)
+    operation = self.payment_operation(run)
+    self.assertEqual(operation["state"], "blocked")
+    self.assertEqual(operation["error_status"], 502)
+
+  def test_database_failure_before_prepare_commit_prevents_merchant_fetch(self):
+    from payment_service import request_payment
+    from principals import Principal
+    from leash_shared.models import PaymentProposal
+    _, run, body = self.payment_setup()
+    class FailedCommit:
+      def __init__(self, conn): self.conn = conn
+      def execute(self, *args, **kwargs): return self.conn.execute(*args, **kwargs)
+      def commit(self): raise psycopg.OperationalError("simulated commit failure")
+    with patch("payment_service._fetch_store_checkout") as fetch:
+      with self.assertRaises(psycopg.OperationalError), db.get_conn() as conn:
+        request_payment(FailedCommit(conn), PaymentProposal.model_validate(body), Principal("agent", self.owner, self.agent_id))
+      fetch.assert_not_called()
+    self.assertIsNone(self.payment_operation(run))
+
+  def test_final_transaction_failure_preserves_prepared_identity_without_partial_evidence(self):
+    from test_payment_service import _store_checkout
+    _, run, body = self.payment_setup()
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()), patch("payment_service._persist", side_effect=RuntimeError("simulated final transaction failure")):
+      with self.assertRaises(RuntimeError): self.payment_direct(body)
+    original = self.payment_operation(run)
+    self.assertEqual(original["state"], "prepared")
+    with db.get_conn() as conn:
+      self.assertIsNone(conn.execute("SELECT payment_id FROM checkout_observations WHERE payment_id=%s", (original["id"],)).fetchone())
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()):
+      self.assertEqual(self.payment_direct(body).id, original["id"])
+
+  def test_run_stop_during_fetch_cancels_prepared_operation_and_prevents_finalization(self):
+    self.assert_payment_control_race("run")
+
+  def test_account_stop_during_fetch_cancels_prepared_operation_and_prevents_finalization(self):
+    self.assert_payment_control_race("account")
+
+  def test_mandate_replacement_during_fetch_cancels_old_operation(self):
+    self.assert_payment_control_race("replace")
+
+  def test_mandate_revocation_during_fetch_cancels_old_operation(self):
+    self.assert_payment_control_race("revoke")
+
+  def assert_payment_control_race(self, control):
+    from test_payment_service import _store_checkout
+    active, run, body = self.payment_setup()
+    entered, release = Event(), Event()
+    def fetch(_):
+      entered.set()
+      self.assertTrue(release.wait(10))
+      return _store_checkout()
+    with patch("payment_service._fetch_store_checkout", side_effect=fetch), patch("workflow_control.stop_rail", return_value={"status": "pending"}), ThreadPoolExecutor(max_workers=1) as pool:
+      future = pool.submit(lambda: self.request("POST", "/payments", body=body))
+      try:
+        self.assertTrue(entered.wait(10))
+        if control == "run":
+          response = self.request("POST", f"/agent-runs/{run['id']}/stop", token=self.user_token)
+        elif control == "account":
+          response = self.request("POST", "/killswitch", token=self.user_token, body={"on": True})
+        elif control == "replace":
+          response = self.request("PATCH", f"/mandates/{active['id']}", token=self.user_token,
+                                  body={**self.binding(active), "proposal": self.proposal})
+        else:
+          response = self.request("POST", f"/mandates/{active['id']}/revoke", token=self.user_token, body=self.binding(active))
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.payment_operation(run)["state"], "cancelled")
+      finally:
+        release.set()
+      self.assertEqual(future.result(timeout=10).status_code, 409)
+    with db.get_conn() as conn:
+      self.assertIsNone(conn.execute("SELECT payment_id FROM checkout_observations WHERE run_id=%s", (run["id"],)).fetchone())
+
+  def test_unknown_operation_blocks_replacement_across_mandate_versions_and_survives_stop(self):
+    from payment_operations import mark_reconciling
+    active, run, body = self.payment_setup()
+    self.crash_preflight(body)
+    original = self.payment_operation(run)
+    with db.get_conn() as conn:
+      mark_reconciling(conn, original["id"], self.owner, expected_revision=1)
+    self.assertEqual(self.request("POST", "/payments", body=body).status_code, 409)
+    replacement = self.request("PATCH", f"/mandates/{active['id']}", token=self.user_token,
+                               body={**self.binding(active), "proposal": self.proposal})
+    self.assertEqual(replacement.status_code, 200, replacement.text)
+    next_active = self.active(replacement.json())
+    next_run = self.run_body(next_active)
+    self.assertEqual(self.request("POST", "/agent-runs", body=next_run).status_code, 201)
+    with patch("payment_service._fetch_store_checkout") as fetch:
+      response = self.request("POST", "/payments", body={**body, "run_id": next_run["id"]})
+      self.assertEqual(response.status_code, 409, response.text)
+      fetch.assert_not_called()
+    self.assertEqual(self.request("POST", f"/agent-runs/{run['id']}/stop", token=self.user_token).status_code, 200)
+    self.assertEqual(self.payment_operation(run)["state"], "reconciling")
+    with db.get_conn() as conn:
+      with self.assertRaises(psycopg.errors.CheckViolation), conn.transaction():
+        conn.execute("UPDATE payment_operations SET state='blocked',revision=revision+1 WHERE id=%s", (original["id"],))
+
+  def test_blocked_subscription_allows_clean_candidate_under_unchanged_mandate(self):
+    from test_payment_service import _store_checkout
+    active, run, body = self.payment_setup()
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout(subscription=True)):
+      attacked = self.payment_direct({**body, "checkout_id": "ckt_sub"})
+    self.assertIn("subscription_prohibited", attacked.reasons)
+    with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()):
+      charger = self.payment_direct(body)
+    self.assertNotEqual(attacked.id, charger.id)
+    self.assertEqual(charger.status, "blocked")  # Independent owner/freeze and financial gates remain.
+    self.assertEqual(self.request("GET", f"/mandates/{active['id']}").json()["canonical_payload_hash"], active["canonical_payload_hash"])
+
+  def test_checkout_secrets_are_rejected_before_persisting_source_or_snapshot(self):
+    from test_payment_service import _store_checkout
+    from leash_shared.models import canonical_json
+    import hashlib
+    _, run, body = self.payment_setup()
+    store = _store_checkout()
+    store["line_items"][0]["attributes"].append({"name": "api_key", "value": "private-test-secret"})
+    store["facts_hash"] = hashlib.sha256(canonical_json({key: store[key] for key in (
+      "checkout_id", "currency", "line_items", "mcc", "merchant_descriptor", "recurring", "total_cents"
+    )}).encode()).hexdigest()
+    with patch("payment_service._fetch_store_checkout", return_value=store):
+      response = self.request("POST", "/payments", body=body)
+    self.assertEqual(response.status_code, 502, response.text)
+    with db.get_conn() as conn:
+      self.assertIsNone(conn.execute("SELECT payment_id FROM checkout_observations WHERE run_id=%s", (run["id"],)).fetchone())
+      events = conn.execute("SELECT record FROM audit_events WHERE user_id=%s", (self.owner,)).fetchall()
+      self.assertNotIn("private-test-secret", str(events))
+
+  def test_mandate_expiry_after_fetch_cancels_operation_before_evidence_commit(self):
+    from test_payment_service import _store_checkout
+    from datetime import datetime
+    active, run, body = self.payment_setup()
+    clock = [utc_now()]
+    def fetch(_):
+      clock[0] = datetime.fromisoformat(active["valid_until"]) + timedelta(seconds=1)
+      return _store_checkout()
+    with patch("payment_service.utc_now", side_effect=lambda: clock[0]), patch("payment_service._fetch_store_checkout", side_effect=fetch):
+      self.assertEqual(self.request("POST", "/payments", body=body).status_code, 409)
+    self.assertEqual(self.payment_operation(run)["state"], "cancelled")
+
+  def test_run_stop_cancels_only_its_prepared_operation(self):
+    active, first_run, first_body = self.payment_setup()
+    self.crash_preflight(first_body)
+    _, other_run, other_body = self.payment_setup()
+    self.crash_preflight(other_body)
+    self.assertEqual(self.request("POST", f"/agent-runs/{first_run['id']}/stop", token=self.user_token).status_code, 200)
+    self.assertEqual(self.payment_operation(first_run)["state"], "cancelled")
+    self.assertEqual(self.payment_operation(other_run)["state"], "prepared")
+    self.assertEqual(self.request("GET", f"/mandates/{active['id']}").json()["status"], "active")
+
+  def test_account_stop_preserves_unknown_financial_outcome(self):
+    from payment_operations import mark_reconciling
+    _, run, body = self.payment_setup()
+    self.crash_preflight(body)
+    operation = self.payment_operation(run)
+    with db.get_conn() as conn:
+      mark_reconciling(conn, operation["id"], self.owner, expected_revision=1)
+    with patch("workflow_control.stop_rail", return_value={"status": "pending"}):
+      self.assertEqual(self.request("POST", "/killswitch", token=self.user_token, body={"on": True}).status_code, 200)
+    self.assertEqual(self.payment_operation(run)["state"], "reconciling")
+
+  def test_database_constraints_reject_parallel_scope_and_forged_owner_bindings(self):
+    _, run, body = self.payment_setup()
+    self.crash_preflight(body)
+    columns = "id,user_id,agent_id,run_id,mandate_id,mandate_version,mandate_hash,checkout_id,request_hash,grant_reference,instrument_reference,issuance_key,authorization_event_id,state"
+    for forged_owner in (False, True):
+      with self.subTest(forged_owner=forged_owner), self.assertRaises(psycopg.errors.ForeignKeyViolation if forged_owner else psycopg.errors.UniqueViolation), db.get_conn() as conn:
+        conn.execute(f"""INSERT INTO payment_operations ({columns})
+          SELECT %s,%s,agent_id,run_id,mandate_id,mandate_version,mandate_hash,'ckt_other',request_hash,
+          %s,%s,%s,%s,%s FROM payment_operations WHERE run_id=%s""",
+          ("pay_" + uuid4().hex, self.other_owner if forged_owner else self.owner,
+           "grt_" + uuid4().hex, uuid4(), uuid4(), uuid4(), "blocked" if forged_owner else "prepared", run["id"]))
+
+  def test_prepared_payment_status_is_owned_and_never_exposes_reserved_instrument_or_grant(self):
+    _, run, body = self.payment_setup()
+    self.crash_preflight(body)
+    operation = self.payment_operation(run)
+    path = f"/payments/{operation['id']}"
+    response = self.request("GET", path)
+    self.assertEqual(response.status_code, 200, response.text)
+    self.assertEqual(response.json()["operation"]["state"], "prepared")
+    self.assertEqual(response.json()["status"], "blocked")
+    self.assertIsNone(response.json()["grant_id"])
+    for key in ("grant_reference", "instrument_reference", "issuance_key", "authorization_event_id"):
+      self.assertNotIn(str(operation[key]), response.text)
+    self.assertEqual(self.request("GET", path, token=self.other_agent_token).status_code, 404)
+
+  def test_historical_approved_grant_blocks_a_new_checkout_without_reissue(self):
+    from psycopg.types.json import Jsonb
+    active, run, body = self.payment_setup()
+    old_id = "pay_" + uuid4().hex
+    record = {"id": old_id, "status": "approved", "verification_id": "ver_historical",
+              "grant_id": "grt_historical", "reasons": []}
+    with db.get_conn() as conn:
+      conn.execute("""INSERT INTO payment_attempts
+        (id,user_id,agent_id,mandate_id,mandate_version,checkout_id,run_id,status,record)
+        VALUES (%s,%s,%s,%s,%s,'ckt_historical',%s,'approved',%s)""",
+        (old_id, self.owner, self.agent_id, active["id"], active["version"], run["id"], Jsonb(record)))
+    with patch("payment_service._fetch_store_checkout") as fetch, patch("payment_service._seed_grant") as seed:
+      response = self.request("POST", "/payments", body=body)
+      self.assertEqual(response.status_code, 409, response.text)
+      fetch.assert_not_called()
+      seed.assert_not_called()
+    self.assertIsNone(self.payment_operation(run))
+    history = self.request("GET", f"/payments/{old_id}").json()
+    self.assertEqual(history["payment_execution"], "unavailable")
+    self.assertEqual(history["authorization_status"], "unverified")
+
   def test_restart_safe_migration_and_uuid_identity_mapping(self):
     db.init_db()
     response = self.request("GET","/identity",token=self.user_token)
@@ -142,7 +491,7 @@ class PostgresAuthorityTests(unittest.TestCase):
       first = self.request("POST", "/payments", body=proposal)
       self.assertEqual(first.status_code, 200, first.text)
       self.assertEqual(first.json()["status"], "blocked")
-      self.assertEqual(first.json()["reasons"], ["financial_authority_unavailable"])
+      self.assertEqual(first.json()["reasons"], ["checkout_source_unavailable_or_wrong_owner", "financial_authority_unavailable"])
       self.assertIsNone(first.json()["grant_id"])
       self.assertNotIn("instrument_token", first.json())
       again = self.request("POST", "/payments", body=proposal)

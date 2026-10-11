@@ -1,6 +1,34 @@
 # LEASH product, architecture and implementation alignment audit
 
-## Latest main integration: Cameron d773079 plus V2 containment
+## R03/R11 foundation over 11d6696 — current
+
+The safe private API/schema batch adds committed operation identities before
+merchant retrieval, full immutable canonical observations with explicit trust
+limits, natural-scope request fingerprints, concurrent retry/result handling,
+unknown-outcome scope barriers and prepared-operation cancellation in the same
+Stop/revoke/replace transaction. The API rechecks current signed authority and
+run binding after retrieval, including expiry. Checkout ownership remains
+unverified; the verifier no longer treats a shared service bearer as owner proof.
+See [exact handoff](../api/r03-r11-handoff.md) and
+[execution results](R03_R11_TEST_RESULTS.md). Earlier absence claims below are
+historical; this section and the updated coverage index define current status.
+
+| Requirement | Current evidence / status | Remaining gate and owner |
+|---|---|---|
+| Immutable complete checkout observation | Implemented/tested in API + migration 0010; source facts/hash, snapshot/hash, human/run/mandate version/hash, explicit observed_unverified assessment | Cameron C02: owned session, revision, expiry, freeze and separate protected bind credential; Rishi R03 verifies it |
+| Durable identity before external work | Implemented/tested: commit before merchant GET; reserved IDs immutable, DB uniqueness and version/run ownership FKs | Rishi R04/R11: actual financial worker/leases/outbox, provider call/read-back and correlation protocol |
+| Retries/concurrency/crash | Implemented/tested: same identity stable, conflicting claims/evidence rejected, rollback preserves preparation, one committed outcome | Actual issuance/charge interruption tests await enabled financial implementation |
+| Unknown outcome prevents alternate purchase | Implemented/tested for injected reconciling ledger state, across mandate versions and surviving both Stop controls | Provider ambiguity detection and read-back missing; private quarantine has no clearing route |
+| Stop and changed/expired authority | Implemented/tested cancellation of prepared work, user -> mandate -> operation order, before post-fetch finalization | Cameron C11/Rishi R13: atomic run grants/issuance/consumption/revocation; Aditya A14 actual Graph cancel |
+| Genuine persisted activity | Implemented/tested prepared/checkout-observed/denied/blocked/cancelled/reconciling events in durable audit/outbox | Rishi/Aditya: complete inference/Graph/recovery/financial lifecycle and product UI |
+| Complete purchase/demo | Missing: no grant/card/bind/charge enabled; Graph, merchant owner/freeze, provider reconciliation and deployed acceptance absent | Follow handoff dependency order. No complete three-minute demo claim |
+
+Frozen shared files, all committed 0001–0009 migrations, infrastructure and
+teammate application code are unchanged in this batch. Migration 0010 is forward
+only and was exercised solely against a disposable local test schema.
+
+
+## Historical main integration: Cameron d773079 plus V2 containment
 
 The original V2 audit below started at f2f50a5. A later fetch found Cameron's
 `d773079` (PR #14), which is preserved by fast-forward on main, with no reset,

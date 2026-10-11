@@ -1,6 +1,26 @@
 # LEASH build plan
 
-**Current main integration (`d773079`):** Cameron's checkout/payment work is
+**Current R03/R11 foundation (over `11d6696`, on main):** payment operations
+now commit before merchant retrieval, with immutable human/agent/run/mandate
+version/hash and stable private grant/instrument/issuance/authorization references.
+Identical retries retain one operation; changed claims conflict; unresolved
+operations block replacement purchases across mandate versions. Full canonical
+observations, source hash, normalized snapshot/hash and verification are persisted
+atomically with the blocked result/events. Stop, replacement, revocation and
+expiry cancel prepared work; unknown outcomes remain reconciling and cannot be
+cleared by a retry or Stop. No financial write is enabled.
+
+Current store responses lack verified checkout owner/session, revision, expiry
+and freeze. A service credential authenticates transport only. Evidence is
+explicitly observed_unverified; the verifier receives checkout_authenticated=False.
+A charger returns blocked with checkout_source_unavailable_or_wrong_owner plus
+financial_authority_unavailable; subscription failures remain explicit. Reserved
+UUIDs are not issued cards or usable grants. R03/R11 are **partially implemented**;
+merchant proof, financial activation/reconciliation workers, atomic run revocation,
+real Graph/recovery and the complete product UI remain required. See [R03/R11 handoff](api/r03-r11-handoff.md).
+Frozen shared models/events, historical migrations, team lanes and LKE are preserved.
+
+**Historical containment baseline (`d773079` + fixes committed at `11d6696`):** Cameron's checkout/payment work is
 preserved with security containment. Authenticated configured merchant retrieval,
 strict canonical facts/hash validation and durable blocked payment preflight exist.
 `POST /payments` requires the agent's owned registered uncancelled run, current
@@ -123,9 +143,9 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | Task | Current result | Remaining completion gate |
 |---|---|---|
 | R01/R02 | Retained and tested; frozen models/events unchanged | Hosted operator bindings/configuration still unverified |
-| R03 | Tested pure policy enforces all 15 checks | Authenticated independent merchant fetch, persistence/routes and protected checkout freeze |
-| R04/R11 | Product payment/issuance/reconciliation absent; durable idempotent CLOSED intents exist | Persist payment operation before any issuance/charge; exact trusted binding, provider idempotency and unknown-outcome query |
-| R05 | Human durable stop, revoked SQL authority, cancellation records, atomic local rail latch and actual provider-closure response handling tested with mocked transport | Aditya cooperative cancellation, all-phase races, individual replacement/revoke propagation, live provider proof; no resume-old-authority route |
+| R03 | All 15 policy checks; configured merchant GET; full immutable observation/source/hash persistence, tested with real SQL/HTTP | Cameron owner/session/revision/expiry/freeze proof; observation context cannot establish ownership. Grants remain blocked |
+| R04/R11 | Durable preflight before GET; stable reserved identities; retry uniqueness, concurrent outcome, unknown-state barrier and Stop/revoke/replace/expiry tested | Actual financial worker/lease/outbox/activate protocol, exact owned checkout binding, provider idempotency/read-back, atomic success reservation and run revocation; spending disabled |
+| R05 | Human durable stop, revoked SQL authority, cancellation records and prepared-operation cancellation in the same transaction; atomic local rail latch and provider-closure response handling tested with mocked transport | Aditya cooperative cancellation, all-phase races, individual replacement/revoke propagation, live provider proof; no resume-old-authority route |
 | R06 | Provenance 201/409/422, ordered owner SSE through Next and durable rail-stream relay tested | Full Graph/inference/verification/recovery/reconciliation emitters, incident/source/history UI and agreed additive contracts |
 | R08–R10 | Identity/profile activity/stop UI build and lint pass | Human purchase confirmation, Mission Control, comparison, incident timeline, receipt and Attack Lab |
 | C02 | Catalog/listings and authenticated checkout create/read tested; charge disabled | User/session ownership, durable checkout freeze/revision/expiry, exact protected binding/charge and safe recovery alternative |
@@ -433,7 +453,7 @@ implemented/tested through migration 0009. This preserves current auth; it does
 not complete short-lived run/mandate/audience-scoped agent credentials in R12.
 
 1. **Cameron:** extend the merged authenticated catalog/checkouts with ownership, durable freeze and immutable protected charge binding (C02/H04/H05). Inspect the new credential names and root-context images before deployment.
-2. **Rishi + Cameron:** connect trusted retrieval to the existing pure verifier; persist attempts/verification/payment operations before any side effect (R03/R04/R11), with tested SQL/Valkey ordering and replace/revoke propagation.
+2. **Rishi + Cameron:** extend the completed non-spending preflight/observation ledger with verified merchant proof, financial leases/outbox/activation/reconciliation (R03/R04/R11) and atomic SQL/Valkey run barriers/replacement invalidation. Stable references exist; usable grants remain disabled.
 3. **Aditya + Rishi:** agree additive typed Graph/unknown-state/event contracts, short-lived run scopes and cancellation polling (R12/H08). Aditya implements real bounded Graph, clean recovery and cooperative stop (A11–A13).
 4. **Rishi:** build confirmed-intent Mission Control/comparison/incident/history/Attack Lab on actual persisted states (R07–R10).
 5. **Cameron + Aditya + Rishi:** deploy/verify selected rail on existing LKE; run live inference and signature attack→automatic recovery plus S7, restart/outage/replay and <=3-minute rehearsal. Until then, label local tests and ASA limitations accurately.

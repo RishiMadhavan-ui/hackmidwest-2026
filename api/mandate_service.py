@@ -16,6 +16,7 @@ from leash_shared.models import (
 )
 from principals import Principal
 from signing import sign_confirmation, signing_key, verify_confirmation
+from payment_operations import cancel_prepared
 
 
 def utc_now() -> datetime:
@@ -162,6 +163,7 @@ def replace(conn, mandate_id: str, principal: Principal, *, version: int,
   transition(conn, previous, MandateStatus.SUPERSEDED, now)
   insert_draft(conn, replacement, now)
   conn.execute("UPDATE mandate_heads SET current_version = %s WHERE id = %s", (replacement.version, mandate_id))
+  cancel_prepared(conn, principal.user_id, mandate_id=mandate_id, reason="mandate_replaced")
   audit(conn, EventType.MANDATE_UPDATED, replacement, now=now,
         extra={"superseded_version": version, "superseded_hash": content_hash})
   return replacement
@@ -170,9 +172,13 @@ def replace(conn, mandate_id: str, principal: Principal, *, version: int,
 def revoke(conn, mandate_id: str, principal: Principal, *, version: int,
            content_hash: str, now: datetime) -> PurchaseMandate:
   require_role(principal, "human")
+  # Same user -> mandate -> operation lock order as payment and replacement.
+  # Revocation remains callable after an account stop.
+  conn.execute("SELECT id FROM leash_users WHERE id=%s FOR UPDATE", (principal.user_id,))
   mandate = current_mandate(conn, mandate_id, principal, now=now, lock=True)
   now = utc_now()
   require_match(mandate, version, content_hash)
+  cancel_prepared(conn, principal.user_id, mandate_id=mandate_id, reason="mandate_revoked")
   if mandate.status == MandateStatus.REVOKED:
     return mandate
   revoked = PurchaseMandate.model_validate({**mandate.model_dump(), "status": "revoked"})

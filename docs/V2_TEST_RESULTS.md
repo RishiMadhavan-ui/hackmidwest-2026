@@ -1,5 +1,11 @@
 # V2 execution evidence and limits
 
+**Current R03/R11 evidence:** [149-test API and supporting regression results](R03_R11_TEST_RESULTS.md)
+supersede the prior integration suite counts below. Full canonical observation,
+committed preflight identity, retry/crash/scope barriers and Stop races are tested;
+financial activation, provider reconciliation and actual Graph remain unfinished.
+Historical outputs below are preserved without modification.
+
 ## Latest integration rerun on Cameron d773079
 
 The original f2f50a5 evidence below is retained as history. Current main includes
