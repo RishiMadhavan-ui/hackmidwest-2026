@@ -193,3 +193,35 @@ fences, conflict-marker and whitespace checks pass. Frozen R01 files are unchang
 No real inference, complete merchant/payment flow, fresh Docker build or hosted
 deployment is claimed; Compose is still absent. The disposable localhost test
 server is stopped after verification. The shared database remains untouched.
+
+## Current post-merge check — `266a805`
+
+Both teammate handoffs are now merged. Aditya's mode-bound credentials are used
+for registration, Leash MCP and isolated trace lanes; fallback mandates belong to
+the scripted agent. Cameron's deploy script uses root context and `api/Dockerfile`,
+API readiness uses `/readyz`, liveness uses its `/healthz` alias, and the agents
+manifest mounts a 5Gi PVC at `/app/trace-spool`. The scripted credential is named
+in `.env.example` and supplied through `app-env`; actual values and bindings were
+not read or changed. Public API health/readiness returned 200. PVC attachment and
+end-to-end purchase behavior were not inspected.
+
+The capture helper now passes an explicit fixture scripted token to registration
+and verifies the bearer header. Contract tests use the refreshed `266a805` capture;
+prior captures remain historical. Signup regression inputs follow the new fields,
+with account/card provider calls mocked. Migration replay expects all three SQL
+migrations. No provider, database provisioning or R03 implementation is performed.
+
+A separate authority issue remains in `api/cards.py`: agent/service tokens may
+supply another user's UUID and mint a card without a confirmed mandate, trusted
+checkout or grant. A fixture-only HTTP probe returned 201 and invoked the mocked
+issuer once, without mandate context. Signup also creates an OPEN VIRTUAL card
+outside the mandate chain. Coordinate with Cameron before enabling this as a
+purchase path; the cleanup deliberately does not redefine the card integration.
+
+Cleanup validation: 81 API tests pass with all 19 PostgreSQL tests enabled and all
+three migrations applied. The current merged agents suite passes 130 tests,
+including local subprocess wiring; two live inference tests are deselected.
+Refreshed peer capture, correctness lint E4/E7/E9/F and documentation/whitespace
+checks pass. A redundant SQL f-string prefix in auth was removed without changing
+the query. The disposable PostgreSQL instance was stopped; no shared database,
+Secret or provisioning changes were made. R03 remains untouched.

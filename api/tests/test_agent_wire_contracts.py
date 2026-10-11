@@ -276,7 +276,7 @@ class AgentWireContractTests(unittest.TestCase):
 class CapturedPeerContractTests(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.capture = json.loads((Path(__file__).parent / "fixtures/aditya-9edadab-wire.json").read_text(encoding="utf-8"))
+    cls.capture = json.loads((Path(__file__).parent / "fixtures/aditya-266a805-wire.json").read_text(encoding="utf-8"))
 
   def test_actual_mcp_serialization_matches_shared_wire_models(self):
     for call in self.capture["mcp_calls"]:

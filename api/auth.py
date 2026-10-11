@@ -147,7 +147,7 @@ def get_user_by_email(email: str) -> dict | None:
 def get_user_by_id(user_id: str) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(
-            f"""
+            """
             SELECT id, email, first_name, last_name, postal_code,
                    lithic_account_token, lithic_account_holder_token,
                    lithic_card_token, lithic_card_last_four, lithic_spend_limit_cents

@@ -120,12 +120,14 @@ def capture() -> dict:
   registration = {}
 
   def register_http(url, *, json, headers, timeout):
+    assert headers == {"Authorization": "Bearer fixture-scripted-token"}
     registration.update(path="/agent-runs", body=copy.deepcopy(json))
     return httpx.Response(201, json={"id": json["id"], "agent_mode": json["agent_mode"]})
 
-  with patch.dict(os.environ, {"API_URL": "https://api.test", "AGENT_TOKEN_SHOPPER": "fixture-token"}), \
+  with patch.dict(os.environ, {"API_URL": "https://api.test"}, clear=True), \
       patch("shopper.registration.httpx.post", side_effect=register_http):
-    register_run("run_demo", "mnd_demo", "scripted", model="scripted-shopper", provider="fixture")
+    register_run("run_demo", "mnd_demo", "scripted", "fixture-scripted-token",
+      model="scripted-shopper", provider="fixture")
   digest = "a" + "1234567890123456" + "b" * 47
   return {
     "source_commit": subprocess.check_output(["git", "rev-parse", "origin/main"], cwd=ROOT, text=True).strip(),

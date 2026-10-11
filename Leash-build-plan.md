@@ -308,3 +308,18 @@ Rishi must complete independent checkout verification, payments and R06 provenan
 stream delivery. Authority mutations are atomic in SQL; R04/R05 and Cameron must
 add coordinated Valkey grant invalidation before issuing any rail grant. Hosted
 deployment, shared database migration and complete Compose boot remain unverified.
+
+## Post-merge integration check — `266a805`
+
+R02 and both teammate handoffs are merged: separate live/scripted credentials,
+mandates and trace lanes, API root-context build, `/readyz` readiness and persistent
+trace-spool configuration. The public API health/readiness endpoints return 200.
+Actual Secrets, agent provisioning and PVC attachment remain unverified. R03 is
+not started. [The R02 handoff](api/r02-handoff.md) records the current fixture/test verification.
+
+Cameron's new `/cards` route permits agent/service credentials to choose a user
+and issue a card without a confirmed mandate, trusted checkout or grant; a
+fixture-only direct call reproduces this. Signup also creates an OPEN VIRTUAL
+card outside the mandate chain. Reconcile this sandbox plumbing with the existing
+firewall invariants; it is not evidence of a guarded payment flow. Rishi should
+coordinate this authority issue with Cameron before purchase integration.

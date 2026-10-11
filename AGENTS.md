@@ -27,7 +27,7 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's merged two-service MCP implementation. R02 adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron must update the API deployment build context before the updated API can be deployed. No shared database or deployed service was changed.
+October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's merged two-service MCP implementation. R02 adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron's API build-context/readiness changes are merged; the public readiness endpoint returns 200. No shared database or deployed service was changed.
 
 - **`api/`:** FastAPI with existing JWT signup/login/me, LEASH identity mapping, mandate lifecycle/history and agent-run registration. R02 adds Ed25519 confirmation, scoped operator-provisioned agents, checksummed SQL migrations and transactional audit records. `/health` and `/healthz` are liveness; `/readyz` checks migrations and database availability. Payments and provenance intake remain pending.
 - **`web/`:** Next.js App Router with signup/signin/profile, top nav + account menu, client `AuthProvider` / Bearer `localStorage`, and shadcn UI primitives. Mission Control / SSE / Attack Lab still planned.
@@ -157,7 +157,7 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 **Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** R01 remains the frozen contract baseline. R02 implements mandate ownership, confirmation and `/agent-runs`; API-owned confirmation/identity/version/hash remain forbidden in agent input. Aditya's merged shopper uses `services/mcp-leash/` and `services/mcp-store/`, with no direct Python shopping tools. Store evidence is inspected/redacted/snapshotted server-side and forwarded by hooks. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) distinguishes historical fixture captures from current integration status. Latest credential fixes on Aditya's branch use separate live/scripted agent identities, tokens, mandates and outbox lanes; merge those before claiming the scripted fallback works with R02. Packaging, API deployment context/readiness, persistent spool storage, protected merchant/rail, payments and provenance intake remain pending. The demo is live-first; no successful live injection is claimed.
+**Agent interface alignment:** R01 remains the frozen contract baseline. R02 implements mandate ownership, confirmation and `/agent-runs`; API-owned confirmation/identity/version/hash remain forbidden in agent input. Aditya's merged shopper uses `services/mcp-leash/` and `services/mcp-store/`, with no direct Python shopping tools. Store evidence is inspected/redacted/snapshotted server-side and forwarded by hooks. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) distinguishes historical fixture captures from current integration status. Aditya's separate live/scripted agent identities, tokens, mandates and outbox lanes are merged. Cameron's API root build context, readiness and persistent spool configuration are merged. Actual token values, agent bindings and PVC attachment remain unverified; shared installability, protected merchant/rail, payments and provenance intake remain pending. The demo is live-first; no successful live injection is claimed.
 
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
@@ -201,8 +201,6 @@ api/: PYTHONPATH=../shared uv run uvicorn main:app --reload --port 8000
 services/agents/: uv run uvicorn main:app --reload --port 8001
 services/mcp-leash/: uv run uvicorn main:app --reload --port 8002
 services/mcp-store/: uv run uvicorn main:app --reload --port 8003
-services/mcp-leash/: uv run uvicorn main:app --reload --port 8002
-services/mcp-store/: uv run uvicorn main:app --reload --port 8003
 web/: pnpm dev
 web/: pnpm lint
 web/: pnpm build
@@ -220,9 +218,25 @@ If a contract or external integration remains unclear, identify its owner and un
 R02 is implemented and ready for the agreed merge/deployment handoff; frozen R01 files are unchanged. The full
 API suite passes 81 tests including 19 real PostgreSQL integration tests; correctness
 lint passes. The local test database is disposable; no shared migration/deployment
-was run. Cameron must switch the API image build to repo-root context and use
-`/readyz` for readiness, supply signing/auth settings and `AGENT_TOKEN_SHOPPER_SCRIPTED`, then have the API operator bind separate live/scripted agents
-to the same intended human and their respective mode. Exact commands and request bodies are in the
+was run. Cameron's root-context build, `/readyz` readiness and persistent spool configuration
+are merged. Actual signing/auth Secret values and both agent bindings remain
+unverified; the API operator must bind separate live/scripted agents to the same
+intended human and their respective mode. Exact commands and request bodies are in the
 [R02 handoff](api/r02-handoff.md). SQL changes commit with audit records; R06 still
 relays those records. R04/R05 and Cameron must implement atomic rail-grant
 invalidation before issuing grants; pending audit delivery is not enforcement.
+
+## Post-merge R02 verification
+
+At `266a805`, both teammate handoffs are merged. The peer capture supplies the
+required mode-specific registration token, and R02 tests cover the current signup
+fields with Lithic mocked and all three migrations. Public `/backend/health` and
+`/backend/readyz` return 200; Secrets, database agent bindings and PVC attachment
+were not inspected. See [the current handoff](api/r02-handoff.md).
+
+**Unresolved authority issue:** `/cards` accepts agent/service tokens plus a
+caller-selected `user_id` and issues an instrument without confirmed mandate,
+trusted checkout or valid grant. The signup path also creates an OPEN VIRTUAL
+card outside the mandate chain. This is sandbox plumbing, not verified firewall
+payment issuance; reconcile it with invariants 1–3 before claiming authorization.
+A mocked direct call confirms the `/cards` bypass. R03 has not been started.

@@ -119,13 +119,19 @@ class PostgresAuthorityTests(unittest.TestCase):
     response = self.request("GET","/identity",token=self.user_token)
     self.assertEqual(response.json(),{"user_id":self.owner,"role":"human"})
     with db.get_conn() as conn:
-      self.assertEqual(conn.execute("SELECT count(*) AS n FROM schema_migrations").fetchone()["n"],2)
+      self.assertEqual(conn.execute("SELECT count(*) AS n FROM schema_migrations").fetchone()["n"],3)
       mapping=conn.execute("SELECT id FROM leash_users WHERE auth_user_id=%s",(self.legacy_auth_id,)).fetchone()
       self.assertEqual(mapping["id"],leash_user_id(str(self.legacy_auth_id)))
 
   def test_signup_login_identity_and_legacy_me_keep_uuid(self):
     email = uuid4().hex + "@example.com"
-    response = self.client.post("/auth/signup",json={"email":email,"password":"r02-password-valid"})
+    # Exercise current signup/SQL identity mapping without reaching Lithic.
+    with patch("auth.create_account_holder", return_value={
+      "account_token":"fixture-account", "account_holder_token":"fixture-holder"}), \
+        patch("auth.create_virtual_card", return_value={
+          "card_token":"fixture-card", "last_four":"1234", "spend_limit_cents":50000}):
+      response = self.client.post("/auth/signup",json={"email":email,"password":"r02-password-valid",
+        "first_name":"Demo", "last_name":"User", "postal_code":"64101", "spend_limit_cents":50000})
     self.assertEqual(response.status_code,201,response.text)
     payload = response.json()
     identity = self.request("GET","/identity",token=payload["access_token"])
