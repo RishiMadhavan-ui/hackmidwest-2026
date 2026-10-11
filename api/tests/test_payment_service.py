@@ -110,7 +110,11 @@ def _raw_store_checkout(*, sku: str = "CHG-65W", subscription: bool = False) -> 
 
 class PaymentServiceTests(unittest.TestCase):
   def setUp(self):
-    self.env = {"STORE_URL": "http://store.test", "STORE_API_TOKEN": "s" * 32}
+    self.env = {
+      "STORE_URL": "http://store.test",
+      "STORE_API_TOKEN": "s" * 32,
+      "STORE_CHARGE_TOKEN": "c" * 32,
+    }
     self.principal = Principal("agent", "usr_" + "a" * 32, "agt_" + "b" * 32)
 
   def mapped(self, store):

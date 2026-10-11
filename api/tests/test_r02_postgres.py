@@ -114,13 +114,34 @@ class PostgresAuthorityTests(unittest.TestCase):
     return {"id":"run_" + uuid4().hex,"mandate_id":mandate["id"],"agent_mode":mode,
             "model":"reported-model","provider":"reported-provider"}
 
+  def _stamp_checkout_trust(self, store, *, user_id, session_id):
+    stamped = dict(store)
+    stamped.update({
+      "user_id": user_id,
+      "session_id": session_id,
+      "revision": max(int(store.get("revision") or 1), 3),
+      "frozen": True,
+      "frozen_at": utc_now().isoformat().replace("+00:00", "Z"),
+      "expires_at": (utc_now() + timedelta(minutes=20)).isoformat().replace("+00:00", "Z"),
+      "expired": False,
+      "ownership_authenticated": True,
+    })
+    return stamped
+
   def payment_setup(self):
     active = self.active()
     run = self.run_body(active)
     self.assertEqual(self.request("POST", "/agent-runs", body=run).status_code, 201)
-    env = patch.dict(os.environ, {"STORE_URL": "http://isolated-store.test", "STORE_API_TOKEN": "s" * 32})
+    env = patch.dict(os.environ, {
+      "STORE_URL": "http://isolated-store.test",
+      "STORE_API_TOKEN": "s" * 32,
+      "STORE_CHARGE_TOKEN": "c" * 32,
+    })
     env.start()
     self.addCleanup(env.stop)
+    trust = patch("payment_service._establish_checkout_trust", side_effect=self._stamp_checkout_trust)
+    trust.start()
+    self.addCleanup(trust.stop)
     return active, run, {"mandate_id": active["id"], "run_id": run["id"], "checkout_id": "ckt_charger"}
 
   def payment_direct(self, body):
@@ -157,9 +178,15 @@ class PostgresAuthorityTests(unittest.TestCase):
     with db.get_conn() as conn:
       observation = conn.execute("SELECT * FROM checkout_observations WHERE payment_id=%s", (response.id,)).fetchone()
       self.assertEqual(observation["snapshot"]["items"][0]["sku"], "CHG-65W")
-      self.assertEqual(observation["source_facts"], _store_checkout())
+      base = _store_checkout()
+      for key in ("checkout_id", "currency", "line_items", "mcc", "merchant_descriptor",
+                  "recurring", "total_cents", "facts_hash", "status"):
+        self.assertEqual(observation["source_facts"][key], base[key])
+      self.assertEqual(observation["source_facts"]["user_id"], self.owner)
+      self.assertTrue(observation["source_facts"]["ownership_authenticated"])
       self.assertEqual(observation["run_id"], run["id"])
-      self.assertEqual(observation["evidence_assessment"]["merchant_ownership"], "unverified")
+      self.assertEqual(observation["evidence_assessment"]["merchant_ownership"], "verified")
+      self.assertEqual(observation["evidence_assessment"]["checkout_freeze"], "verified")
       self.assertFalse(observation["evidence_assessment"]["financial_authority"])
       events = conn.execute("SELECT record FROM audit_events WHERE record->'data'->>'payment_id'=%s ORDER BY sequence", (response.id,)).fetchall()
       self.assertEqual([row["record"]["type"] for row in events],
@@ -478,9 +505,14 @@ class PostgresAuthorityTests(unittest.TestCase):
     run = self.run_body(active)
     self.assertEqual(self.request("POST", "/agent-runs", body=run).status_code, 201)
     proposal = {"mandate_id": active["id"], "checkout_id": "ckt_charger", "run_id": run["id"]}
-    env = {"STORE_URL": "http://isolated-store.test", "STORE_API_TOKEN": "s" * 32}
+    env = {
+      "STORE_URL": "http://isolated-store.test",
+      "STORE_API_TOKEN": "s" * 32,
+      "STORE_CHARGE_TOKEN": "c" * 32,
+    }
     with (patch.dict(os.environ, env),
           patch("payment_service._fetch_store_checkout", return_value=_store_checkout()) as fetch,
+          patch("payment_service._establish_checkout_trust", side_effect=self._stamp_checkout_trust),
           patch("payment_service._seed_grant") as seed,
           patch("payment_service._bind_store") as bind):
       missing = {key: value for key, value in proposal.items() if key != "run_id"}
@@ -491,7 +523,8 @@ class PostgresAuthorityTests(unittest.TestCase):
       first = self.request("POST", "/payments", body=proposal)
       self.assertEqual(first.status_code, 200, first.text)
       self.assertEqual(first.json()["status"], "blocked")
-      self.assertEqual(first.json()["reasons"], ["checkout_source_unavailable_or_wrong_owner", "financial_authority_unavailable"])
+      # Ownership/freeze proof is present; spending remains closed.
+      self.assertEqual(first.json()["reasons"], ["financial_authority_unavailable"])
       self.assertIsNone(first.json()["grant_id"])
       self.assertNotIn("instrument_token", first.json())
       again = self.request("POST", "/payments", body=proposal)

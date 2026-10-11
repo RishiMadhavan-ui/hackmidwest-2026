@@ -64,6 +64,8 @@ class GrantSnapshot:
   checkout_id: str = ""
   checkout_hash: str = ""
   merchant_binding_id: str = ""
+  # Rail-local run scope (not a frozen R01 AuthorizationGrant field).
+  run_id: str = ""
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,8 @@ KILLSWITCH_KEY = "leash:killswitch"  # legacy operator/test global stop
 MANDATE_KEY = "leash:mandate:{mandate_id}"
 USER_KILL_KEY = "leash:killswitch:{user_id}"
 USER_GRANTS_KEY = "leash:user-grants:{user_id}"
+RUN_KILL_KEY = "leash:run-stop:{run_id}"
+RUN_GRANTS_KEY = "leash:run-grants:{run_id}"
 EVENT_STREAM = "leash:rail-events"
 
 
@@ -32,6 +34,7 @@ def grant_from_dict(data: dict[str, Any]) -> GrantSnapshot:
   fields["mandate_version"] = int(fields["mandate_version"])
   fields["authorized_amount_cents"] = int(fields["authorized_amount_cents"])
   fields["expires_at"] = datetime.fromisoformat(fields["expires_at"].replace("Z", "+00:00"))
+  fields.setdefault("run_id", "")
   return GrantSnapshot(**fields)
 
 
@@ -69,6 +72,8 @@ class MemoryGrantStore:
     self._mandates = {}
     self._killswitch = False
     self._user_kills = set()
+    self._run_kills = set()
+    self._run_grants: dict[str, set[str]] = {}
     self._purchases = {}
     self.audit_events = []
 
@@ -76,6 +81,8 @@ class MemoryGrantStore:
     with self._lock:
       if grant.user_id in self._user_kills:
         raise ValueError("User spending is stopped")
+      if grant.run_id and grant.run_id in self._run_kills:
+        raise ValueError("Run spending is stopped")
       old = self._grants.get(grant.grant_id)
       if old is not None or grant.instrument_token in self._instruments:
         if old == grant_to_dict(grant) and old["status"] == "ISSUED":
@@ -83,6 +90,8 @@ class MemoryGrantStore:
         raise ValueError("Grant/instrument already bound")
       self._grants[grant.grant_id] = grant_to_dict(grant)
       self._instruments[grant.instrument_token] = grant.grant_id
+      if grant.run_id:
+        self._run_grants.setdefault(grant.run_id, set()).add(grant.grant_id)
 
   def get_grant(self, grant_id):
     with self._lock:
@@ -121,10 +130,38 @@ class MemoryGrantStore:
       )
       return revoked
 
+  def stop_run(self, user_id: str, run_id: str) -> int:
+    """Revoke unused grants for one run; latch blocks later installs for that run."""
+    with self._lock:
+      self._run_kills.add(run_id)
+      revoked = 0
+      for grant_id in list(self._run_grants.get(run_id, ())):
+        grant = self._grants.get(grant_id)
+        if (
+          grant
+          and grant.get("user_id") == user_id
+          and grant.get("run_id") == run_id
+          and grant["status"] == "ISSUED"
+        ):
+          grant["status"] = "REVOKED"
+          revoked += 1
+      self.audit_events.append(
+        {
+          "type": "run.stop.enforced",
+          "user_id": user_id,
+          "run_id": run_id,
+          "revoked": revoked,
+        }
+      )
+      return revoked
+
   def _state(self, grant):
     authority = self._mandates.get(grant.mandate_id, {}) if grant else {}
+    run_stopped = bool(grant and grant.run_id and grant.run_id in self._run_kills)
     return AuthorityState(
-      killswitch_on=self._killswitch or bool(grant and grant.user_id in self._user_kills),
+      killswitch_on=self._killswitch
+      or bool(grant and grant.user_id in self._user_kills)
+      or run_stopped,
       mandate_status=authority.get("status", "missing"),
       current_mandate_version=authority.get("version", 0),
     )
@@ -215,7 +252,7 @@ if ARGV[3] == '1' then
   local current = redis.call('HGET',KEYS[1],'status')
   local tm = redis.call('TIME')
   local clock = tonumber(tm[1]) + tonumber(tm[2])/1000000
-  if redis.call('GET',KEYS[3]) == '1' or redis.call('GET',KEYS[6]) == '1' then reason='killswitch_on'
+  if redis.call('GET',KEYS[3]) == '1' or redis.call('GET',KEYS[6]) == '1' or redis.call('GET',KEYS[7]) == '1' then reason='killswitch_on'
   elseif not current then reason='no_grant'
   elseif current == 'REVOKED' then reason='grant_revoked'
   elseif current == 'CONSUMED' then reason='grant_consumed'
@@ -242,11 +279,15 @@ if redis.call('EXISTS',KEYS[1]) == 1 or redis.call('EXISTS',KEYS[2]) == 1 then
 end
 local index_type=redis.call('TYPE',KEYS[3]).ok
 if index_type ~= 'none' and index_type ~= 'set' then return 'conflict' end
+local run_index_type=redis.call('TYPE',KEYS[6]).ok
+if run_index_type ~= 'none' and run_index_type ~= 'set' then return 'conflict' end
 if redis.call('GET',KEYS[4]) == '1' then return 'conflict' end
-for i=4,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
+if redis.call('GET',KEYS[5]) == '1' then return 'conflict' end
+for i=5,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
 redis.call('HSET',KEYS[1],'binding_fingerprint',ARGV[1],'expires_epoch',ARGV[2])
 redis.call('SET',KEYS[2],ARGV[3])
 redis.call('SADD',KEYS[3],ARGV[3])
+if ARGV[4] ~= '' then redis.call('SADD',KEYS[6],ARGV[3]) end
 return 'ok'
 """
 
@@ -269,6 +310,21 @@ redis.call('XADD',KEYS[3],'*','type','killswitch.changed','user_id',ARGV[1],'rev
 return revoked
 """
 
+_RUN_KILL_LUA = """
+redis.call('SET',KEYS[1],'1')
+local revoked=0
+for _,id in ipairs(redis.call('SMEMBERS',KEYS[2])) do
+  local key='leash:grant:'..id
+  if redis.call('HGET',key,'status') == 'ISSUED'
+     and redis.call('HGET',key,'user_id') == ARGV[1]
+     and redis.call('HGET',key,'run_id') == ARGV[2] then
+    redis.call('HSET',key,'status','REVOKED'); revoked=revoked+1
+  end
+end
+redis.call('XADD',KEYS[3],'*','type','run.stop.enforced','user_id',ARGV[1],'run_id',ARGV[2],'revoked',tostring(revoked))
+return revoked
+"""
+
 
 class RedisGrantStore:
   def __init__(self, url):
@@ -282,16 +338,20 @@ class RedisGrantStore:
   def put_grant(self, grant):
     data = grant_to_dict(grant)
     fields = [value for key, item in data.items() for value in (key, str(item))]
+    run_id = grant.run_id or ""
     result = self._r.eval(
       _PUT_LUA,
-      4,
+      6,
       GRANT_KEY.format(grant_id=grant.grant_id),
       INSTRUMENT_KEY.format(token=grant.instrument_token),
       USER_GRANTS_KEY.format(user_id=grant.user_id),
       USER_KILL_KEY.format(user_id=grant.user_id),
+      RUN_KILL_KEY.format(run_id=run_id or "_none"),
+      RUN_GRANTS_KEY.format(run_id=run_id or "_none"),
       event_fingerprint(data),
       str(grant.expires_at.timestamp()),
       grant.grant_id,
+      run_id,
       *fields,
     )
     if result == "conflict":
@@ -327,9 +387,24 @@ class RedisGrantStore:
       )
     )
 
+  def stop_run(self, user_id: str, run_id: str) -> int:
+    return int(
+      self._r.eval(
+        _RUN_KILL_LUA,
+        3,
+        RUN_KILL_KEY.format(run_id=run_id),
+        RUN_GRANTS_KEY.format(run_id=run_id),
+        EVENT_STREAM,
+        user_id,
+        run_id,
+      )
+    )
+
   def load_state(self, grant):
     kill = self._r.get(KILLSWITCH_KEY) == "1" or bool(
       grant and self._r.get(USER_KILL_KEY.format(user_id=grant.user_id)) == "1"
+    ) or bool(
+      grant and grant.run_id and self._r.get(RUN_KILL_KEY.format(run_id=grant.run_id)) == "1"
     )
     raw = self._r.hgetall(MANDATE_KEY.format(mandate_id=grant.mandate_id)) if grant else {}
     return AuthorityState(kill, raw.get("status", "missing"), int(raw.get("version", 0)))
@@ -360,6 +435,7 @@ class RedisGrantStore:
           MANDATE_KEY.format(mandate_id=grant.mandate_id if grant else "_none"),
           EVENT_STREAM,
           USER_KILL_KEY.format(user_id=grant.user_id if grant else "_none"),
+          RUN_KILL_KEY.format(run_id=grant.run_id if grant and grant.run_id else "_none"),
         ],
         args=[
           fingerprint,

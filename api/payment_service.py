@@ -49,6 +49,10 @@ def _store_token() -> str:
   return os.getenv("STORE_API_TOKEN", "").strip()
 
 
+def _store_charge_token() -> str:
+  return os.getenv("STORE_CHARGE_TOKEN", "").strip()
+
+
 def _webhook_url() -> str:
   return os.getenv("WEBHOOK_URL", "").strip().rstrip("/")
 
@@ -60,6 +64,9 @@ def _webhook_internal_token() -> str:
 def _require_integrations() -> None:
   if not _store_url() or len(_store_token()) < 32:
     raise AuthorityError(503, "Trusted merchant STORE_URL/STORE_API_TOKEN is not configured")
+  charge = _store_charge_token()
+  if len(charge) < 32 or charge == _store_token():
+    raise AuthorityError(503, "Trusted merchant STORE_CHARGE_TOKEN must be set and distinct")
   parsed = urlsplit(_store_url())
   if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
       or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
@@ -111,9 +118,79 @@ def _map_checkout(
     raise AuthorityError(502, "Trusted checkout facts failed validation") from None
 
 
+def _merchant_trust_present(store: dict[str, Any]) -> bool:
+  return bool(
+    store.get("ownership_authenticated") is True
+    and store.get("frozen") is True
+    and store.get("expired") is False
+    and isinstance(store.get("user_id"), str)
+    and isinstance(store.get("session_id"), str)
+    and isinstance(store.get("revision"), int)
+    and store["revision"] >= 1
+    and isinstance(store.get("expires_at"), str)
+  )
+
+
+def _store_charge_headers() -> dict[str, str]:
+  return {
+    "Authorization": f"Bearer {_store_charge_token()}",
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  }
+
+
+def _establish_checkout_trust(
+  store: dict[str, Any],
+  *,
+  user_id: str,
+  session_id: str,
+) -> dict[str, Any]:
+  """Own + freeze at the merchant before treating evidence as authenticated."""
+  checkout_id = store["checkout_id"]
+  if store.get("expired") is True:
+    raise AuthorityError(409, "Trusted checkout expired")
+  owner = store.get("user_id")
+  session = store.get("session_id")
+  if owner is not None and owner != user_id:
+    raise AuthorityError(403, "Trusted checkout belongs to a different user")
+  if session is not None and owner == user_id and session != session_id:
+    raise AuthorityError(403, "Trusted checkout belongs to a different shopping session")
+  if (
+    _merchant_trust_present(store)
+    and store.get("user_id") == user_id
+    and store.get("session_id") == session_id
+  ):
+    return store
+  try:
+    with httpx.Client(timeout=5.0, follow_redirects=False) as client:
+      if owner is None:
+        owned = client.post(
+          f"{_checkout_url(checkout_id)}/own",
+          headers=_store_charge_headers(),
+          json={"user_id": user_id, "session_id": session_id},
+        )
+        if owned.status_code >= 400:
+          raise AuthorityError(502, "Trusted merchant rejected checkout ownership")
+        store = owned.json()
+      if store.get("frozen") is not True:
+        frozen = client.post(
+          f"{_checkout_url(checkout_id)}/freeze",
+          headers=_store_charge_headers(),
+          json={"expected_facts_hash": store["facts_hash"]},
+        )
+        if frozen.status_code >= 400:
+          raise AuthorityError(502, "Trusted merchant rejected checkout freeze")
+        store = frozen.json()
+  except httpx.HTTPError as exc:
+    raise AuthorityError(502, "Trusted merchant unreachable while establishing checkout trust") from exc
+  if not isinstance(store, dict) or store.get("checkout_id") != checkout_id:
+    raise AuthorityError(502, "Trusted merchant returned an invalid trusted checkout")
+  if not _merchant_trust_present(store) or store.get("user_id") != user_id:
+    raise AuthorityError(502, "Trusted merchant did not authenticate checkout ownership")
+  return store
+
+
 def _map_checkout_facts(store, *, user_id, payment_id, now):
-  # This connector has no durable owner/session/expiry proof yet. These are
-  # preflight observations, never sufficient to issue spending authority.
   if store.get("status") != "open" or store.get("currency") != "USD":
     raise ValueError("Invalid checkout state or currency")
   lines = store["line_items"]
@@ -153,14 +230,30 @@ def _map_checkout_facts(store, *, user_id, payment_id, now):
   if hashlib.sha256(canonical_json(facts).encode("utf-8")).hexdigest() != store["facts_hash"]:
     raise ValueError("Checkout facts hash mismatch")
   retrieved = now
-  expires = now + CHECKOUT_TTL
+  trusted = _merchant_trust_present(store) and store.get("user_id") == user_id
+  if trusted:
+    try:
+      expires = datetime.fromisoformat(str(store["expires_at"]).replace("Z", "+00:00"))
+    except ValueError as exc:
+      raise ValueError("Invalid merchant checkout expiry") from exc
+    if expires.tzinfo is None or expires <= now:
+      raise ValueError("Merchant checkout expired")
+    revision = int(store["revision"])
+    session_id = str(store["session_id"])
+    owner_id = str(store["user_id"])
+  else:
+    # Legacy observation path for unit fixtures without merchant trust fields.
+    expires = now + CHECKOUT_TTL
+    revision = 1
+    session_id = f"ses_{store['checkout_id']}"
+    owner_id = user_id
   return CheckoutSnapshot(
     checkout_id=str(store["checkout_id"]),
-    revision=1,
+    revision=revision,
     purchase_attempt_id=payment_id,
-    user_id=user_id,
+    user_id=owner_id,
     merchant_id=MERCHANT_ID,
-    session_id=f"ses_{store['checkout_id']}",
+    session_id=session_id,
     merchant=Merchant(
       name="Volt Supply Co.",
       descriptor=descriptor,
@@ -240,11 +333,7 @@ def _bind_store(
     with httpx.Client(timeout=5.0) as client:
       res = client.post(
         f"{_store_url()}/api/checkouts/{checkout_id}/bind",
-        headers={
-          "Authorization": f"Bearer {_store_token()}",
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
+        headers=_store_charge_headers(),
         json=body,
       )
   except httpx.HTTPError as exc:
@@ -341,11 +430,24 @@ def request_payment(conn, body: PaymentProposal, principal: Principal) -> Paymen
     store = _fetch_store_checkout(body.checkout_id)
     if store.get("checkout_id") != body.checkout_id:
       raise AuthorityError(502, "Trusted merchant returned a different checkout")
+    store = _establish_checkout_trust(
+      store,
+      user_id=principal.user_id,
+      session_id=f"ses_{body.run_id}",
+    )
     checkout = _map_checkout(store, user_id=principal.user_id, payment_id=operation["id"], now=utc_now())
     source_facts = {key: store[key] for key in (
       "checkout_id", "currency", "line_items", "mcc", "merchant_descriptor",
       "recurring", "total_cents", "facts_hash", "status",
     )}
+    source_facts.update({
+      "user_id": store.get("user_id"),
+      "session_id": store.get("session_id"),
+      "revision": store.get("revision"),
+      "frozen": store.get("frozen"),
+      "expires_at": store.get("expires_at"),
+      "ownership_authenticated": store.get("ownership_authenticated"),
+    })
     if canonical_json(sanitize_event_data(source_facts)) != canonical_json(source_facts):
       raise AuthorityError(502, "Trusted checkout contains sensitive data")
   except AuthorityError as error:
@@ -365,10 +467,10 @@ def request_payment(conn, body: PaymentProposal, principal: Principal) -> Paymen
       raise AuthorityError(409, "Concurrent checkout observation conflicts with the original evidence")
     return _original_response(conn, operation)
   now = utc_now()
+  checkout_authenticated = _merchant_trust_present(store) and store.get("user_id") == principal.user_id
   verification = verify_checkout(
     mandate, checkout, now=now, confirmation_valid=_confirmation_valid(conn, mandate),
-    # A merchant service bearer authenticates transport, not checkout ownership.
-    checkout_authenticated=False,
+    checkout_authenticated=checkout_authenticated,
     successful_purchases=_successful_purchases(conn, principal.user_id, mandate),
   )
   reasons = tuple(dict.fromkeys((*verification.reasons, "financial_authority_unavailable")))
