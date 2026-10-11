@@ -133,6 +133,115 @@ export async function fetchBalance(token?: string | null) {
   return apiFetch<Balance>("/auth/balance", {}, token);
 }
 
+export async function logoutSession(token?: string | null) {
+  return apiFetch<void>("/auth/logout", { method: "POST" }, token);
+}
+
+export type ActivityEvent = {
+  sequence: number;
+  event_id: string;
+  type: string;
+  at: string;
+  user_id: string;
+  data: Record<string, unknown>;
+};
+
+export type ActivityHistory = {
+  events: ActivityEvent[];
+  next_cursor: number | null;
+};
+
+export async function fetchActivity(
+  after = 0,
+  limit = 100,
+  token?: string | null,
+) {
+  const params = new URLSearchParams({
+    after: String(after),
+    limit: String(limit),
+  });
+  return apiFetch<ActivityHistory>(`/activity?${params}`, {}, token);
+}
+
+/**
+ * Stream activity via SSE using fetch (Bearer header; EventSource cannot set it).
+ * Calls onEvent for each activity row; onStatus for connection state.
+ */
+export function streamActivity(handlers: {
+  onEvent: (event: ActivityEvent) => void;
+  onStatus?: (status: "connecting" | "live" | "error") => void;
+  onError?: (error: Error) => void;
+  after?: number;
+  token?: string | null;
+  signal?: AbortSignal;
+}): () => void {
+  const auth = handlers.token === undefined ? getStoredToken() : handlers.token;
+  const after = handlers.after ?? 0;
+  const controller = new AbortController();
+  if (handlers.signal) {
+    if (handlers.signal.aborted) controller.abort();
+    else {
+      handlers.signal.addEventListener("abort", () => controller.abort(), {
+        once: true,
+      });
+    }
+  }
+
+  handlers.onStatus?.("connecting");
+
+  (async () => {
+    try {
+      const response = await fetch(
+        `${API_URL}/activity/stream?after=${after}`,
+        {
+          headers: auth ? { Authorization: `Bearer ${auth}` } : {},
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok || !response.body) {
+        throw new ApiError(response.status, `Activity stream failed (${response.status})`);
+      }
+      handlers.onStatus?.("live");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          let eventName = "message";
+          let dataLine = "";
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              dataLine += line.slice(5).trim();
+            }
+          }
+          if (eventName === "activity" && dataLine) {
+            try {
+              handlers.onEvent(JSON.parse(dataLine) as ActivityEvent);
+            } catch {
+              // ignore malformed frames
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      handlers.onStatus?.("error");
+      handlers.onError?.(
+        err instanceof Error ? err : new Error("Activity stream disconnected"),
+      );
+    }
+  })();
+
+  return () => controller.abort();
+}
+
 /** Display-only conversion; money stays integer cents on the wire. */
 export function formatUsdFromCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";

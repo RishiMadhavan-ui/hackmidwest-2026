@@ -1,0 +1,53 @@
+# In-cluster Valkey for grant / idempotency / kill-switch state (C01/C04).
+# Ephemeral: demo-friendly; restart loses in-flight grants (acceptable for hackathon).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:8-alpine
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: valkey
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379

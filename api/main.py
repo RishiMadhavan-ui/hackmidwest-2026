@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from activity import router as activity_router
 from auth import router as auth_router
 from authority_errors import AuthorityError, DatabaseUnavailable
 from cards import router as cards_router
@@ -35,6 +36,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(cards_router)
 app.include_router(mandate_router)
+app.include_router(activity_router)
 
 
 @app.exception_handler(AuthorityError)

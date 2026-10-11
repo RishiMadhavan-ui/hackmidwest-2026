@@ -59,8 +59,9 @@ export function SiteNav() {
                   <Menu.Item
                     className={itemClassName}
                     onClick={() => {
-                      logout();
-                      router.push("/");
+                      void logout().finally(() => {
+                        router.push("/");
+                      });
                     }}
                   >
                     Sign out
