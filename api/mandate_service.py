@@ -1,6 +1,8 @@
 """Transactional authority lifecycle; no model or merchant content can approve."""
 
 import base64
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -14,7 +16,7 @@ from leash_shared.models import (
   AgentRun, AgentRunRegistration, MandateProposal, MandateStatus,
   PurchaseMandate, canonical_json,
 )
-from principals import Principal
+from principals import Principal, bind_agent, token_digest
 from signing import sign_confirmation, signing_key, verify_confirmation
 
 
@@ -109,6 +111,75 @@ def propose(conn, proposal: MandateProposal, principal: Principal, *, now: datet
                      user_id=principal.user_id, agent_id=principal.agent_id, now=now)
   conn.execute("INSERT INTO mandate_heads (id, user_id, agent_id, current_version) VALUES (%s, %s, %s, 1)",
                (draft.id, draft.user_id, draft.agent_id))
+  insert_draft(conn, draft, now)
+  return draft
+
+
+def draft_agent_for_user(conn, user_id: str) -> str:
+  """Pick an owned shopper agent for a human-authored draft.
+
+  Prefers an existing live binding. If the account has no agent yet, provisions a
+  live agent using AGENT_TOKEN_SHOPPER when configured (local/demo), otherwise a
+  random credential so Mission Control can still create drafts before MCP is wired.
+  """
+  row = conn.execute(
+    """SELECT id FROM leash_agents
+       WHERE user_id = %s AND enabled
+       ORDER BY CASE WHEN allowed_modes @> %s::jsonb THEN 0 ELSE 1 END, id
+       LIMIT 1""",
+    (user_id, Jsonb(["live"])),
+  ).fetchone()
+  if row:
+    return str(row["id"])
+
+  env_token = os.getenv("AGENT_TOKEN_SHOPPER", "").strip()
+  if len(env_token) >= 32:
+    owned = conn.execute(
+      "SELECT id, user_id FROM leash_agents WHERE token_sha256 = %s",
+      (token_digest(env_token),),
+    ).fetchone()
+    if owned is not None:
+      if str(owned["user_id"]) != user_id:
+        raise AuthorityError(
+          409,
+          "Configured AGENT_TOKEN_SHOPPER is bound to another human",
+        )
+      return str(owned["id"])
+    agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
+    bind_agent(
+      conn, user_id=user_id, agent_id=agent_id, token=env_token, modes=("live",),
+    )
+    return agent_id
+
+  agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
+  bind_agent(
+    conn,
+    user_id=user_id,
+    agent_id=agent_id,
+    token=secrets.token_hex(32),
+    modes=("live",),
+  )
+  return agent_id
+
+
+def propose_human(
+  conn, proposal: MandateProposal, principal: Principal, *, now: datetime,
+) -> PurchaseMandate:
+  """Mission Control / human UI draft. Still requires explicit confirm to activate."""
+  require_role(principal, "human")
+  agent_id = draft_agent_for_user(conn, principal.user_id)
+  draft = make_draft(
+    proposal,
+    mandate_id="mnd_" + uuid4().hex,
+    version=1,
+    user_id=principal.user_id,
+    agent_id=agent_id,
+    now=now,
+  )
+  conn.execute(
+    "INSERT INTO mandate_heads (id, user_id, agent_id, current_version) VALUES (%s, %s, %s, 1)",
+    (draft.id, draft.user_id, draft.agent_id),
+  )
   insert_draft(conn, draft, now)
   return draft
 

@@ -124,7 +124,17 @@ function formatWhen(iso: string): string {
   });
 }
 
-export function ActivityFeed() {
+export function ActivityFeed({
+  title = "Activity",
+  description = "Live feed of account, card, and LEASH events for this profile",
+  onEventsChange,
+  className,
+}: {
+  title?: string;
+  description?: string;
+  onEventsChange?: (events: ActivityEvent[]) => void;
+  className?: string;
+} = {}) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +163,10 @@ export function ActivityFeed() {
   }, []);
 
   useEffect(() => {
+    onEventsChange?.(events);
+  }, [events, onEventsChange]);
+
+  useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
@@ -161,13 +175,11 @@ export function ActivityFeed() {
   const newestFirst = [...events].reverse();
 
   return (
-    <section className="flex min-h-[22rem] flex-col">
+    <section className={`flex min-h-[22rem] flex-col ${className ?? ""}`}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold tracking-tight">Activity</h2>
-          <p className="text-xs text-muted-foreground">
-            Live feed of account, card, and LEASH events for this profile
-          </p>
+          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
         <span
           className={

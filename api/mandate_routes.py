@@ -1,4 +1,4 @@
-"""REST boundary: agents draft, authenticated humans confirm exact content."""
+"""REST boundary: agents or humans may draft; only humans confirm exact content."""
 
 from typing import Annotated
 
@@ -11,8 +11,8 @@ from leash_shared.models import (
   MandateStatus, PurchaseMandate, Sha256, Version,
 )
 from mandate_service import (
-  approve, current_mandate, list_mandates, propose, register_run, replace,
-  revoke, scope_head, utc_now, version_record,
+  approve, current_mandate, list_mandates, propose, propose_human, register_run,
+  replace, revoke, scope_head, utc_now, version_record,
 )
 from principals import Principal, require_agent, require_human, require_reader
 
@@ -54,6 +54,14 @@ def identity(principal: Human) -> dict[str, str]:
 def propose_mandate(body: MandateProposal, principal: Agent):
   with get_conn() as conn:
     record = propose(conn, body, principal, now=utc_now())
+  return record
+
+
+@router.post("/mandates/draft", response_model=PurchaseMandate, status_code=201)
+def draft_mandate(body: MandateProposal, principal: Human):
+  """Human Mission Control draft. Does not activate until POST .../approve."""
+  with get_conn() as conn:
+    record = propose_human(conn, body, principal, now=utc_now())
   return record
 
 

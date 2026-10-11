@@ -17,7 +17,7 @@ from authority_errors import AuthorityError, DatabaseUnavailable  # noqa: E402
 from leash_shared.models import MandateProposal, PurchaseMandate  # noqa: E402
 from main import app, on_startup  # noqa: E402
 from mandate_routes import MandateConfirmation  # noqa: E402
-from mandate_service import approve, make_draft, replace, revoke  # noqa: E402
+from mandate_service import approve, make_draft, propose_human, replace, revoke  # noqa: E402
 from principals import Principal, leash_user_id, require_agent, require_human, require_reader  # noqa: E402
 from signing import sign_confirmation, signing_key, verify_confirmation  # noqa: E402
 
@@ -76,6 +76,21 @@ class SigningTests(unittest.TestCase):
         operation(None,"mnd_test",Principal("agent","usr_test","agt_shopper",("live",)),
                   version=1,content_hash=self.draft.canonical_payload_hash,now=self.now,**options)
       self.assertEqual(error.exception.status,403)
+
+  def test_human_draft_rejects_agent_principal(self):
+    proposal = MandateProposal(
+      description="Buy a USB-C charger. No subscriptions.",
+      category="laptop_charger",
+      max_cents=3999,
+    )
+    with self.assertRaises(AuthorityError) as error:
+      propose_human(
+        None,
+        proposal,
+        Principal("agent", "usr_test", "agt_shopper", ("live",)),
+        now=self.now,
+      )
+    self.assertEqual(error.exception.status, 403)
 
 
 class RouteBoundaryTests(unittest.TestCase):

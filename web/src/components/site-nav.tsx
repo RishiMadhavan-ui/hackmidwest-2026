@@ -25,7 +25,7 @@ export function SiteNav() {
 
   return (
     <header className="border-b border-border">
-      <div className="mx-auto flex h-14 w-full max-w-3xl items-center justify-between gap-4 px-4">
+      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-4">
         <Link href="/" className="text-sm font-semibold tracking-tight">
           LEASH
         </Link>
@@ -50,6 +50,12 @@ export function SiteNav() {
                     "data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
                   )}
                 >
+                  <Menu.Item
+                    className={itemClassName}
+                    onClick={() => router.push("/mission-control")}
+                  >
+                    Mission Control
+                  </Menu.Item>
                   <Menu.Item
                     className={itemClassName}
                     onClick={() => router.push("/profile")}
