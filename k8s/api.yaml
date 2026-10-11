@@ -27,6 +27,9 @@ spec:
               value: http://agents:8000
             - name: API_URL
               value: http://api:8000
+            # Trusted merchant for checkout verify (R03) — in-cluster Service.
+            - name: STORE_URL
+              value: http://store:8000
           ports:
             - containerPort: 8000
           readinessProbe:

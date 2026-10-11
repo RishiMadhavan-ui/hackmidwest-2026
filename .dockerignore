@@ -18,8 +18,10 @@ web
 services/mcp
 services/mcp-leash
 services/mcp-store
-services/store
-# webhook image builds from repo root (needs services/webhook + shared/).
+# store + webhook images build from repo root (need services/* + shared/).
+services/store/**/__pycache__
+services/store/.venv
+services/store/tests
 services/webhook/**/__pycache__
 services/webhook/.venv
 services/webhook/tests
@@ -28,4 +30,3 @@ docs
 infra
 .idea
 .cursor
-# Note: store/mcp images use their own directory as Docker context (not this file).

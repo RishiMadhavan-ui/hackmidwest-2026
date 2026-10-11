@@ -35,7 +35,8 @@ October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/bu
 - **`services/mcp-leash/`:** Streamable HTTP MCP thin adapter with four tools forwarding to api (`propose_mandate`, `list_mandates`, `request_payment`, `check_status`). In-cluster `:8002`; public via web rewrite `/mcp-leash/*`.
 - **`services/mcp-store/`:** Store MCP with `browse`, `create_checkout`, `complete_checkout`; its own `STORE_MCP_TOKEN` auth and a separate store credential; store-only browsing with server-side page inspection and redacted snapshots. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
 - **`services/webhook/`:** Labeled local rail (`POST /local/authorize`) and Lithic ASA adapter (`POST /lithic/asa`) over shared `decide()` + Valkey. Public via web rewrite `/rail/*`. Post-decision activity notifies `POST /internal/activity`.
-- **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, valkey, webhook, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `VALKEY_URL` / `WEBHOOK_INTERNAL_TOKEN` / MCP URLs / agent tokens / image registry. Managed Postgres `hackmidwest-db` + in-cluster Valkey exist. Compose and controlled store HTTP remain planned; R02 domain migrations are implemented. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
+- **`services/store/`:** Simulated Volt Supply Co. merchant (catalog HTML, checkouts, Lithic sandbox complete). In-cluster `:8000` as Service `store`; public via web rewrite `/store/*`.
+- **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, store, valkey, webhook, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `VALKEY_URL` / `WEBHOOK_INTERNAL_TOKEN` / MCP URLs / agent tokens / image registry. Managed Postgres `hackmidwest-db` + in-cluster Valkey exist. R02 domain migrations are implemented. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -53,8 +54,8 @@ human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
 | Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
 | Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
-| Merchant / payment rail | `services/store/` planned; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail; Lithic ASA later; atomic enforcement |
-| Database / Valkey / deployment | `k8s/` (+ valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
+| Merchant / payment rail | `services/store/` simulated merchant; `services/webhook/` local rail + Valkey + ASA | Cameron | Canonical catalog/checkout; local rail; Lithic ASA; atomic enforcement |
+| Database / Valkey / deployment | `k8s/` (+ store/valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
 
 ## Repository tree
 
@@ -65,7 +66,7 @@ hackmidwest-2026/
   AGENTS.md                          [E] shared coding rules/ownership
   Leash-build-plan.md                 [E] shared team execution plan
   README.md                          [P] shared setup/product guide
-  docker-compose.yml                 [P] Cameron: integrated local runtime
+  docker-compose.yml                 [P] unused — LKE/`k8s/` is the integrated runtime
   .env.example                       [E] Cameron: configuration names only
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
@@ -113,8 +114,10 @@ hackmidwest-2026/
       store.py / handler.py / main.py [E] Valkey consume + /local/authorize
       tests/                         [E] handler/concurrency tests
       Dockerfile                     [E] amd64; COPY runtime modules
-    store/                           [P] Cameron: controlled merchant
-      tests/                         [P] catalog/checkout/correlation tests
+    store/                           [E] Cameron: simulated Volt Supply merchant
+      catalog.py / pages.py / main.py [E] HTML listings + checkout truth + Lithic complete
+      tests/                         [E] evil toggle / catalog truth / complete
+      Dockerfile                     [E] amd64; COPY runtime modules + shared lithic
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
     src/app/                         [E] home, signup (name/zip), signin, profile (Lithic card credit)
     src/components/                  [E] site-nav + ui primitives
@@ -166,12 +169,12 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
-**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, `services/mcp-store/Dockerfile`, and `services/webhook/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
+**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, `services/mcp-store/Dockerfile`, `services/webhook/Dockerfile`, and `services/store/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
 
 ## Engineering requirements
 
 - Python 3.12+, FastAPI, Pydantic v2; TypeScript strict mode, Next.js App Router, 2-space indentation for new code. Ruff configuration is planned, not present at root. Do not reformat another owner's files.
-- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, or `services/webhook/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
+- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, `services/webhook/`, or `services/store/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
 - Money is integer minor units; the USD MVP uses `_cents` fields, never float dollars. Validate amounts, quantities, supported currencies, required checkout fields, and UTC-aware timestamps. Convert only for display.
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.

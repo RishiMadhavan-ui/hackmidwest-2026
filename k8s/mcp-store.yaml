@@ -1,6 +1,5 @@
 # mcp-store MCP server. ClusterIP only: agents call it inside the cluster.
-# STORE_URL / STORE_PUBLIC_URLS / STORE_API_TOKEN / STORE_MCP_TOKEN come from
-# app-env (team .env). Demo merchant: https://evil-store-six.vercel.app
+# STORE_URL points at the in-cluster simulated merchant (services/store).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,6 +22,11 @@ spec:
           envFrom:
             - secretRef:
                 name: app-env
+          env:
+            - name: STORE_URL
+              value: http://store:8000
+            - name: STORE_PUBLIC_URLS
+              value: http://store:8000
           ports:
             - containerPort: 8003
           readinessProbe:
