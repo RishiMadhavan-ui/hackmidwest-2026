@@ -353,7 +353,7 @@ def update_card_state(card_token: str, state: str) -> dict[str, Any]:
 
 def enroll_asa_responder(url: str) -> dict[str, Any]:
     """Enroll a publicly reachable ASA responder URL (sandbox self-serve)."""
-    body = {"type": "ASA_RESPONDER", "url": url}
+    body = {"type": "AUTH_STREAM_ACCESS", "url": url}
     try:
         with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
             res = client.post("/v1/responder_endpoints", headers=_headers(), json=body)
