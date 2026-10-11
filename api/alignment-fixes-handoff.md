@@ -158,7 +158,7 @@ never silently alter applied checksums. No shared migration was run in this task
 1. **Cameron / C02:** supply authenticated canonical checkout GET/freeze/bind/charge,
    same-merchant/2999/USD products and a safe alternative. Enforce exact checkout
    association when actually charging, mandatory store auth and owner/session scope.
-   The store does not yet exist; MCP forwarding tests use substitutes.
+   The merged simulated store now has mandatory authenticated create/read and same-price canonical SKU/recurrence facts, but checkouts are process memory. Completion is disabled (503): no ownership/freeze/binding/payment operation exists. Preserve aliases CHG-65W/SUB-CARE-MO; no provider keys belong in the store pod.
 2. **Rishi / R03–R04/R11:** connect trusted retrieval to existing policy; persist
    attempts/verification/payment operations before side effects, protected binding
    activation, once-only delivery and reconciliation. Connect individual mandate
@@ -180,14 +180,15 @@ never silently alter applied checksums. No shared migration was run in this task
 
 - API: 107 tests pass with real disposable PostgreSQL (25 SQL tests), including
   the opt-in stack smoke described below.
-- Stack smoke: real local API/Redis rail/Next standalone, seeded backend fixture
+- Stack smoke: real local API/Redis rail/store/Next standalone, seeded backend fixture
   grant, human stop acknowledgment, real rail→API delivery and persisted SSE through
-  Next. No merchant/model/provider call/full purchase demo.
+  Next. Simulated storefront/private-auth/blocked-charge routing is tested; no model/provider call/full purchase demo.
 - Rail: **45 tests pass**, including 14 real Redis tests; replay/concurrency/server-clock expiry,
   stop races, two-grant purchase scope, wrong stream type, delivery outage and crash
   replay. Redis 6 test engine, not live deployed Valkey8.
 - Agents: 131 passed, 2 live inference tests deselected; actual SDK subprocess MCP
   tests use substitute API/store/model. Both MCP suites previously passed (33/40).
+- Store: **15 tests pass** for canonical products, poison toggle, mandatory auth, validation redaction and disabled unverified charge. Source checkout ownership/durable freeze and protected completion remain pending.
 - Web lint/build pass; six live E2E scenarios are skipped. No browser interaction,
   Docker image build, cluster apply, provider enrollment or live sandbox proof.
 

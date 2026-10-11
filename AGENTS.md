@@ -33,7 +33,7 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`) and ASA adapter (`a9e8cba`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; completion is disabled until protected binding/payment operations exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
 
 **Historical integration snapshot (superseded by the current handoff):**
 
@@ -43,9 +43,10 @@ October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/bu
 - **`web/`:** signup/signin/profile, genuine fetch SSE/stream proxy, human stop control and legacy-only card headroom. Signup never presents spending authority. Mission Control/confirmation/comparison/incidents/Attack Lab remain pending; existing custom JWT is preserved.
 - **`services/agents/`:** single Strands shopper Agent, guardian and durable provenance spool. Real Graph, automatic containment/recovery, durable progress/fencing and cancellation-control polling remain Aditya's work. Configured provider attribution never proves live inference.
 - **`services/mcp-leash/`:** four thin financial tools on internal `:8002/mcp`, forwarding the agent bearer. Payment timeout reports unknown and forbids another purchase until reconciled; durable payment-operation IDs remain pending.
-- **`services/mcp-store/`:** authenticated browse/create/complete tools on internal `:8003/mcp`, distinct store credential, store-only redirects and sanitized evidence. Cameron's canonical merchant target is still absent.
+- **`services/mcp-store/`:** authenticated browse/create/complete tools on internal `:8003/mcp`, distinct store credential, store-only redirects and sanitized evidence. Cameron's simulated merchant create/read target exists; protected completion remains unavailable.
 - **`services/webhook/`:** strict local charge credential; complete frozen grants with checkout binding and <=30-minute lifetime; Valkey atomic consume/cache/event + human stop latch. Separate signed ASA adapter requires HMAC and always fails closed without trusted checkout correlation. Provider pause/close accepts only confirmed card identity/state; simulation HTTP route is unavailable until durable payment operations exist. Rail stream relay writes through API with an event-only credential outside the hot path.
-- **Deploy:** existing LKE topology preserved; explicit Secret-key allowlists, persistent Valkey AOF/PVC, financial NetworkPolicy and root-context API/webhook images. Public MCP proxies default off; only exact `/rail/lithic/asa` is publicly proxied and requires HMAC plus an externally configured HTTPS endpoint. TLS/CNI policy enforcement/image imports/PVC/Secrets/agent binding and actual deployment remain unverified. Shared packaging and optional local Compose remain pending.
+- **`services/store/`:** simulated Volt Supply Co. catalog/listings and process-memory checkout create/read. `STORE_API_TOKEN` is mandatory (>=32 characters); `/readyz` checks configuration. Same-merchant/2999/USD charger and subscription have distinct canonical SKU/category/attributes/recurrence. Completion returns 503 without provider side effects; owned sessions, durable freeze/revision and protected charge remain Cameron's C02 work. Public proxy exposes listings only.
+- **Deploy:** existing LKE topology preserved; explicit Secret-key allowlists, persistent Valkey AOF/PVC, financial NetworkPolicy and root-context API/store/webhook images. Public MCP proxies default off; only exact `/rail/lithic/asa` is publicly proxied and requires HMAC plus an externally configured HTTPS endpoint. TLS/CNI policy enforcement/image imports/PVC/Secrets/agent binding and actual deployment remain unverified. Shared packaging and optional local Compose remain pending.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -66,8 +67,8 @@ human confirmation -> immutable mandate -> real Strands Graph
 | Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
 | Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
-| Merchant / payment rail | `services/store/` planned; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail/ASA adapter; trusted correlation and live proof pending |
-| Database / Valkey / deployment | `k8s/` (+ valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
+| Merchant / payment rail | `services/store/` catalog/checkouts; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail/ASA adapter; trusted correlation and live proof pending |
+| Database / Valkey / deployment | `k8s/` (+ store/valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
 
 ## Repository tree
 
@@ -83,7 +84,7 @@ hackmidwest-2026/
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
   infra/                             [P] Cameron: Akamai deployment
-  k8s/                               [E] Cameron: api/web/agents/mcp-leash/mcp-store/valkey/webhook/service
+  k8s/                               [E] Cameron: api/web/agents/mcp-leash/mcp-store/store/valkey/webhook/service
   scripts/                           [E] Cameron: deploy_lke.sh + lib.sh / PostgreSQL + LKE (Akamai; no AWS)
   mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
@@ -131,8 +132,10 @@ hackmidwest-2026/
       asa.py / activity_notify.py    [E] signed adapter + durable API relay
       tests/                         [E] handler/concurrency tests
       Dockerfile                     [E] amd64; COPY runtime modules
-    store/                           [P] Cameron: controlled merchant
-      tests/                         [P] catalog/checkout/correlation tests
+    store/                           [E] Cameron: simulated Volt Supply merchant
+      catalog.py / pages.py / main.py [E] catalog/listings + authenticated checkouts; charge disabled
+      tests/                         [E] catalog/auth/redaction/disabled-charge tests
+      Dockerfile                     [E] amd64; COPY runtime modules + shared lithic
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
     src/app/                         [E] home, signup (name/zip), signin, profile (events, stop, legacy headroom)
     src/components/                  [E] site-nav + ui primitives
@@ -191,12 +194,12 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
 
-**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, `services/mcp-store/Dockerfile`, and `services/webhook/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
+**Docker images are not automatic package installs of the whole tree.** `api/Dockerfile`, `services/agents/Dockerfile`, `services/mcp-leash/Dockerfile`, `services/mcp-store/Dockerfile`, `services/webhook/Dockerfile`, and `services/store/Dockerfile` explicitly `COPY` the Python modules the container needs. Adding a new module, package directory, or import path **must** update that service’s Dockerfile (and `.dockerignore` if needed) in the same change. Omitting a file produces a green local `uv run` and a crashing LKE pod (`ModuleNotFoundError`). New HTTP routes alone are not enough if they live in new files. Prefer copying the required runtime modules (or an explicit package tree) over assuming `uv sync` installs application source.
 
 ## Engineering requirements
 
 - Python 3.12+, FastAPI, Pydantic v2; TypeScript strict mode, Next.js App Router, 2-space indentation for new code. Ruff configuration is planned, not present at root. Do not reformat another owner's files.
-- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, or `services/webhook/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
+- When adding or renaming runtime modules under `api/`, `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, `services/webhook/`, or `services/store/`, update that service’s Dockerfile `COPY` list in the same PR/commit (see Docker note above).
 - Money is integer minor units; the USD MVP uses `_cents` fields, never float dollars. Validate amounts, quantities, supported currencies, required checkout fields, and UTC-aware timestamps. Convert only for display.
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
@@ -281,6 +284,6 @@ not been started, and deployment of this patch remains Cameron's task.
 
 ## Current alignment handoff
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`) and ASA adapter (`a9e8cba`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; completion is disabled until protected binding/payment operations exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
 
 Use [api/alignment-fixes-handoff.md](api/alignment-fixes-handoff.md) for current callable interfaces, new configuration, tests and dependency order. Earlier R02/card paragraphs are historical; signup issuance has now been removed, deterministic verifier policy has started, and local spending invalidation/SSE are tested. Do not claim Graph cancellation, trusted merchant payments or live sandbox success from this work.

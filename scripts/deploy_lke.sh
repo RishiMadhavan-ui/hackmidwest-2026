@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy api + web + agents + mcp-* + webhook + Valkey on Akamai LKE, with managed PostgreSQL.
+# Deploy api + web + agents + mcp-* + store + webhook + Valkey on Akamai LKE, with managed PostgreSQL.
 # Adapted from the workshop deploy_lke.sh for this repo.
 #
 # Prerequisites:
@@ -40,6 +40,7 @@ AGENTS_IMAGE="$IMAGE_REGISTRY/agents:$IMAGE_TAG"
 MCP_LEASH_IMAGE="$IMAGE_REGISTRY/mcp-leash:$IMAGE_TAG"
 MCP_STORE_IMAGE="$IMAGE_REGISTRY/mcp-store:$IMAGE_TAG"
 WEBHOOK_IMAGE="$IMAGE_REGISTRY/webhook:$IMAGE_TAG"
+STORE_IMAGE="$IMAGE_REGISTRY/store:$IMAGE_TAG"
 
 echo "API image:       $API_IMAGE"
 echo "Web image:       $WEB_IMAGE"
@@ -47,6 +48,7 @@ echo "Agents image:    $AGENTS_IMAGE"
 echo "mcp-leash image: $MCP_LEASH_IMAGE"
 echo "mcp-store image: $MCP_STORE_IMAGE"
 echo "webhook image:   $WEBHOOK_IMAGE"
+echo "store image:     $STORE_IMAGE"
 
 # 1. Cluster: one node on the newest Kubernetes version LKE offers.
 cluster_id=$(linode-cli lke clusters-list --label "$LKE_LABEL" --text --no-headers --format id)
@@ -103,9 +105,11 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   docker push "$MCP_STORE_IMAGE"
   "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/webhook/Dockerfile" -t "$WEBHOOK_IMAGE" --load "$REPO"
   docker push "$WEBHOOK_IMAGE"
+  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/store/Dockerfile" -t "$STORE_IMAGE" --load "$REPO"
+  docker push "$STORE_IMAGE"
   echo "$(elapsed): images pushed ($PLATFORM)."
 else
-  echo "SKIP_BUILD=1 — using existing $API_IMAGE, $WEB_IMAGE, $AGENTS_IMAGE, $MCP_LEASH_IMAGE, $MCP_STORE_IMAGE, $WEBHOOK_IMAGE."
+  echo "SKIP_BUILD=1 — using existing $API_IMAGE, $WEB_IMAGE, $AGENTS_IMAGE, $MCP_LEASH_IMAGE, $MCP_STORE_IMAGE, $WEBHOOK_IMAGE, $STORE_IMAGE."
 fi
 
 # 5. Namespace + Secret from .env (IMAGE_REGISTRY is not needed inside the pods).
@@ -144,6 +148,7 @@ fi
 existed=$(kubectl -n "$NAMESPACE" get deployment api -o name 2>/dev/null || true)
 kubectl apply -f k8s/valkey.yaml
 kubectl apply -f k8s/financial-boundaries.yaml
+render_manifest k8s/store.yaml | kubectl apply -f -
 render_manifest k8s/webhook.yaml | kubectl apply -f -
 render_manifest k8s/agents.yaml | kubectl apply -f -
 render_manifest k8s/mcp-leash.yaml | kubectl apply -f -
@@ -153,9 +158,10 @@ render_manifest k8s/web.yaml | kubectl apply -f -
 kubectl apply -f k8s/service.yaml
 if [[ -n $existed ]]; then
   kubectl -n "$NAMESPACE" rollout restart deployment/api deployment/web deployment/agents \
-    deployment/mcp-leash deployment/mcp-store deployment/webhook deployment/valkey
+    deployment/mcp-leash deployment/mcp-store deployment/webhook deployment/store deployment/valkey
 fi
 kubectl -n "$NAMESPACE" rollout status deployment/valkey --timeout=300s
+kubectl -n "$NAMESPACE" rollout status deployment/store --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/webhook --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/agents --timeout=600s
 kubectl -n "$NAMESPACE" rollout status deployment/mcp-leash --timeout=600s
@@ -200,9 +206,10 @@ echo
 echo "App is up on LKE after $(elapsed):"
 echo "  Web:       http://$nb_ip"
 echo "  API:       http://$nb_ip/backend/health  (ready: /backend/readyz)"
-echo "  mcp-leash: http://$nb_ip/mcp-leash/mcp  (health: /mcp-leash/health)"
-echo "  mcp-store: http://$nb_ip/mcp-store/mcp  (health: /mcp-store/health)"
+echo "  mcp-leash: ClusterIP http://mcp-leash:8002/mcp (public proxy disabled by default)"
+echo "  mcp-store: ClusterIP http://mcp-store:8003/mcp (public proxy disabled by default)"
 echo "  Agents:    ClusterIP http://agents:8000/health (in-cluster; PVC agents-trace-spool)"
 echo "  Webhook:   ClusterIP http://webhook:8000/health (local rail; Valkey redis://valkey:6379)"
+echo "  Store:     http://$nb_ip/store/products/chg-65w (checkout API private; in-cluster http://store:8000)"
 echo "  Postgres:  managed $DB_LABEL (DATABASE_URL in .env / app-env Secret)"
 echo "kubectl: export KUBECONFIG=$REPO/$KUBECONFIG_FILE"

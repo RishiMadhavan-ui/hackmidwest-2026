@@ -14,7 +14,7 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`) and ASA adapter (`a9e8cba`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; completion is disabled until protected binding/payment operations exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
 
 **Historical R01 integration snapshot:**
 
@@ -105,6 +105,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | R05 | Human durable stop, revoked SQL authority, cancellation records, atomic local rail latch and actual provider-pause outcome handling tested | Aditya cooperative cancellation, all-phase races, individual replacement/revoke propagation, live provider proof; no resume-old-authority route |
 | R06 | Provenance 201/409/422, ordered owner SSE through Next and durable rail-stream relay tested | Full Graph/inference/verification/recovery/reconciliation emitters, incident/source/history UI and agreed additive contracts |
 | R08–R10 | Identity/profile activity/stop UI build and lint pass | Human purchase confirmation, Mission Control, comparison, incident timeline, receipt and Attack Lab |
+| C02 | Catalog/listings and authenticated checkout create/read tested; charge disabled | User/session ownership, durable checkout freeze/revision/expiry, exact protected binding/charge and safe recovery alternative |
 | C03/C04 | Strict local rail, immutable grants, scope cap, concurrency/replay/expiry/stop Lua tested with real Redis | Complete trusted merchant/SQL activation/replacement invalidation protocol, actual Valkey8/PVC restart tests |
 | C05/C09 | Sandbox guard, mandatory signed ASA, safe non-spending card controls retained | ASA checkout correlation is absent: no provider approval claim. Issuance/lifecycle, real enrollment/HMAC/HTTPS and signed live integration proof remain |
 | C06 | Scoped Secret keys, financial NetworkPolicy and Valkey AOF/PVC declarations | Cameron deploys/verifies TLS, images, CNI policy, Secrets and volumes; no rollout performed here |
@@ -365,7 +366,7 @@ were not revoked; deployment of the patch remains a separate handoff to Cameron.
 
 ## Next work in dependency order
 
-1. **Cameron:** implement authenticated canonical store/checkouts and immutable protected charge binding (C02/H04/H05). Inspect the new credential names and root-context images before deployment.
+1. **Cameron:** extend the merged authenticated catalog/checkouts with ownership, durable freeze and immutable protected charge binding (C02/H04/H05). Inspect the new credential names and root-context images before deployment.
 2. **Rishi + Cameron:** connect trusted retrieval to the existing pure verifier; persist attempts/verification/payment operations before any side effect (R03/R04/R11), with tested SQL/Valkey ordering and replace/revoke propagation.
 3. **Aditya + Rishi:** agree additive typed Graph/unknown-state/event contracts, short-lived run scopes and cancellation polling (R12/H08). Aditya implements real bounded Graph, clean recovery and cooperative stop (A11–A13).
 4. **Rishi:** build confirmed-intent Mission Control/comparison/incident/history/Attack Lab on actual persisted states (R07–R10).

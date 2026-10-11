@@ -1,5 +1,6 @@
 # mcp-store MCP server. ClusterIP only: agents call it inside the cluster.
 # Store-scoped MCP tools; no backend signing, database or rail credentials.
+# STORE_URL points at the in-cluster simulated merchant (services/store).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

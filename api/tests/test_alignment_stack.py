@@ -1,6 +1,6 @@
-"""Opt-in local PostgreSQL + real Redis + webhook + Next streaming smoke.
+"""Opt-in local PostgreSQL + real Redis + store + webhook + Next streaming smoke.
 
-No model, merchant, Lithic, deployment or shared database is used. Grants are
+No model, Lithic, deployment or shared database is used. The store is simulated. Grants are
 explicit backend fixtures; this is transport/control evidence, not a purchase demo.
 """
 
@@ -164,6 +164,21 @@ class AlignmentStackTests(unittest.TestCase):
           )
         )
         wait_ready("http://127.0.0.1:58105/readyz")
+        store_token = "store-" + uuid4().hex
+        children.append(
+          subprocess.Popen(
+            [
+              str(ROOT / "services/store/.venv/Scripts/python.exe"),
+              "-m", "uvicorn", "main:app", "--host", "127.0.0.1",
+              "--port", "58104", "--log-level", "error",
+            ],
+            cwd=ROOT / "services/store",
+            env={**child_base, "STORE_API_TOKEN": store_token, "STORE_EVIL_MODE": "0"},
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+          )
+        )
+        wait_ready("http://127.0.0.1:58104/readyz")
         children.append(
           subprocess.Popen(
             [shutil.which("node"), "server.js"],
@@ -173,6 +188,7 @@ class AlignmentStackTests(unittest.TestCase):
               "PORT": "58130",
               "HOSTNAME": "127.0.0.1",
               "API_ORIGIN": "http://127.0.0.1:58100",
+              "STORE_ORIGIN": "http://127.0.0.1:58104",
             },
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -187,6 +203,26 @@ class AlignmentStackTests(unittest.TestCase):
           ).status_code,
           404,
         )
+        self.assertEqual(
+          httpx.get("http://127.0.0.1:58130/store/products/chg-65w", timeout=5).status_code,
+          200,
+        )
+        self.assertEqual(
+          httpx.post("http://127.0.0.1:58130/store/api/checkouts", json={"sku": "CHG-65W"}, timeout=5).status_code,
+          404,
+        )
+        with httpx.Client(base_url="http://127.0.0.1:58104", timeout=5) as store_client:
+          self.assertEqual(store_client.post("/api/checkouts", json={"sku": "CHG-65W"}).status_code, 401)
+          store_client.headers["Authorization"] = "Bearer " + store_token
+          checkout = store_client.post("/api/checkouts", json={"sku": "CHG-65W"}).json()
+          self.assertEqual(checkout["total_cents"], 2999)
+          self.assertEqual(
+            store_client.post(
+              f"/api/checkouts/{checkout['checkout_id']}/complete",
+              json={"payment_id": "unverified-claim", "card_token": "unverified-card"},
+            ).status_code,
+            503,
+          )
         with httpx.Client(base_url="http://127.0.0.1:58100", timeout=5) as client:
           signup = client.post(
             "/auth/signup",

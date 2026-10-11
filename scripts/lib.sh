@@ -59,6 +59,7 @@ AGENTS_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}agents:$IMAGE_TAG"
 MCP_LEASH_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}mcp-leash:$IMAGE_TAG"
 MCP_STORE_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}mcp-store:$IMAGE_TAG"
 WEBHOOK_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}webhook:$IMAGE_TAG"
+STORE_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}store:$IMAGE_TAG"
 
 if [[ -z $IMAGE_REGISTRY ]]; then
   API_IMAGE="hackmidwest-api:$IMAGE_TAG"
@@ -67,6 +68,7 @@ if [[ -z $IMAGE_REGISTRY ]]; then
   MCP_LEASH_IMAGE="hackmidwest-mcp-leash:$IMAGE_TAG"
   MCP_STORE_IMAGE="hackmidwest-mcp-store:$IMAGE_TAG"
   WEBHOOK_IMAGE="hackmidwest-webhook:$IMAGE_TAG"
+  STORE_IMAGE="hackmidwest-store:$IMAGE_TAG"
 fi
 
 # wait_for SECONDS WHAT COMMAND...: run COMMAND every 5 seconds until it succeeds.
@@ -90,7 +92,8 @@ render_manifest() {
       -e "s|\${AGENTS_IMAGE}|${AGENTS_IMAGE}|g" \
       -e "s|\${MCP_LEASH_IMAGE}|${MCP_LEASH_IMAGE}|g" \
       -e "s|\${MCP_STORE_IMAGE}|${MCP_STORE_IMAGE}|g" \
-      -e "s|\${WEBHOOK_IMAGE}|${WEBHOOK_IMAGE}|g" "$1"
+      -e "s|\${WEBHOOK_IMAGE}|${WEBHOOK_IMAGE}|g" \
+      -e "s|\${STORE_IMAGE}|${STORE_IMAGE}|g" "$1"
 }
 
 # db_id: managed Postgres labeled hackmidwest-db, or empty.

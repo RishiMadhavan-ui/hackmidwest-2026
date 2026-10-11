@@ -1,0 +1,68 @@
+# Simulated Volt Supply Co. merchant. ClusterIP Service `store`; public via
+# web rewrite /store/products/* only. Checkout callers stay in-cluster.
+# No provider credentials or payment authority; completion currently returns 503.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: store
+  template:
+    metadata:
+      labels:
+        app: store
+    spec:
+      containers:
+        - name: store
+          image: ${STORE_IMAGE}
+          imagePullPolicy: Always
+          env:
+            - name: STORE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: STORE_API_TOKEN
+            - name: STORE_EVIL_MODE
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: STORE_EVIL_MODE
+                  optional: true
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: store
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: store
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
