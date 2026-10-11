@@ -1,5 +1,18 @@
 # LEASH build plan
 
+**Urgent P0 Attack Lab:** an anonymous deployed storefront request selected a
+poisoned listing; the dedicated Lab UI is absent. Source containment disables
+runtime poison selection in web/store; deployed remediation remains unverified.
+Do not re-enable it through `STORE_EVIL_MODE`, a query, or a frontend flag.
+Latest Cameron merge `e52bbde` adds basic Mission Control and human drafting;
+preserve those surfaces, disable its ordinary-user attack link, and review
+`draft_agent_for_user` before using any auto-bound shared shopper credential.
+Post-merge web build passes; full lint fails on the merged activity-feed ref
+assignment at line 144. Rishi/Cameron should resolve that separate React rule
+violation; the security patch does not rewrite the activity feed.
+Complete the operator authorization/isolation gates below before live scenarios.
+See [Attack Lab audit](docs/ATTACK_LAB_SECURITY_AUDIT.md).
+
 **Current R03/R11 foundation (over `11d6696`, on main):** payment operations
 now commit before merchant retrieval, with immutable human/agent/run/mandate
 version/hash and stable private grant/instrument/issuance/authorization references.
@@ -457,3 +470,23 @@ not complete short-lived run/mandate/audience-scoped agent credentials in R12.
 3. **Aditya + Rishi:** agree additive typed Graph/unknown-state/event contracts, short-lived run scopes and cancellation polling (R12/H08). Aditya implements real bounded Graph, clean recovery and cooperative stop (A11–A13).
 4. **Rishi:** build confirmed-intent Mission Control/comparison/incident/history/Attack Lab on actual persisted states (R07–R10).
 5. **Cameron + Aditya + Rishi:** deploy/verify selected rail on existing LKE; run live inference and signature attack→automatic recovery plus S7, restart/outage/replay and <=3-minute rehearsal. Until then, label local tests and ASA limitations accurately.
+
+
+## Attack Lab P0 gate and handoff
+
+These requirements extend R09, C02/C09 and A03/A07/A09; lanes remain unchanged.
+No generic admin credential or shared service token authorizes attacks.
+
+| Order / owner | Exact task | Completion evidence |
+|---|---|---|
+| 0 Cameron deployment; Rishi source containment | Roll out patched web/store, or temporarily deny public store listings until rollout; legacy STORE_EVIL_MODE=0 alone is insufficient | Actual image revisions; anonymous evil/duplicate selector 403, clean listing 200; no shared data mutation |
+| 1 Rishi R09 / API auth | Backend verified human session + stable-ID demo/admin allowlist; authorize every Lab UI/server mutation and downstream command; audited server enable/disable default off | Real unauthenticated/non-admin/disabled/direct requests denied; authorized operator identity verified; do not introduce competing auth |
+| 2 Cameron C02/C09; Rishi schema | Demo namespace/principals, scoped fixture reset/replay/tamper routes, scoped credentials and sandbox/local-only rail; no arbitrary provider operations | Cross-user/reset/card/merchant isolation; no real-money or unrestricted Lithic access; durable audit and unresolved payments survive cleanup |
+| 3 Rishi control plane; Cameron infrastructure | Distributed per-operator limits, namespace concurrency, server payload/execution limits and cleanup; session/CSRF policy | Five starts/mutations per minute, one active scenario, three candidates/120s, 64 KiB; 429 before effects; cookie/Bearer negative session checks |
+| 4 Aditya A03/A07/A09 with Rishi/Cameron | Genuine Graph/MCP scenario execution, original mandate unchanged; stop/timeout cleanup and truthful live/local/replay labels | LAB-010 real authorized bounded run, persisted actual events; existing financial/Graph/Stop gates also pass |
+
+All LAB-001–010 must have backend evidence before re-enabling runtime attacks.
+Current tests prove disabled-path containment only; an all-caller 403 is not
+evidence of positive operator execution. Full case mapping is in
+[security coverage](docs/LEASH_SECURITY_COVERAGE.md#attack-lab-addendum-lab-001010).
+No teammate scenario/Graph/deployment rewrite was performed during containment.

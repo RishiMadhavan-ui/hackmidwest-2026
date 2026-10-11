@@ -1,5 +1,17 @@
 # AGENTS.md
 
+**P0 Attack Lab containment (October 11):** anonymous deployed
+`/store/products/chg-65w?evil=1` served a poisoned listing; `/attack-lab` was 404.
+The source now denies runtime poison selection in both the web route and store,
+ignores legacy `STORE_EVIL_MODE`, and preserves clean browsing/offline fixtures.
+This patch is not a deployed remediation or an implemented operator workflow.
+During integration, Cameron's Mission Control/human-draft merge `e52bbde` was
+preserved; its ordinary-user attack link is replaced with a disabled placeholder.
+The human draft's automatic shared shopper-token binding is separately flagged
+for identity review; it is not approved operator provisioning.
+See [Attack Lab audit](docs/ATTACK_LAB_SECURITY_AUDIT.md) and
+[spec section 29](docs/LEASH_SPEC.md#29-attack-lab-access-control-p0).
+
 **Current R03/R11 foundation (over `11d6696`, on main):** payment operations
 now commit before merchant retrieval, with immutable human/agent/run/mandate
 version/hash and stable private grant/instrument/issuance/authorization references.
@@ -38,7 +50,7 @@ topology remain intact.
 
 **V2 precedence:** the post-lesson V2 master is the current desired state. Read
 [spec section 27](docs/LEASH_SPEC.md#27-v2-post-lesson-baseline) and the
-[137-case coverage index](docs/LEASH_SECURITY_COVERAGE.md) with this file. Older
+[security coverage index: 137 original + 10 Lab cases](docs/LEASH_SECURITY_COVERAGE.md) with this file. Older
 singular-stop/PAUSE/preferred-card wording is superseded by the rules below;
 historical snapshots remain evidence of their original revision.
 
@@ -57,6 +69,17 @@ The signature demo: the user confirms “Buy a USB-C laptop charger for under $4
 Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team target: submit Sunday October 11 at 7:30 AM Central ahead of the planned 8:00 AM deadline.
 
 ## Non-negotiable security invariants
+
+**Attack Lab:** server-verified human authentication plus an explicit demo/admin
+role or stable-identity allowlist is mandatory at the UI server boundary and
+every scenario/fixture/reset/replay/tampering/simulated-authorization API.
+Hidden navigation, browser claims, service/agent tokens, and `NEXT_PUBLIC_*` flags
+never confer operator authority. Server execution defaults disabled in production;
+enablement also requires isolated demo data and an allowed local/sandbox rail.
+Keep runtime attacks disabled until all LAB-001–010 gates pass. Rishi owns the
+operator API/UI and identity adapter; Cameron owns fixture/rail isolation and
+rollout; Aditya owns bounded genuine Graph/MCP scenario execution. Preserve all
+existing path lanes and financial controls; no real-money or unrestricted Lithic.
 
 **V2 additions:** two separate human controls are mandatory. **Stop This Purchase**
 targets only its owned run, unused run grants/dedicated cards and scoped agent

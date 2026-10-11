@@ -212,3 +212,38 @@ Assessment totals: **BLOCKED_EXTERNAL: 5**, **MISSING: 51**, **NOT_RUN: 46**, **
 | `DEMO-002` P0/LIVE<br>Run Stop during active recovery | Aditya; all three | [docs/demo-script.md](../docs/demo-script.md)<br>`live demonstration` | M | None<br>Planned full-case target (not created): `tests/e2e/test_v2_demo.py:test_demo_002`<br>Exists: No full-case test | **MISSING**<br>No execution; target below | No full run financial stop/cancellation with independent second run and live recovery. |
 | `DEMO-003` P0/LIVE<br>Global Kill demo | Aditya; all three | [docs/demo-script.md](../docs/demo-script.md)<br>`live demonstration` | M | None<br>Planned full-case target (not created): `tests/e2e/test_v2_demo.py:test_demo_003`<br>Exists: No full-case test | **MISSING**<br>No execution; target below | No complete two-run Graph/global stop/actual card outcome demonstration. |
 | `DEMO-004` P0/LIVE<br>Non-Lithic fallback truthful | Aditya; all three | [docs/demo-script.md](../docs/demo-script.md)<br>`live demonstration` | M | None<br>Planned full-case target (not created): `tests/e2e/test_v2_demo.py:test_demo_004`<br>Exists: No full-case test | **MISSING**<br>No execution; target below | Labeled local policy exists; complete three-minute fallback narration/workflow rehearsal absent. |
+
+
+<a id="attack-lab-addendum-lab-001010"></a>
+
+## Attack Lab addendum (LAB-001–010)
+
+Original assessment totals remain 137: PASS 35 / NOT_RUN 46 / MISSING 51 /
+BLOCKED_EXTERNAL 5. The ten added cases below are **NOT_RUN 4 / MISSING 6**, with
+no full-case PASS. Combined 147: **PASS 35 / NOT_RUN 50 / MISSING 57 /
+BLOCKED_EXTERNAL 5**. Local denied-path evidence is partial; authorized execution
+and deployed authorization are not established. See
+[audit/results](ATTACK_LAB_SECURITY_AUDIT.md).
+
+T_LAB_STORE: services/store `.venv/Scripts/python.exe -m pytest -q`, 22 passed,
+12 subtests; FastAPI TestClient/local process-memory simulated merchant.
+T_LAB_WEB: web `node --experimental-strip-types --test tests/attack-lab-boundary.test.mjs`,
+2 passed; actual handler invocation + isolated HTTP merchant double. Neither
+uses real authenticated operator sessions, provider calls or deployed services.
+T_LAB_HTTP: root `services/store/.venv/Scripts/python.exe web/tests/attack_lab_http.py`,
+1 passed; built Next standalone + actual isolated store HTTP, anonymous clean 200
+and attack/duplicate selectors 403 with legacy poison environment enabled.
+This confirms production-build containment locally, not deployed authorization.
+
+| Case | Human owner / consumer | Current source path / code boundary | Implementation | Actual or desired test and existence | Case status / command / evidence | Gap and safe fix |
+|---|---|---|---|---|---|---|
+| `LAB-001` P0/API<br>Unauthenticated access | Rishi; Cameron rollout | [store product_page](../services/store/main.py), [web GET](../web/src/app/store/products/[productId]/route.ts) | PI | [test_lab_001_003_unauthenticated_direct_attack_selection_denied](../services/store/tests/test_store.py), [web boundary tests](../web/tests/attack-lab-boundary.test.mjs); exists, containment only | **NOT_RUN**<br>T_LAB_STORE / T_LAB_WEB / audit | Disabled poison selection tested; full protected UI/scenario/mutation inventory and real auth acceptance missing; deployed exposure confirmed |
+| `LAB-002` P0/API<br>Non-admin access | Rishi; Cameron service boundaries | Same product boundaries; no operator-role policy | PI | Store `test_lab_002_store_service_credential_is_not_operator_authority`; web fake credentials denied | **NOT_RUN**<br>T_LAB_STORE / T_LAB_WEB / audit | All callers denied locally; real ordinary-user versus allowed-operator checks missing |
+| `LAB-003` P0/INTEG<br>Direct API bypass | Rishi; Cameron; Aditya | Store/web selection denied; existing internal rail service auth | PI | Store LAB-001/003 duplicate selectors and web direct handler tests | **NOT_RUN**<br>T_LAB_STORE / T_LAB_WEB / audit | Destination listing closed; isolated reset/replay/tamper/trigger APIs and deployed bypass acceptance missing |
+| `LAB-004` P0/API<br>Disabled server flag | Rishi; Cameron config | Runtime listing always disabled, legacy env ignored | PI | Store `test_lab_004_environment_flags_cannot_enable_runtime_attack` | **NOT_RUN**<br>T_LAB_STORE / audit | Denied override tested; actual audited operator enable/disable switch with production default and active-run cancel missing |
+| `LAB-005` P0/INTEG<br>Cross-user isolation | Rishi schema/API; Cameron fixtures; Aditya runs | No Lab namespace implementation | M | Planned operator HTTP/integration namespace substitution tests, not created | **MISSING**<br>Not executed | Separate demo principals and owned records; reject foreign IDs at every boundary; scoped cleanup |
+| `LAB-006` P0/INTEG<br>Rail isolation | Cameron; Rishi payment scope | [simulate_lithic_auth](../services/webhook/main.py) disabled; existing spending gates | PI | Related store completion tests; no full operator/provider isolation suite | **MISSING**<br>Not executed | Explicit demo rail/instrument scopes, sandbox-only SINGLE_USE or isolated local rail; real-money/arbitrary provider inputs denied |
+| `LAB-007` P0/API<br>Fixture reset | Cameron; Rishi authorization | [reset_checkouts](../services/store/main.py) test helper only, no HTTP route | M | Planned scoped reset auth/foreign/unresolved-record tests, not created | **MISSING**<br>Not executed | Never expose global helper; authorized enabled namespace-only reset; preserve audit and unknown payment records |
+| `LAB-008` P0/RACE<br>Rate and bounds | Rishi control plane; Cameron counters; Aditya Graph | No Lab distributed limiter/scenario leases | M | Planned two-replica limiter/concurrency/timeout/cleanup test, not created | **MISSING**<br>Not executed | Enforce spec section 29 limits before effects; bound tools/replay and cancel/revoke unused scope on timeout |
+| `LAB-009` P0/API<br>CSRF/session | Rishi; Cameron auth coordination | Existing Bearer auth retained; no Lab protected mutation/session policy | M | Planned revoked/expired/ambient-cookie/cross-origin Lab tests, not created | **MISSING**<br>Not executed | Reuse verified sessions; cookie auth requires CSRF/Origin; GET cannot perform attack mutations |
+| `LAB-010` P0/LIVE<br>Authorized operator | Aditya execution; Rishi/Cameron authorization/isolation | Runtime attack disabled; full genuine Graph/purchase demo still missing | M | Planned enabled allowed-operator live scenario and scoped stop/reset; not created | **MISSING**<br>Not executed | Only enable after all negative gates and existing financial/Graph/Stop acceptance; truthful sandbox/local/replay evidence |

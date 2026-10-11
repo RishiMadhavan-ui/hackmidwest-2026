@@ -722,9 +722,12 @@ Do not label blocked attempts as completed transactions.
 
 #### F. Attack Lab
 
-Include a demo-focused attack control.
+Include a restricted operator-only attack control, subject to section 29.
 
-The presenter can select a legitimate scenario or a controlled adversarial product listing.
+Only a server-authenticated, explicitly authorized demo/admin operator may select
+an isolated legitimate scenario or controlled adversarial listing. Ordinary users
+and visitors cannot execute attacks, even by calling underlying APIs directly.
+Execution is disabled until the backend authorization and isolation gates pass.
 
 The attack is executed against the real shopping agent with the existing mandate unchanged.
 
@@ -1810,3 +1813,67 @@ owner protocol agreement and crash/race/replay evidence. H14 frozen-contract rev
 is still required. Keep dormant issuance/grant/bind/charge paths disabled until
 C02 ownership/freeze, R03 proof, R04/R11 execution/correlation and C11/R13 run barrier
 are implemented together. Actual Strands Graph remains Aditya's required work.
+
+
+## 29. Attack Lab access control (P0)
+
+This restriction governs all previous Attack Lab/attack-toggle wording. It does
+not relax any V2 financial, Stop, Graph, SSE or sandbox requirement.
+
+1. **Authentication and operator authority:** both the server UI boundary and
+   every underlying scenario, fixture mutation/reset, replay injection, checkout
+   tampering and simulated webhook API require a verified human session and an
+   explicit demo/admin role or stable user-ID allowlist. Reuse the existing auth
+   foundation; verify current account/session and role server-side. Deny ordinary
+   users, visitors, agent/store/service credentials and caller-claimed roles.
+   Each destination service must reject direct bypass or accept only a narrowly
+   scoped authenticated scenario command from the authorized control plane.
+2. **Enablement:** execution must also require an explicit server-side switch,
+   default disabled in real production and when configuration is missing or
+   invalid. Only approved operators may enable isolated hackathon scenarios;
+   log enable/disable and reject new execution while disabled. Disable must
+   cancel active scenarios and request scoped financial revocation through the
+   existing Stop machinery; report pending outcomes honestly. A role alone or
+   `NEXT_PUBLIC_*` flag is insufficient. No runtime re-enable exists in current
+   containment source; `ATTACK_LAB_ENABLED` is a proposed server contract only.
+3. **Isolation:** derive operator/scenario namespace from verified identity,
+   never arbitrary body IDs. Use separate demo principals, mandates, runs,
+   merchant fixture records, grants and instruments. Immutable human intent
+   still requires explicit confirmation. Reject foreign and ordinary-user
+   resources, including during reset/replay/cleanup. No process-wide reset.
+4. **Rail boundary:** local simulations use separate namespaces and credentials;
+   provider scenarios require explicitly configured Lithic sandbox and scoped
+   SINGLE_USE demo instruments. Never accept caller-selected rail/provider URLs,
+   real-money keys, arbitrary cards, grants or raw unrestricted Lithic commands.
+   Signed ASA delivery remains a provider-authenticated rail boundary, not a Lab
+   trigger. An operator cannot bypass checkout verification or financial policy.
+5. **Bounds:** enforce shared rate counters before any scenario/fixture effect,
+   not solely in the browser or one process. Initial ceiling: five starts or
+   fixture mutations per operator per minute, one active scenario per isolated
+   namespace, three candidate attempts and 120 seconds per scenario, payloads at
+   most 64 KiB. Owners may tighten these; documented/tested changes are required
+   to loosen them. Return 429 without side effects and bound replay/event count.
+   On stop/timeout, cancel worker/tool access and revoke unused spending scope;
+   cleanup only scoped inactive fixture data after 15 minutes. Preserve audit,
+   committed authorizations and unresolved financial records; never retry an
+   ambiguous purchase or delete its reconciliation barrier.
+6. **Session/CSRF:** Bearer-only mutations must ignore ambient cookies and reject
+   missing/expired/revoked sessions. If cookie auth is adopted, verify CSRF token
+   and allowed Origin plus appropriate secure/SameSite cookie policy. GET cannot
+   execute attacks, reset data or toggle enablement. API and downstream bypass
+   tests are mandatory; navigation hiding is only presentation.
+7. **Truthful execution:** authorized demos still use actual Strands Graph,
+   MCP, independent checkout and deterministic policy. Preserve the original
+   mandate and genuine persisted sanitized events. Label actual Lithic sandbox,
+   Local Payment Rail Simulator and recorded replay distinctly; never fabricate
+   activity or assert settlement/charges from scripted fixtures.
+
+Current status: [the audit](ATTACK_LAB_SECURITY_AUDIT.md) confirms public deployed
+poison selection, source-level all-caller denial and retained clean browsing.
+Dedicated operator UI/API, isolation, bounds, CSRF acceptance and authorized
+execution are **missing**, not complete. Rollout and deployed checks remain
+unverified. Cases LAB-001–010 supplement the original 137 unchanged cases.
+The later `e52bbde` Mission Control merge is preserved with a disabled Lab
+placeholder; ordinary client sign-in is not operator access. Its human draft
+endpoint is separate from Lab authority. Automatic shared shopper-token binding
+requires identity review before agent/payment activation; see the focused audit.

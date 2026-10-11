@@ -204,3 +204,24 @@ For each test ID, attach: `Owner | Current source path:function | Actual test pa
 - Stop effectiveness has a precise atomic fast-path boundary; do not promise that a click retroactively reverses transactions or that PostgreSQL and Valkey share one native transaction.
 - The standalone simulator must exercise real deterministic rules and state transitions, not frontend-only animation.
 - On actual provider rail, the card type is `SINGLE_USE` exclusively for MVP purchase cards, and any unauthorized charge test must distinguish pre-issuance block from a real ASA decline.
+
+
+## Attack Lab addendum — LAB-001 through LAB-010 (P0)
+
+Added October 11, 2026. These ten cases supplement the original 137 unchanged
+cases (147 total). This is a specification, not a claim of execution. See
+[current coverage](LEASH_SECURITY_COVERAGE.md#attack-lab-addendum-lab-001010)
+and [live exposure/containment audit](ATTACK_LAB_SECURITY_AUDIT.md).
+
+| ID | Priority | Level | Scenario | Procedure / stimulus | Expected authoritative behavior | Status |
+|---|---|---|---|---|---|---|
+| `LAB-001` | P0 | API | Unauthenticated access | GET Lab UI; call scenario, fixture/reset, replay and simulation APIs without a verified session | 401/403 or safe 404; no attack content or mutation, tool call, payment or fixture effect | NOT_RUN |
+| `LAB-002` | P0 | API | Ordinary user and non-human credentials | Use valid ordinary-user session, forged role, agent/store/service token on every Lab boundary | Denied; only server-verified explicit demo/admin role or stable-ID allowlist grants access | NOT_RUN |
+| `LAB-003` | P0 | INTEG | Direct API bypass | Bypass UI; call store poison selectors, tamper/reset/replay/simulated webhook endpoints and downstream services; duplicate query selectors | Denied at destination boundary; navigation or frontend flags cannot confer authority | NOT_RUN |
+| `LAB-004` | P0 | API | Disabled environment control | Use an approved operator with server execution disabled, missing or invalid config; attempt frontend/legacy env overrides | No scenario/fixture effect; production defaults disabled; only explicit server-controlled isolated enablement works | NOT_RUN |
+| `LAB-005` | P0 | INTEG | Cross-user isolation | Operator targets ordinary user or foreign namespace mandate, purchase, checkout, grant, card or merchant fixture; cleanup/replay substitutions | Denied; unrelated resources unchanged; namespace derived from verified scope | NOT_RUN |
+| `LAB-006` | P0 | INTEG | Payment-rail isolation | Submit real-money rail, arbitrary Lithic/card/provider operation, live credentials or foreign instrument to Lab | Denied before external effect; only explicitly scoped local simulator or configured Lithic sandbox SINGLE_USE demo instruments | NOT_RUN |
+| `LAB-007` | P0 | API | Fixture reset permissions | Visitor, ordinary user and operator request reset; inject foreign namespace and unresolved financial records | Only enabled authorized scoped reset allowed; no global wipe, foreign effect or deleted audit/reconciliation barrier | NOT_RUN |
+| `LAB-008` | P0 | RACE | Rate limiting and scenario bounds | Exceed distributed starts/mutations, concurrency, payload, candidates/time limits across replicas; timeout/cleanup | 429 or bounded termination before further effects; five/min/operator, one active namespace scenario, three candidates/120s, 64 KiB; scoped cleanup | NOT_RUN |
+| `LAB-009` | P0 | API | CSRF and session protection | Cross-origin cookie mutation; missing CSRF; expired/revoked session; cookie-only request at Bearer boundary; GET state mutation | Denied; verified current session and explicit role required; CSRF/Origin checked for cookie auth; ambient cookies do not authorize Bearer routes | NOT_RUN |
+| `LAB-010` | P0 | LIVE | Legitimate authorized operator execution | Approved operator explicitly enables isolated scenario; run actual Graph/MCP/policy then scoped stop/reset | Genuine bounded execution under unchanged human-confirmed mandate; persisted sanitized evidence; accurate sandbox/local/replay labels; no ordinary-user or real-money effects | NOT_RUN |
