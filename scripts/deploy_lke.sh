@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy api + web + agents on Akamai LKE, with managed PostgreSQL.
+# Deploy api + web + agents + mcp-* + webhook + Valkey on Akamai LKE, with managed PostgreSQL.
 # Adapted from the workshop deploy_lke.sh for this repo.
 #
 # Prerequisites:

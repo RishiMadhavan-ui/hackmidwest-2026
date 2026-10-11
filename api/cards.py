@@ -111,63 +111,6 @@ def issue_card(
     )
 
 
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO lithic_cards (
-                card_token, user_id, account_token, last_four,
-                spend_limit_cents, spend_limit_duration, card_type,
-                state, memo, correlation_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                card["card_token"],
-                user_id,
-                card["account_token"],
-                card.get("last_four") or None,
-                int(card["spend_limit_cents"]),
-                card["spend_limit_duration"],
-                card["card_type"],
-                card.get("state"),
-                memo,
-                body.correlation_id,
-            ),
-        )
-        from activity import emit_for_auth_user
-        from leash_shared.events import EventType
-
-        emit_for_auth_user(
-            conn,
-            auth_user_id=user_id,
-            event_type=EventType.CARD_ISSUED.value,
-            data={
-                "last_four": card.get("last_four") or None,
-                "spend_limit_cents": int(card["spend_limit_cents"]),
-                "spend_limit_duration": card["spend_limit_duration"],
-                "card_type": card["card_type"],
-                "correlation_id": body.correlation_id,
-                "source": "issue_card",
-                "provider": "lithic_sandbox",
-            },
-        )
-        conn.commit()
-
-    return IssuedCardOut(
-        card_token=card["card_token"],
-        last_four=card.get("last_four") or "",
-        spend_limit_cents=int(card["spend_limit_cents"]),
-        spend_limit_duration=card["spend_limit_duration"],
-        card_type=card["card_type"],
-        state=card.get("state") or "OPEN",
-        account_token=card["account_token"],
-        correlation_id=body.correlation_id,
-        pan=card["pan"],
-        cvv=card["cvv"],
-        exp_month=card.get("exp_month") or "",
-        exp_year=card.get("exp_year") or "",
-    )
-
-
 @router.get("", response_model=list[CardMetaOut])
 def list_cards(
     credentials: Annotated[
