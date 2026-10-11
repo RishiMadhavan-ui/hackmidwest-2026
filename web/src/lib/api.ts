@@ -239,6 +239,185 @@ export function streamActivity(handlers: {
   return () => { abort(); handlers.signal?.removeEventListener("abort", abort); };
 }
 
+export type MandateStatus =
+  | "proposed"
+  | "active"
+  | "revoked"
+  | "expired"
+  | "superseded";
+
+export type ProductConstraint = {
+  name: string;
+  value: string | number | boolean;
+  operator: "equals" | "contains" | "minimum" | "maximum";
+};
+
+export type ShippingConstraints = {
+  country?: string | null;
+  postal_code?: string | null;
+  deliver_by?: string | null;
+  max_shipping_cents?: number | null;
+};
+
+/** PurchaseMandate from leash_shared.models; the API owns every field. */
+export type Mandate = {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  description: string;
+  category: string;
+  max_cents: number;
+  currency: "USD";
+  product_constraints: ProductConstraint[];
+  max_quantity: number;
+  maximum_purchases: number;
+  allow_subscription: boolean;
+  allow_recurring: boolean;
+  shipping_constraints: ShippingConstraints | null;
+  location: string | null;
+  merchant_allowlist: string[] | null;
+  valid_from: string;
+  valid_until: string;
+  version: number;
+  created_at: string;
+  status: MandateStatus;
+  approved_at: string | null;
+  signature: string | null;
+  canonical_payload_hash: string | null;
+};
+
+/** MandateProposal: the draft body a human submits to replace a version. */
+export type MandateProposal = {
+  description: string;
+  category: string;
+  max_cents: number;
+  currency: "USD";
+  location: string | null;
+  valid_from: string | null;
+  valid_until: string | null;
+  product_constraints: ProductConstraint[];
+  max_quantity: number;
+  maximum_purchases: number;
+  allow_subscription: boolean;
+  allow_recurring: boolean;
+  shipping_constraints: ShippingConstraints | null;
+  merchant_allowlist: string[] | null;
+};
+
+function binding(mandate: Mandate) {
+  if (!mandate.canonical_payload_hash) {
+    throw new ApiError(409, "Mandate has no content hash to confirm against");
+  }
+  return {
+    version: mandate.version,
+    canonical_payload_hash: mandate.canonical_payload_hash,
+  };
+}
+
+export async function listMandates(status?: MandateStatus) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const result = await apiFetch<{ items: Mandate[] }>(`/mandates${query}`);
+  return result.items;
+}
+
+export async function getMandate(id: string) {
+  return apiFetch<Mandate>(`/mandates/${encodeURIComponent(id)}`);
+}
+
+export async function getMandateVersions(id: string) {
+  const result = await apiFetch<{ items: Mandate[] }>(
+    `/mandates/${encodeURIComponent(id)}/versions`,
+  );
+  return result.items;
+}
+
+/** Human confirmation of the exact version and hash the person reviewed. */
+export async function approveMandate(mandate: Mandate) {
+  return apiFetch<Mandate>(
+    `/mandates/${encodeURIComponent(mandate.id)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ...binding(mandate), confirmed: true }),
+    },
+  );
+}
+
+/** Creates a new proposed version; it still needs its own confirmation. */
+export async function replaceMandate(mandate: Mandate, proposal: MandateProposal) {
+  return apiFetch<Mandate>(`/mandates/${encodeURIComponent(mandate.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ...binding(mandate), proposal }),
+  });
+}
+
+export async function revokeMandate(mandate: Mandate) {
+  return apiFetch<Mandate>(
+    `/mandates/${encodeURIComponent(mandate.id)}/revoke`,
+    { method: "POST", body: JSON.stringify(binding(mandate)) },
+  );
+}
+
+export type RunStop = {
+  run_id: string;
+  scope: "run";
+  cancel_requested: boolean;
+  requested_at: string | null;
+  status: "pending_enforcement" | "not_requested";
+  financial_revocation: string;
+  graph_cancellation: string;
+  provider_card_controls: string;
+  previous_authorizations_reversed: false;
+};
+
+export type OwnedRun = {
+  id: string;
+  mandate_id: string;
+  agent_mode: "live" | "scripted";
+  stop: RunStop;
+};
+
+export async function listRuns() {
+  return apiFetch<{ runs: OwnedRun[]; limit: number }>("/agent-runs");
+}
+
+export async function stopRun(runId: string) {
+  return apiFetch<RunStop>(`/agent-runs/${encodeURIComponent(runId)}/stop`, {
+    method: "POST",
+  });
+}
+
+export type KillSwitchState = {
+  on: boolean;
+  rail_enforced: boolean;
+  provider_controls_enforced: boolean;
+};
+
+export type KillSwitchResult = {
+  on: true;
+  status: "financially_stopped" | "pending_enforcement";
+  mandates_revoked: number;
+  rail: { status: "enforced" | "pending"; unused_grants_revoked?: number; reason?: string };
+  run_cancellation: string;
+  graph_cancellation: string;
+  provider_card_controls: {
+    status: "not_required" | "enforced" | "pending";
+    total: number;
+    confirmed: number;
+  };
+  previous_authorizations_reversed: false;
+};
+
+export async function getKillSwitch() {
+  return apiFetch<KillSwitchState>("/killswitch");
+}
+
+export async function engageKillSwitch() {
+  return apiFetch<KillSwitchResult>("/killswitch", {
+    method: "POST",
+    body: JSON.stringify({ on: true }),
+  });
+}
+
 /** Display-only conversion; money stays integer cents on the wire. */
 export function formatUsdFromCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";

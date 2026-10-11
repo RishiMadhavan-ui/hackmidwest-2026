@@ -106,7 +106,7 @@ effective stop; a new run ID must not bypass the required fresh human launch.
 October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's merged two-service MCP implementation. R02 adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron's API build-context/readiness changes are merged; the public readiness endpoint returns 200. No shared database or deployed service was changed.
 
 - **`api/`:** JWT identity, signed immutable mandates, registered runs; `POST /provenance`; owner `GET /activity` and `/activity/stream`; `POST/GET /killswitch`; agent-owned `/agent-runs/{id}/control`; dedicated rail `POST /internal/activity`. `payment_service.py` retrieves configured authenticated merchant facts for preflight and persists blocked attempts. `/payments` requires an owned registered uncancelled run; financial authority remains unavailable. Verified issuance/reconciliation remain absent. `/health[z]` is liveness; `/readyz` checks schema/database.
-- **`web/`:** signup/signin/profile, genuine fetch SSE/stream proxy, human stop control and legacy-only card headroom. Signup never presents spending authority. Mission Control/confirmation/comparison/incidents/Attack Lab remain pending; existing custom JWT is preserved.
+- **`web/`:** landing/signup/signin; signed-in Mission Control, mandate review/confirm/replace/revoke with version history, activity timeline, incidents with intent-vs-checkout comparison, payments history, Attack Lab and account page, all reading real API routes and one shared persisted SSE stream. Human Kill Switch and per-run stop use dialogs. No human route starts a shopping run yet; agents still draft mandates. Signup never presents spending authority; existing custom JWT is preserved.
 - **`services/agents/`:** single Strands shopper Agent, guardian and durable provenance spool. Real Graph, automatic containment/recovery, durable progress/fencing and cancellation-control polling remain Aditya's work. Configured provider attribution never proves live inference.
 - **`services/mcp-leash/`:** four thin financial tools on internal `:8002/mcp`, forwarding the agent bearer. Payment timeout reports unknown and forbids another purchase until reconciled; private durable payment-operation IDs now exist; financial activation/reconciliation remain pending.
 - **`services/mcp-store/`:** authenticated browse/create/complete tools on internal `:8003/mcp`, distinct store credential, store-only redirects and sanitized evidence. Cameron's simulated merchant create/read target exists; bind primitives exist; protected durable completion remains unavailable.
@@ -130,7 +130,7 @@ human confirmation -> immutable mandate -> real Strands Graph
 | Component | Inspected or planned path | Owner | Responsibility |
 |---|---|---|---|
 | Product backend | `api/` (auth + signed mandates + registered runs); `services/api/` reserved | Rishi | Mandates, trusted checkout verification, grants, persistence, audit, SSE; owns users/auth foundation |
-| Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
+| Web | `web/` (auth UI + Mission Control views) | Rishi | Auth, Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
 | Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
 | Merchant / payment rail | `services/store/` catalog/checkouts; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail/ASA adapter; trusted correlation and live proof pending |
@@ -205,9 +205,11 @@ hackmidwest-2026/
       tests/                         [E] catalog/auth/redaction/disabled-charge tests
       Dockerfile                     [E] amd64; COPY runtime modules + shared lithic
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
-    src/app/                         [E] home, signup (name/zip), signin, profile (events, stop, legacy headroom)
-    src/components/                  [E] site-nav + ui primitives
-    src/lib/api.ts                   [E] apiFetch + auth + fetchBalance helpers
+    src/app/(public)/                [E] landing, signup (name/zip), signin
+    src/app/(app)/                   [E] overview, mandates(/[id]), activity, incidents, payments, attack-lab, profile
+    src/components/                  [E] app shell, kill switch, mandate/event/run views + ui primitives
+    src/lib/api.ts                   [E] apiFetch + auth, mandate, run, kill switch and activity helpers
+    src/lib/activity.tsx, events.ts  [E] shared SSE provider; event labels, incidents, payments
     src/lib/auth.tsx                 [E] AuthProvider / Bearer state
     src/lib/api-types.ts             [P] generated from agreed OpenAPI
   tests/
