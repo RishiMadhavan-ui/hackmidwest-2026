@@ -118,6 +118,12 @@ spec:
                   optional: true
             - name: AGENTS_URL
               value: http://agents:8000
+            - name: AGENTS_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: AGENTS_SERVICE_TOKEN
+                  optional: true
             - name: API_URL
               value: http://api:8000
             - name: WEBHOOK_URL

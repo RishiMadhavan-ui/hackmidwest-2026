@@ -7,6 +7,7 @@ import { KillSwitchButton } from "@/components/kill-switch";
 import { AttackLab } from "@/components/mission-control/attack-lab";
 import { AuthorityPanel } from "@/components/mission-control/authority-panel";
 import { ComparisonPanel } from "@/components/mission-control/comparison-panel";
+import { StartShopping } from "@/components/mission-control/start-shopping";
 import { EmptyState } from "@/components/page";
 import { useActivity } from "@/lib/activity";
 import type { PurchaseMandate } from "@/lib/mandates";
@@ -52,8 +53,13 @@ export default function MissionControlPage() {
 
       <AuthorityPanel onMandateChange={onMandateChange} />
 
-      <div className="rounded-lg border border-border px-4 py-4 md:px-5">
-        <ComparisonPanel mandate={mandate} events={events} />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-border px-4 py-4 md:px-5">
+          <StartShopping mandate={mandate} />
+        </div>
+        <div className="rounded-lg border border-border px-4 py-4 md:px-5">
+          <ComparisonPanel mandate={mandate} events={events} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
