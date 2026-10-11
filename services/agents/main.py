@@ -3,18 +3,25 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from guardian.routes import router as guardian_router
-from provenance.sink import default_sinks
+from provenance.sink import api_configured, default_sinks
+from shopper.credentials import CredentialError, credential_for
 from shopper.runs import router as runs_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-  # Start the trace outbox right away so events spooled before a restart are
-  # delivered even if no new run starts.
-  for sink in default_sinks():
-    start = getattr(sink, "start", None)
-    if start:
-      start()
+  # Start each credential's trace outbox right away so events spooled before a
+  # restart are delivered even if no new run starts.
+  if api_configured():
+    for mode in ("live", "scripted"):
+      try:
+        credential = credential_for(mode)
+      except CredentialError:
+        continue  # that mode isn't provisioned here
+      for sink in default_sinks(credential.token, mode):
+        start = getattr(sink, "start", None)
+        if start:
+          start()
   yield
 
 

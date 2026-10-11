@@ -9,12 +9,15 @@ from provenance.outbox import shared_outbox
 from shopper.runs import RunManager, StartRun
 
 API = "http://api.test"
+LIVE_TOKEN = "live-agent-token"
+SCRIPTED_TOKEN = "scripted-agent-token"
 
 
 @pytest.fixture
 def api_env(monkeypatch):
   monkeypatch.setenv("API_URL", API)
-  monkeypatch.setenv("AGENT_TOKEN_SHOPPER", "agent-token")
+  monkeypatch.setenv("AGENT_TOKEN_SHOPPER", LIVE_TOKEN)
+  monkeypatch.setenv("AGENT_TOKEN_SHOPPER_SCRIPTED", SCRIPTED_TOKEN)
 
 
 def wait_done(manager, run_id):
@@ -41,9 +44,10 @@ def scripted(mandate_id="mnd_1"):
 
 
 def drain():
-  box = shared_outbox(API, "agent-token")
-  box.flush(timeout=5)
-  assert box.stop(timeout=5)
+  for token, lane in ((LIVE_TOKEN, "live"), (SCRIPTED_TOKEN, "scripted")):
+    box = shared_outbox(API, token, lane)
+    box.flush(timeout=5)
+    assert box.stop(timeout=5)
 
 
 def test_registers_before_any_trace(api_env):
@@ -71,7 +75,8 @@ def test_registers_before_any_trace(api_env):
   assert record["registered"] is True
   assert order == ["register", "trace"]
   body = reg.calls.last.request
-  assert body.headers["authorization"] == "Bearer agent-token"
+  # A scripted run registers with the scripted credential, never the live one.
+  assert body.headers["authorization"] == f"Bearer {SCRIPTED_TOKEN}"
   sent = _json(body)
   assert sent == {
     "id": run_id,
@@ -164,3 +169,41 @@ def _json(request):
   import json
 
   return json.loads(request.content)
+
+
+def test_each_mode_registers_and_traces_with_its_own_credential(api_env):
+  def register(request):
+    body = _json(request)
+    return respx.MockResponse(201, json={"id": body["id"], "agent_mode": body["agent_mode"]})
+
+  with respx.mock() as mock:
+    reg = mock.post(f"{API}/agent-runs").mock(side_effect=register)
+    intake = mock.post(f"{API}/provenance").respond(202)
+    manager = RunManager(runner=emitting_runner([]))
+    live = wait_done(manager, manager.start(StartRun(task="t", mandate_id="mnd_live"))["id"])
+    fixture = wait_done(manager, manager.start(scripted("mnd_scripted"))["id"])
+    drain()
+
+  assert live["status"] == fixture["status"] == "completed"
+  by_mode = {_json(c.request)["agent_mode"]: c.request.headers["authorization"] for c in reg.calls}
+  assert by_mode == {"live": f"Bearer {LIVE_TOKEN}", "scripted": f"Bearer {SCRIPTED_TOKEN}"}
+  traces = {_json(c.request)["run_id"]: c.request.headers["authorization"] for c in intake.calls}
+  assert traces == {
+    live["id"]: f"Bearer {LIVE_TOKEN}",
+    fixture["id"]: f"Bearer {SCRIPTED_TOKEN}",
+  }
+
+
+def test_scripted_run_without_scripted_credential_fails_and_sends_nothing(api_env, monkeypatch):
+  monkeypatch.delenv("AGENT_TOKEN_SHOPPER_SCRIPTED")
+  with respx.mock(assert_all_called=False) as mock:
+    anything = mock.route().respond(201, json={})
+    calls = []
+    manager = RunManager(runner=emitting_runner(calls))
+    record = wait_done(manager, manager.start(scripted())["id"])
+  assert record["status"] == "failed"
+  assert "AGENT_TOKEN_SHOPPER_SCRIPTED is not set" in record["error"]
+  assert LIVE_TOKEN not in record["error"]
+  assert calls == []
+  # Nothing was sent at all, so the live credential was never used for it.
+  assert not anything.called

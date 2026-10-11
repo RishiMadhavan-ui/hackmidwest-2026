@@ -37,6 +37,17 @@ Claims we make: within our controlled merchant, Leash ties payment to the exact 
 
 Claims we don't make: card networks show SKUs (they don't; the rail alone can't tell the charger from the subscription), protection against a dishonest merchant, AP2 compliance, passkey signing.
 
+## Two agent credentials
+
+The api binds every agent credential to exactly one agent and one mode (R02). Live and scripted runs are therefore two separate agents, each with its own token and its own human-confirmed mandates. An agent only sees and registers runs on mandates assigned to it, so a scripted fallback can never run under a live session's mandate.
+
+| Mode | Token (team `.env`) | Agent id | Bound with (operator, from `api/`) |
+|---|---|---|---|
+| live | `AGENT_TOKEN_SHOPPER` | `agt_shopper` | `python manage.py bind-agent --user-id <usr_...> --agent-id agt_shopper --token-env AGENT_TOKEN_SHOPPER --mode live` |
+| scripted | `AGENT_TOKEN_SHOPPER_SCRIPTED` | `agt_shopper_scripted` | `python manage.py bind-agent --user-id <usr_...> --agent-id agt_shopper_scripted --token-env AGENT_TOKEN_SHOPPER_SCRIPTED --mode scripted` |
+
+Never bind the live token to scripted mode, and never reuse one token for both. The agents service enforces its half: a scripted run without its own credential fails before sending anything, and it refuses to start if both variables hold the same token.
+
 ## Prerequisites before any rehearsal
 
 | Needed | Owner | Why |
@@ -44,7 +55,8 @@ Claims we don't make: card networks show SKUs (they don't; the rail alone can't 
 | Mandate propose/confirm/read, `POST /payments` with independent checkout verification, `POST /agent-runs`, `POST /provenance`, incidents/history reads | Rishi (R02-R06) | Every scenario runs through these; nothing is stubbed in the demo path. |
 | Store: canonical catalog, attackable listing with an attack toggle, checkout API, protected charge bound to the verified checkout | Cameron (C02) | The attack and the block both depend on it. |
 | Rail, Valkey grant/idempotency protocol | Cameron (C03/C04) | The legitimate purchase's real approval. |
-| agents, mcp-leash and mcp-store deployed from this code; `AGENTS_SERVICE_TOKEN`, `AGENT_TOKEN_SHOPPER`, `STORE_MCP_TOKEN`, `STORE_URL`, `STORE_PUBLIC_URLS` in `.env`; persistent volume at `/app/trace-spool` | Cameron (C06) | Agents can't run or keep traces without them. |
+| agents, mcp-leash and mcp-store deployed from this code; `AGENTS_SERVICE_TOKEN`, `AGENT_TOKEN_SHOPPER`, `AGENT_TOKEN_SHOPPER_SCRIPTED`, `STORE_MCP_TOKEN`, `STORE_URL`, `STORE_PUBLIC_URLS` in `.env`; persistent volume at `/app/trace-spool` | Cameron (C06) | Agents can't run or keep traces without them. |
+| Both agent credentials bound with `manage.py bind-agent` (table above) | Rishi / whoever operates the api | Without the bindings the api refuses every run. |
 | A passing live inference smoke test (`services/agents/tests/test_llm.py`) | Aditya | A live attack needs a working model. |
 
 ## Preflight (T-30 minutes)
@@ -56,6 +68,9 @@ $env:API_URL = "http://173.255.199.245/backend"
 $env:STORE_PUBLIC_URL = "<public store url>"
 $env:AGENTS_URL = "http://localhost:8001"     # via the port-forward below; agents is cluster-internal
 $env:AGENTS_SERVICE_TOKEN = "<from the team .env>"
+# Used only to propose session mandates, each as the agent that will run it.
+$env:AGENT_TOKEN_SHOPPER = "<live credential, from the team .env>"
+$env:AGENT_TOKEN_SHOPPER_SCRIPTED = "<scripted credential, from the team .env>"
 $env:KUBECONFIG = "$PWD\hackmidwest-kubeconfig.yaml"
 
 # Local port 8001 -> the agents Service's port 8000. Leave it running in its own window.
@@ -74,25 +89,42 @@ function Start-Run($body) {
 }
 $task = 'Buy a USB-C laptop charger for under $40. No subscriptions.'
 $listing = "$env:STORE_PUBLIC_URL/products/chg-65w"
+
+# Propose a session mandate as one agent; a human then confirms it in the UI.
+function New-Mandate($agentToken) {
+  $body = @{
+    description = $task; category = "laptop_charger"; max_cents = 3999
+    product_constraints = @(@{ name = "connector"; operator = "equals"; value = "USB-C" })
+    max_quantity = 1; maximum_purchases = 1; allow_subscription = $false; allow_recurring = $false
+  } | ConvertTo-Json -Depth 5
+  (Invoke-RestMethod -Method Post -Uri "$env:API_URL/mandates/propose" `
+    -Headers @{ Authorization = "Bearer $agentToken" } -ContentType "application/json" -Body $body).id
+}
 ```
 
-1. **Scenario suite** on a preflight session (never sessions A or B). These use the scripted fixture by default so they're repeatable; they test enforcement, not the model:
+1. **Scenario suite** on preflight sessions (never the demo sessions). These use the scripted fixture by default so they're repeatable, and they propose their own mandates with the scripted credential; they test enforcement, not the model:
    ```powershell
    $env:LEASH_E2E = "1"; $env:E2E_CHARGER_URL = "$env:STORE_PUBLIC_URL/products/chg-65w"
    uv run --project services/agents pytest tests/e2e -v
    ```
    All six must pass. If any fail, stop and fix or switch to the backup video.
-2. **Live attack rehearsal** on a fresh preflight session (a new mandate a human has confirmed, its id in `$env:MANDATE_PREFLIGHT`), attack listing on:
+2. **Live attack rehearsal** on a fresh preflight session, attack listing on. Propose it as the live agent with `$env:MANDATE_PREFLIGHT = New-Mandate $env:AGENT_TOKEN_SHOPPER`, and have a human confirm it in the UI. Then:
    ```powershell
    $id = Start-Run @{ task=$task; mandate_id=$env:MANDATE_PREFLIGHT; start_url=$listing; agent_mode="live" }
    Invoke-RestMethod "$env:AGENTS_URL/runs/$id" -Headers $h | ConvertTo-Json -Depth 20
    ```
    Check the trace for: the listing's `provenance.source` (hidden text flagged), a `create_checkout` for `SUB-CARE-MO`, and `request_payment` with Leash's real `blocked` decision. Record it in the [live evidence log](#live-evidence-log). Repeat a few times. If the live shopper doesn't take the bait reliably, change the listing text with Cameron (A08); never script the "live" run to make it look like it did.
 3. **Live legitimate run** on another preflight session, attack listing off, to confirm the approval path.
-4. Create **session A** and **session B**: the shopper proposes two mandates with the same instruction, "Buy a USB-C laptop charger for under $40. No subscriptions.", and a human confirms each one in the UI. Write down both mandate ids:
+4. Create the demo sessions, all with the same instruction, and have a human confirm each one in the UI:
    ```powershell
-   $env:MANDATE_A = "<mnd_...>"; $env:MANDATE_B = "<mnd_...>"
+   # Live sessions: the live agent's mandates.
+   $env:MANDATE_A = New-Mandate $env:AGENT_TOKEN_SHOPPER
+   $env:MANDATE_B = New-Mandate $env:AGENT_TOKEN_SHOPPER
+   # Fallback sessions: the scripted agent's own mandates, used only if a live run fails.
+   $env:MANDATE_A_FIXTURE = New-Mandate $env:AGENT_TOKEN_SHOPPER_SCRIPTED
+   $env:MANDATE_B_FIXTURE = New-Mandate $env:AGENT_TOKEN_SHOPPER_SCRIPTED
    ```
+   The fallback sessions show as the scripted agent (`agt_shopper_scripted`) in the UI. Keep them out of sight unless a fallback is needed.
 5. Attack listing **off** before session A's run (Attack Lab toggle, C02).
 6. Open the screens: phone (mandate view) and big screen (Mission Control).
 
@@ -103,15 +135,15 @@ The commands below use `Start-Run`, `$task` and `$listing` from the preflight se
 | Time | Presenter | On screen | If it goes wrong |
 |---|---|---|---|
 | 0:00-0:20 | Aditya: "You tell your AI to buy a charger. What stops it from buying something else?" Rishi shows session A's confirmed mandate. | Original instruction, USB-C, under $40, no subscriptions, one purchase; human confirmation. | Show the mandate from the phone screenshot. |
-| 0:20-0:45 | Start session A: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_A; start_url=$listing; agent_mode="live" }` | Live tool trace, trusted checkout verified, grant, rail approval. Label: "Live Strands shopper". | No result after 30 s: run `Start-Run @{ task=$task; mandate_id=$env:MANDATE_A; start_url=$listing; agent_mode="scripted"; sku="CHG-65W" }` and say "scripted fallback". |
-| 0:45-1:30 | Switch visibly to session B. Turn the attack listing **on** in Attack Lab. Start the live shopper: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B; start_url=$listing; agent_mode="live" }` | The poisoned listing's hidden text, then the live agent's own tool calls, including the `SUB-CARE-MO` checkout it attempts. Label: "Live Strands shopper". Session B's mandate hash unchanged. | If the live agent doesn't attempt the subscription within 40 s, say so plainly ("this time the model didn't take the bait"), then show the enforcement with the labeled fixture: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B; start_url=$listing; agent_mode="scripted"; sku="SUB-CARE-MO"; claim_sku="CHG-65W" }`, on screen as "Simulated compromised agent (scripted fixture)". |
+| 0:20-0:45 | Start session A: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_A; start_url=$listing; agent_mode="live" }` | Live tool trace, trusted checkout verified, grant, rail approval. Label: "Live Strands shopper". | No result after 30 s: switch visibly to the fallback session and say "scripted fallback": `Start-Run @{ task=$task; mandate_id=$env:MANDATE_A_FIXTURE; start_url=$listing; agent_mode="scripted"; sku="CHG-65W" }`. It runs as the scripted agent, on its own confirmed mandate. |
+| 0:45-1:30 | Switch visibly to session B. Turn the attack listing **on** in Attack Lab. Start the live shopper: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B; start_url=$listing; agent_mode="live" }` | The poisoned listing's hidden text, then the live agent's own tool calls, including the `SUB-CARE-MO` checkout it attempts. Label: "Live Strands shopper". Session B's mandate hash unchanged. | If the live agent doesn't attempt the subscription within 40 s, say so plainly ("this time the model didn't take the bait"), then switch visibly to the fallback session and show the enforcement with the labeled fixture: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B_FIXTURE; start_url=$listing; agent_mode="scripted"; sku="SUB-CARE-MO"; claim_sku="CHG-65W" }`, on screen as "Simulated compromised agent (scripted fixture)". Session B's live mandate stays untouched. |
 | 1:30-2:00 | "Same merchant, same $29.99, same USD. A merchant-and-budget rule approves this." | Intent vs trusted checkout: laptop_charger vs protection_plan, one-time vs monthly. Result: **blocked before payment**, no grant. | Read the block reasons from `GET /payments/{id}`. |
 | 2:00-2:35 | Open the incident. | Listing URL and SHA-256, the hidden instruction excerpt, the agent's claim vs the trusted checkout, failed checks, guardian findings, decision source and latency. | Show the run's trace: `Invoke-RestMethod "$env:AGENTS_URL/runs/<run_id>" -Headers $h`. |
 | 2:35-3:00 | Aditya: Strands for the shopper and guardian, Akamai inference for the models, the FastAPI policy backend on Akamai compute, the selected rail. Limitation in one sentence. | Blocked incident stays on screen. | |
 
-If timing allows, show recovery (S6) in session B after the block: turn the attack listing off and run `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B; start_url=$listing; agent_mode="live" }`. It's approved under the same unchanged mandate: the blocked attack consumed no purchase authority, and the incident stays in history.
+If timing allows, show recovery (S6) in the session where the attack was blocked: turn the attack listing off and run the same mode again on that same mandate. After the live attack: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B; start_url=$listing; agent_mode="live" }`. After the fixture fallback: `Start-Run @{ task=$task; mandate_id=$env:MANDATE_B_FIXTURE; start_url=$listing; agent_mode="scripted"; sku="CHG-65W" }`. Either way it's approved under the same unchanged mandate: the blocked attack consumed no purchase authority, and the incident stays in history.
 
-Sessions A and B stay separate, each with its own human-confirmed mandate. A singular "buy a charger" mandate allows one purchase, so A's successful purchase can't be followed by B's attack under the same authority.
+Sessions A and B stay separate, each with its own human-confirmed mandate. A singular "buy a charger" mandate allows one purchase, so A's successful purchase can't be followed by B's attack under the same authority. The same holds for the fallback sessions, which belong to the scripted agent.
 
 ## Live evidence log
 
@@ -123,7 +155,7 @@ Fill this in from real runs only (the run record from `GET /runs/{id}` plus the 
 
 ## Resetting between rehearsals
 
-- A mandate allows one purchase. Each rehearsal uses **new** sessions: propose and confirm new mandates. Never delete or edit a used mandate, grant, or incident to "reset" it.
+- A mandate allows one purchase. Each rehearsal uses **new** sessions: propose (with `New-Mandate`, as the agent that will run it) and confirm new mandates. Never delete or edit a used mandate, grant, or incident to "reset" it.
 - Turn the attack listing off after every run.
 - Spooled traces deliver on their own. Check nothing is stuck: `kubectl -n hackmidwest exec deploy/agents -- ls /app/trace-spool/pending` should be empty, and `rejected/` should be empty too (anything there means the api refused an event; read the agents log with `kubectl -n hackmidwest logs deploy/agents`).
 
@@ -131,7 +163,7 @@ Fill this in from real runs only (the run record from `GET /runs/{id}` plus the 
 
 | What failed | Do this |
 |---|---|
-| Akamai inference | Both sessions use the scripted fixture, labeled on screen, and say the model is unavailable. The guardian reports `model.status: unavailable` and recommends review; enforcement doesn't change. |
+| Akamai inference | Use the fallback sessions (`MANDATE_A_FIXTURE`, `MANDATE_B_FIXTURE`) with the scripted fixture, labeled on screen, and say the model is unavailable. The guardian reports `model.status: unavailable` and recommends review; enforcement doesn't change. |
 | Agents service | Show the preflight run's incident and trace from the UI history. |
 | api or rail | Switch to the backup video, labeled prerecorded. Don't narrate a replay as live. |
 | Store | Same as api. |

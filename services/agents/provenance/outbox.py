@@ -165,11 +165,16 @@ _shared: dict[tuple[str, str, str], OutboxSink] = {}
 _shared_lock = threading.Lock()
 
 
-def shared_outbox(api_url: str, token: str) -> OutboxSink:
-  """One outbox per api/token/spool, so every run shares one ordered worker."""
-  spool = os.environ.get("TRACE_SPOOL_DIR") or DEFAULT_SPOOL_DIR
-  key = (api_url, token, spool)
+def shared_outbox(api_url: str, token: str, lane: str) -> OutboxSink:
+  """One outbox per credential, each with its own spool folder (`lane`).
+
+  Every event must reach the api with the credential of the run that produced
+  it. Separate folders keep one worker from ever delivering another
+  credential's events.
+  """
+  root = Path(os.environ.get("TRACE_SPOOL_DIR") or DEFAULT_SPOOL_DIR)
+  key = (api_url, token, str(root), lane)
   with _shared_lock:
     if key not in _shared:
-      _shared[key] = OutboxSink(api_url, token, spool)
+      _shared[key] = OutboxSink(api_url, token, root / lane)
     return _shared[key]

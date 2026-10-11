@@ -46,7 +46,9 @@ The same from the CLI: `--scripted-sku SUB-CARE-MO --claim-sku CHG-65W`.
 
 ## Run registration and trace delivery
 
-When `API_URL` and `AGENT_TOKEN_SHOPPER` are set, every run registers with the api (`POST /agent-runs` with the agent token) before it emits a single trace event. The api binds the run to the agent's user, the mandate, and the live/scripted label. If registration fails, the run fails and nothing is traced.
+When `API_URL` is set, every run registers with the api (`POST /agent-runs`) before it emits a single trace event. The api binds the run to the agent's user, the mandate, and the live/scripted label. If registration fails, the run fails and nothing is traced.
+
+Each mode is its own Leash agent with its own mode-bound credential (the api binds a credential to exactly one mode): live runs use `AGENT_TOKEN_SHOPPER` as `agt_shopper`, scripted runs use `AGENT_TOKEN_SHOPPER_SCRIPTED` as `agt_shopper_scripted`. A run's registration, Leash MCP calls, and trace delivery all use its own mode's credential, and its trace events name that agent. There's no fallback: a scripted run without its credential fails before sending anything, and the service refuses to use one token for both modes. Each credential's traces spool in their own folder (`TRACE_SPOOL_DIR/live`, `TRACE_SPOOL_DIR/scripted`).
 
 Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST /provenance` in order by a background worker. It retries through api outages, sets aside events the api permanently rejects (`rejected/`), and on restart delivers anything still spooled. The api deduplicates by `event_id`, so retries are safe. Without `API_URL`, the service runs local-only: no registration, traces go to logs.
 
@@ -56,7 +58,9 @@ Trace events are redacted, written to `TRACE_SPOOL_DIR`, and delivered to `POST 
 |---|---|
 | `INFERENCE_BASE_URL`, `INFERENCE_API_KEY`, `MODEL_ID` | Akamai inference through `make_model()`. The workshop names `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `CHAT_MODEL` also work, as a matched pair |
 | `AGENTS_SERVICE_TOKEN` | Required bearer for `/runs` and `/guardian/evaluate` |
-| `AGENT_TOKEN_SHOPPER` | Shopper's bearer for MCP, run registration, and trace intake |
+| `AGENT_TOKEN_SHOPPER` | Live runs only: bearer for the Leash MCP, run registration, and trace intake (bound to live mode) |
+| `AGENT_TOKEN_SHOPPER_SCRIPTED` | Scripted runs only: the same uses, as a separate credential bound to scripted mode |
+| `SHOPPER_AGENT_ID`, `SHOPPER_SCRIPTED_AGENT_ID` | Agent ids each credential is bound to (defaults `agt_shopper`, `agt_shopper_scripted`) |
 | `API_URL` | Run registration and trace intake; without it, local-only mode |
 | `MCP_LEASH_URL` | Leash MCP service (default `http://localhost:8002/mcp`; `MCP_URL` also accepted) |
 | `MCP_STORE_URL` | Store MCP service (default `http://localhost:8003/mcp`) |
