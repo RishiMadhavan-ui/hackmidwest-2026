@@ -137,11 +137,22 @@ def propose_and_confirm(api_as_agent: httpx.Client, api_as_user: httpx.Client) -
     },
   )
   assert res.status_code in (200, 201), res.text
-  mandate_id = res.json()["id"]
-  res = api_as_user.post(f"/mandates/{mandate_id}/approve")
+  draft = res.json()
+  assert draft["status"] == "proposed"
+  # R02: the human confirms the exact draft they were shown, bound by version
+  # and payload hash. A changed draft would need a fresh confirmation.
+  res = api_as_user.post(
+    f"/mandates/{draft['id']}/approve",
+    json={
+      "version": draft["version"],
+      "canonical_payload_hash": draft["canonical_payload_hash"],
+      "confirmed": True,
+    },
+  )
   assert res.status_code == 200, res.text
-  mandate = api_as_user.get(f"/mandates/{mandate_id}").json()
+  mandate = api_as_user.get(f"/mandates/{draft['id']}").json()
   assert mandate["status"] == "active"
+  assert mandate["canonical_payload_hash"] == draft["canonical_payload_hash"]
   return mandate
 
 
