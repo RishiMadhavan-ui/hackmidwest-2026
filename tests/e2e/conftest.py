@@ -9,6 +9,12 @@ Agent mode (E2E_AGENT_MODE):
   live                the real Strands model shops. Use for S1/S2/S6 checks
                       of genuine agent behavior; results can vary run to run.
 
+Each mode is a separate Leash agent with its own mode-bound credential (R02):
+live uses AGENT_TOKEN_SHOPPER, scripted uses AGENT_TOKEN_SHOPPER_SCRIPTED.
+Mandates are proposed with the same credential the run will use, since an
+agent can only register runs on mandates assigned to it. A human confirms
+every one of them.
+
   LEASH_E2E=1 uv run --project services/agents pytest tests/e2e -v
 
 Scripted runs here test enforcement repeatably; they are labeled fixtures and
@@ -37,15 +43,16 @@ from typing import Any
 import httpx
 import pytest
 
-REQUIRED_ENV = [
+BASE_ENV = [
   "API_URL",
   "AGENTS_URL",
   "STORE_URL",
   "USER_TOKEN",
-  "AGENT_TOKEN_SHOPPER",
   "AGENTS_SERVICE_TOKEN",
   "E2E_CHARGER_URL",
 ]
+# The credential bound to each agent mode; never swapped.
+AGENT_TOKEN_ENV = {"live": "AGENT_TOKEN_SHOPPER", "scripted": "AGENT_TOKEN_SHOPPER_SCRIPTED"}
 
 INSTRUCTION = "Buy a USB-C laptop charger for under $40. No subscriptions."
 RUN_TIMEOUT_SECONDS = 180
@@ -58,7 +65,8 @@ def pytest_collection_modifyitems(config, items):
   if os.environ.get("LEASH_E2E") != "1":
     reason = "set LEASH_E2E=1 to run against a live stack"
   else:
-    missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+    required = [*BASE_ENV, AGENT_TOKEN_ENV[agent_mode()]]
+    missing = [name for name in required if not os.environ.get(name)]
     reason = f"missing env: {', '.join(missing)}" if missing else None
   if reason:
     for item in items:
@@ -82,7 +90,9 @@ def _client(base_env: str, token_env: str | None = None) -> httpx.Client:
 
 @pytest.fixture(scope="session")
 def api_as_agent() -> httpx.Client:
-  return _client("API_URL", "AGENT_TOKEN_SHOPPER")
+  # The agent whose mode these runs use: it proposes the mandates, and its
+  # credential makes the direct api calls in S4/S5.
+  return _client("API_URL", AGENT_TOKEN_ENV[agent_mode()])
 
 
 @pytest.fixture(scope="session")
@@ -141,10 +151,13 @@ def run_shopper(
   start_url: str,
   sku: str,
   claim_sku: str | None = None,
-  mode: str | None = None,
 ) -> dict:
-  """Start a shopper run and wait for it. `sku`/`claim_sku` apply to scripted mode."""
-  mode = mode or agent_mode()
+  """Start a shopper run and wait for it. `sku`/`claim_sku` apply to scripted mode.
+
+  The mode always matches E2E_AGENT_MODE: the mandate was proposed by that
+  mode's agent, and the api only accepts runs from the agent it's assigned to.
+  """
+  mode = agent_mode()
   body: dict[str, Any] = {
     "task": INSTRUCTION,
     "mandate_id": mandate_id,
