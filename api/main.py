@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from auth import router as auth_router
 from authority_errors import AuthorityError, DatabaseUnavailable
+from cards import router as cards_router
 from db import init_db
 from mandate_routes import router as mandate_router
 
@@ -32,6 +33,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(cards_router)
 app.include_router(mandate_router)
 
 

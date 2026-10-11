@@ -15,6 +15,7 @@ import {
   me as apiMe,
   signup as apiSignup,
   TOKEN_STORAGE_KEY,
+  type SignupInput,
   type User,
 } from "@/lib/api";
 
@@ -22,7 +23,7 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  signup: (input: SignupInput) => Promise<void>;
   logout: () => void;
 };
 
@@ -35,7 +36,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
     let cancelled = false;
-    // Complete session restoration asynchronously even when no token is stored.
     const restoredUser = token ? apiMe(token) : Promise.resolve(null);
     restoredUser
       .then((u) => {
@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signup = useCallback(
-    async (email: string, password: string) => {
-      const res = await apiSignup(email, password);
+    async (input: SignupInput) => {
+      const res = await apiSignup(input);
       persist(res.access_token, res.user);
     },
     [persist],
