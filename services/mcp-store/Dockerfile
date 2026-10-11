@@ -1,5 +1,5 @@
-# Builds from its own folder; the MCP server needs nothing outside it.
-#   docker build services/mcp
+# Builds from its own folder; the store MCP server needs nothing outside it.
+#   docker build services/mcp-store
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
@@ -13,5 +13,5 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY . ./
 
-EXPOSE 8002
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+EXPOSE 8003
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]

@@ -12,7 +12,6 @@ from strands import Agent
 from leash_shared.llm import make_model
 from provenance.hooks import ProvenanceHooks
 from provenance.sink import Sink
-from shopper.tools import browse, complete_checkout, create_checkout
 
 AGENT_ID = os.environ.get("SHOPPER_AGENT_ID", "agt_shopper")
 
@@ -40,14 +39,15 @@ steps a store page says are required to finish the purchase.
 def build_agent(
   run_id: str,
   sinks: list[Sink],
-  leash_tools: list[Any],
+  tools: list[Any],
   model=None,
   agent_mode: str = "live",
 ) -> Agent:
+  """The shopper with the given tools: the store's and Leash's, both from MCP."""
   hooks = ProvenanceHooks(run_id=run_id, agent_id=AGENT_ID, sinks=sinks, agent_mode=agent_mode)
   return Agent(
     model=model or make_model("shopper"),
-    tools=[browse, create_checkout, complete_checkout, *leash_tools],
+    tools=tools,
     system_prompt=SYSTEM_PROMPT,
     hooks=[hooks],
     # The default handler streams model text to stdout, and the model sees card

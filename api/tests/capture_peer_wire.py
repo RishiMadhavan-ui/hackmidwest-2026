@@ -19,13 +19,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path[:0] = [str(ROOT / "shared"), str(ROOT / "services/agents"), str(ROOT / "api/tests")]
+sys.path[:0] = [str(ROOT / "shared"), str(ROOT / "services/agents"),
+  str(ROOT / "services/mcp-store"), str(ROOT / "api/tests")]
 
 import httpx  # noqa: E402
 
 from guardian import evaluate  # noqa: E402
 from leash_shared.models import CheckoutSnapshot, Mandate  # noqa: E402
-from provenance.hooks import FETCHES_KEY, ProvenanceHooks  # noqa: E402
+from provenance.hooks import ProvenanceHooks  # noqa: E402
+from evidence.inspect import inspect_page  # noqa: E402
+from evidence.snapshots import upload_snapshot  # noqa: E402
 from provenance.redact import redact  # noqa: E402
 from provenance.sink import MemorySink  # noqa: E402
 from shopper.registration import register_run  # noqa: E402
@@ -34,7 +37,7 @@ from test_shared_contracts import NOW, SIGNATURE, checkout_data, mandate_data  #
 
 
 def capture() -> dict:
-  spec = importlib.util.spec_from_file_location("peer_mcp", ROOT / "services/mcp/main.py")
+  spec = importlib.util.spec_from_file_location("peer_mcp", ROOT / "services/mcp-leash/main.py")
   peer = importlib.util.module_from_spec(spec)
   sys.modules[spec.name] = peer
   spec.loader.exec_module(peer)
@@ -82,18 +85,21 @@ def capture() -> dict:
   timestamp = NOW.isoformat()
   with patch.dict(os.environ, {"OBJ_ENDPOINT": "https://storage.test", "OBJ_BUCKET": "demo-evidence",
     "OBJ_ACCESS_KEY": "fixture-key", "OBJ_SECRET_KEY": "fixture-secret"}, clear=True), \
-      patch("provenance.snapshots._s3_client", return_value=FakeStorage()), \
+      patch("evidence.snapshots._s3_client", return_value=FakeStorage()), \
       patch("provenance.hooks._now", return_value=timestamp), \
       patch("provenance.hooks.time.monotonic", side_effect=[1.0, 1.015, 2.0, 2.015]):
-    # ProvenanceHooks' default upload points to the real uploader; only S3 is replaced.
+    # Store MCP supplies inspected evidence; only its S3 upload is substituted.
+    page = inspect_page(html)
+    evidence = {"url": "https://store.test/listing", "http_status": 200,
+      "fetched_at": timestamp, **page,
+      "snapshot": upload_snapshot("run_demo", page["sha256"], html)}
     hook.before_tool(SimpleNamespace(tool_use=use))
     hook.after_tool(SimpleNamespace(tool_use=use, exception=None, invocation_state={},
       result={"status": "success", "content": [{"text": '{"id":"pay_demo","status":"blocked"}'}]}))
     hook.before_tool(SimpleNamespace(tool_use=browse_use))
     hook.after_tool(SimpleNamespace(tool_use=browse_use, exception=None,
-      result={"status": "success", "content": [{"text": "Listing read"}]},
-      invocation_state={FETCHES_KEY: {"tool_browse": {"html": html, "url": "https://store.test/listing",
-        "status_code": 200, "fetched_at": timestamp}}}))
+      result={"status": "success", "content": [{"text": "Listing read"}],
+        "structuredContent": evidence}, invocation_state={}))
 
   def outage(_):
     raise RuntimeError("fixture model outage")
@@ -122,8 +128,8 @@ def capture() -> dict:
     register_run("run_demo", "mnd_demo", "scripted", model="scripted-shopper", provider="fixture")
   digest = "a" + "1234567890123456" + "b" * 47
   return {
-    "source_commit": subprocess.check_output(["git", "rev-parse", "origin/aditya-mcp"], cwd=ROOT, text=True).strip(),
-    "capture_scope": "actual current serializers/evaluator/hook methods with fixture inputs; HTTP, S3 and model substituted",
+    "source_commit": subprocess.check_output(["git", "rev-parse", "origin/main"], cwd=ROOT, text=True).strip(),
+    "capture_scope": "merged main peer serializers/evaluator/hook methods with fixture inputs; HTTP, S3 and model substituted",
     "mcp_calls": calls, "run_registration": registration,
     "guardian_responses": outputs, "guardian_product_constraint_responses": constraint_outputs,
     "provenance_events": sink.events,

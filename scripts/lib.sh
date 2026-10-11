@@ -56,11 +56,15 @@ IMAGE_REGISTRY=$(echo "${IMAGE_REGISTRY:-$(get_env IMAGE_REGISTRY)}" | tr -d '[:
 API_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}api:$IMAGE_TAG"
 WEB_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}web:$IMAGE_TAG"
 AGENTS_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}agents:$IMAGE_TAG"
+MCP_LEASH_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}mcp-leash:$IMAGE_TAG"
+MCP_STORE_IMAGE="${IMAGE_REGISTRY:+$IMAGE_REGISTRY/}mcp-store:$IMAGE_TAG"
 
 if [[ -z $IMAGE_REGISTRY ]]; then
   API_IMAGE="hackmidwest-api:$IMAGE_TAG"
   WEB_IMAGE="hackmidwest-web:$IMAGE_TAG"
   AGENTS_IMAGE="hackmidwest-agents:$IMAGE_TAG"
+  MCP_LEASH_IMAGE="hackmidwest-mcp-leash:$IMAGE_TAG"
+  MCP_STORE_IMAGE="hackmidwest-mcp-store:$IMAGE_TAG"
 fi
 
 # wait_for SECONDS WHAT COMMAND...: run COMMAND every 5 seconds until it succeeds.
@@ -82,7 +86,8 @@ render_manifest() {
   sed -e "s|\${API_IMAGE}|${API_IMAGE}|g" \
       -e "s|\${WEB_IMAGE}|${WEB_IMAGE}|g" \
       -e "s|\${AGENTS_IMAGE}|${AGENTS_IMAGE}|g" \
-      -e "s|\${MCP_IMAGE}|${MCP_IMAGE}|g" "$1"
+      -e "s|\${MCP_LEASH_IMAGE}|${MCP_LEASH_IMAGE}|g" \
+      -e "s|\${MCP_STORE_IMAGE}|${MCP_STORE_IMAGE}|g" "$1"
 }
 
 # db_id: managed Postgres labeled hackmidwest-db, or empty.

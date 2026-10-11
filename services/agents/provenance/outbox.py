@@ -79,9 +79,21 @@ class OutboxSink:
         self._worker = threading.Thread(target=self._run, name="trace-outbox", daemon=True)
         self._worker.start()
 
-  def stop(self) -> None:
+  def stop(self, timeout: float | None = 5.0) -> bool:
+    """Stop the worker and wait up to `timeout` seconds for it to exit.
+
+    Never deletes anything: an event is only removed after the api has
+    acknowledged it, so whatever is still pending stays spooled for the next
+    worker. Returns True once the worker has exited. False means it is still
+    finishing an in-flight post (bounded by the request timeout).
+    """
     self._stop.set()
     self._wake.set()
+    worker = self._worker
+    if worker is None or worker is threading.current_thread():
+      return True
+    worker.join(timeout)
+    return not worker.is_alive()
 
   def pending_count(self) -> int:
     return len(self._files())

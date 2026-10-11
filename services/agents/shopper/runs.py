@@ -75,21 +75,39 @@ def make_model_for(req: StartRun):
   return None  # build_agent falls back to make_model("shopper")
 
 
+def mcp_urls() -> tuple[str, str]:
+  """(Leash MCP url, store MCP url): two separate services.
+
+  On LKE these are http://mcp-leash:8002/mcp and http://mcp-store:8003/mcp,
+  set in k8s/agents.yaml. MCP_URL is the older name for the Leash one.
+  """
+  leash = os.environ.get("MCP_LEASH_URL") or os.environ.get("MCP_URL", "http://localhost:8002/mcp")
+  return leash, os.environ.get("MCP_STORE_URL", "http://localhost:8003/mcp")
+
+
 def run_shopper(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
-  """Run the shopper with the Leash tools loaded from the MCP server."""
+  """Run the shopper with tools from both MCP servers: the store and Leash.
+
+  Each server gets its own credential. The Leash token goes only to Leash's
+  server, and the store token only to the store's.
+  """
   from strands.tools.mcp import MCPClient
 
-  mcp_url = os.environ.get("MCP_URL", "http://localhost:8002/mcp")
-  token = os.environ.get("AGENT_TOKEN_SHOPPER")
-  if not token:
+  leash_token = os.environ.get("AGENT_TOKEN_SHOPPER")
+  store_token = os.environ.get("STORE_MCP_TOKEN")
+  if not leash_token:
     raise RuntimeError("AGENT_TOKEN_SHOPPER is not set")
+  if not store_token:
+    raise RuntimeError("STORE_MCP_TOKEN is not set")
 
-  client = MCPClient(url=mcp_url, headers={"Authorization": f"Bearer {token}"})
-  with client:
+  leash_url, store_url = mcp_urls()
+  leash = MCPClient(url=leash_url, headers={"Authorization": f"Bearer {leash_token}"})
+  store = MCPClient(url=store_url, headers={"Authorization": f"Bearer {store_token}"})
+  with leash, store:
     agent = build_agent(
       run_id,
       sinks,
-      client.list_tools_sync(),
+      [*store.list_tools_sync(), *leash.list_tools_sync()],
       model=make_model_for(req),
       agent_mode=req.agent_mode,
     )

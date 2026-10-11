@@ -12,7 +12,7 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-R01 baseline review: incorporated main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. R02 now implements mandate/run routes on its branch; payments remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
+R01 baseline review: incorporated main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. R02 now implements mandate/run routes in R02; payments remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
 
 Keep the existing backend in `api/`; `services/api/` is a reserved alternative. The annotated tree is in [AGENTS.md](AGENTS.md#repository-tree). Current deployment lives in `k8s/` and `scripts/`. API uses 8000 and web 3000; agents use local 8001 and LKE 8000; MCP uses 8002. Webhook/store 8003/8004 remain proposed. Agents/MCP now have both health paths; API retains `/health`.
 
@@ -23,13 +23,13 @@ No integrations or account credentials are assumed ready. Original and current f
 Each person's coding agent edits only that person's paths. Cross-lane work is an interface handoff; the owner makes the edit. Existing ownership is retained. Shared package metadata/marker files are assigned to Cameron so installability has an explicit owner; domain contracts remain Rishi's.
 | Path | Owner |
 |---|---|
-| `infra/`, `k8s/`, `scripts/`, `mise.toml`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
+| `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
 | `services/webhook/`, `services/store/`, `tests/test_decision_cases.py` | Cameron |
 | `shared/leash_shared/lithic.py` | Cameron |
 | `shared/pyproject.toml`, `shared/leash_shared/__init__.py` | Cameron |
 | `api/`, `services/api/`, `db/`, `web/` | Rishi |
 | `shared/leash_shared/models.py`, `shared/leash_shared/events.py` | Rishi; frozen after joint agreement |
-| `services/agents/`, `services/mcp/` | Aditya |
+| `services/agents/`, `services/mcp-leash/`, `services/mcp-store/` | Aditya |
 | `shared/leash_shared/llm.py` | Aditya |
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
@@ -83,7 +83,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **R01 implementation status:** models, hashing, event publishing and contract tests are implemented as the initial accepted integration baseline. The handoff documents the mandatory `checkout_id` on payment proposals, the nested grant on PreApproval, nullable guardian model, the 15 required verification checks, and the `event` stream field. Contract tests pass; C01 shared package/runtime installation remain open. R02 signing/auth/persistence and R03 independent verification are separate work, not completed by parsing a valid record.
 
-**Integrated review:** main includes Cameron's PRs #2/#3 and Aditya's #4 (`2e6f940`). R01 has incorporated main and refreshed actual serializer/hook/evaluator captures: 52 contract tests pass; locked MCP has 33 passes; locked agents has 126 passes, one restart-test failure and two live tests deselected. [The handoff](api/agent-interface-handoff.md) diagnoses the 0.3-second restart-test assumption and records remaining work. Aditya's auth, semantic forwarding, snapshot redaction/hash preservation and registration/outbox are implemented. Rishi accepts `/agent-runs`, service-token guardian auth and durable provenance HTTP semantics. Cameron's shared package/API build context and persistent spool volume remain pending; store/rail and product API routes are not implemented. Implement the agreed Store MCP endpoint at `/store/mcp` in the existing MCP service and the scripted-default attack versus required live demonstration before claiming full agreement. Rishi authorized this initial R01 baseline; future contract changes still require coordinated review.
+**Integrated review:** the `9edadab` baseline includes R01, Cameron's deployment/auth work, and Aditya's merged two-service MCP implementation. R02 supplies signed mandate lifecycle, identity mapping, immutable SQL authority and registered runs. [The handoff](api/r02-handoff.md) records validation and deployment commands. Both MCP services are owned by Aditya, the merchant/deployment by Cameron; shopping tools use Store MCP and the demo is live-first. Latest separate live/scripted credentials on Aditya's branch need to merge, be supplied through Secrets, and be bound by the API operator to the same intended human with distinct mandates. Cameron's API root-context/readiness change and persistent trace volume remain pending. Rishi authorized merging R02 before that deployment follow-up. Payments, verifier, provenance intake, merchant/rail/Valkey and genuine live acceptance remain pending. Historical R01 peer-suite results are retained in the interface handoff; future frozen-contract changes require dedicated coordinated review.
 
 **Rishi agent starting prompt:** “Read AGENTS.md, Leash-build-plan.md and docs/LEASH_SPEC.md. Work as Rishi's coding agent. Inspect current files and Git status, then implement the earliest unfinished R-task with satisfied prerequisites. Stay in the Rishi lane. Lead shared contracts through all-three review; do not treat an agent cart or positive guardian opinion as payment authority. Preserve the current api/ starter and fail closed until independent checkout and correlation are complete. Return task ID, code/tests, handoff and real blockers.”
 
@@ -112,7 +112,7 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 
 **Human responsibilities:** validate Akamai inference/tool calling with actual credentials; review tool permissions, trusted/untrusted evidence and investigation output; tune/rehearse controlled adversarial listing content with Cameron; coordinate the three-minute demo and labeled resets; collect final readiness evidence and handle submission at the team's 7:30 AM Central target. The shopper must remain observable and susceptible enough to demonstrate backend protection.
 
-**Coding agent lane:** `services/agents/`, `services/mcp/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement.
+**Coding agent lane:** `services/agents/`, `services/mcp-leash/`, `services/mcp-store/`, shared model factory, independent YAML fixtures, `tests/e2e/`, `docs/demo-script.md`. Start with A01 and A02; integrate real checkout tools when Rishi/Cameron hand off. Do not add prompt-injection defenses that eliminate the intentionally gullible shopper or let hooks become the only enforcement.
 
 | ID | Deliverable and paths | Depends on / handoff | Evidence required to finish |
 |---|---|---|---|
@@ -120,8 +120,8 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 | A02 | `shared/leash_shared/llm.py` factory/provider abstraction, real Akamai Strands smoke test in owned agent tests | C01 shared installability, human inference access | Text-only actual tool-call round trip, explicit `max_tokens`, guardian temperature 0, validated structured findings/fallback and outage metadata |
 | A03 | Shopper browse/search/compare/select/checkout tools and run service/CLI in `services/agents/shopper/` | R02 mandate context, C02 catalog/listing/checkout, R04 payments | Genuine Strands execution, mandate unchanged, actual tool calls; protected checkout delegates enforcement and has no unrestricted provider API |
 | A04 | Supported before/after tool hooks and provenance in `services/agents/provenance/` | A02/A03, R01 event schemas/R06 intake; optional C06 snapshot store | Sanitized arguments/results, source hashes/refs/time/trust, real attempt/decision events; direct tool bypass still blocked by backend |
-| A05 | Guardian/investigator in `services/agents/guardian/` | A02/A04, R03 verification/R06 evidence | Authenticated internal findings identify instruction versus attempt and suspicious source; `block`, `review` or `no_findings`, structured nullable model metadata; never approves, grants or edits mandate |
-| A06 | Official SDK stateless Streamable HTTP `services/mcp/` with four thin tools and auth tests | R02/R04 actual API routes/contracts | Bearer forwarded unchanged, one API operation per tool; agent roles cannot confirm/expand/kill-switch; no alternate authorization path |
+| A05 | Guardian/investigator in `services/agents/guardian/` | A02/A04, R03 verification/R06 evidence | Structured evidence-linked findings identify instruction versus attempt and suspicious source; recommends block/review, never grants or edits mandate |
+| A06 | Official SDK stateless Streamable HTTP `services/mcp-leash/` with four thin tools and auth tests | R02/R04 actual API routes/contracts | Bearer forwarded unchanged, one API operation per tool; agent roles cannot confirm/expand/kill-switch; no alternate authorization path |
 | A07 | `tests/e2e/` six-scenario integration runner with reset/session handling and persistence checks | C02/C03/C04, R02–R06, A03–A06; deployed URLs C06 | Positive, semantic attack, budget, missing evidence, expiry/replay, recovery; unchanged attack/recovery mandate and real results; manipulated-output fixtures separately labeled |
 | A08 | Attack scenario control coordination with Cameron; actual agent trace/guardian report handed to Rishi | C02/A03–A05, R09 UI | Attack changes listing/run selection only; actual subscription attempt observable; no fabricated agent manipulation or forced frontend result |
 | A09 | Agent/MCP tests and Dockerfiles/READMEs; complete e2e matrix and SDK failure checks | A02–A07; hand startup/dependencies to C06 | Tool/hook redaction, direct-call bypass, immutable authority, role checks, model outages, no agent-success spoofing, service probes/startup |
@@ -279,12 +279,13 @@ When changing product requirements, ownership, a shared interface or a milestone
 Rishi authorized the initial R01 integration baseline after checking peer compatibility.
 Separate approval messages from all three teammates are not claimed. Subsequent
 shared-contract changes retain the dedicated PR and all-three coordination rule.
-Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
-to LEASH's `usr_` identities in R02 before issuing purchase authority.
+Cameron's PR #5 auth code is preserved; R02 maps its UUID user IDs
+to LEASH's `usr_` identities before issuing purchase authority.
 
-The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` endpoints in the same service.
-Aditya implements Store MCP over Cameron's merchant in the existing MCP deployment; current shopping tools remain
-direct Python until that lands. Use separate credential handling, store-only browsing
+The agreed MCP direction uses separate `services/mcp-leash/` and
+`services/mcp-store/` servers, both at `/mcp`, on ports 8002 and 8003. Aditya owns
+both MCP services; Cameron owns the underlying merchant and deployment. Store
+tools are merged and no direct Python shopping tools remain. Use separate scoped credentials, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection
@@ -292,7 +293,7 @@ remains required; scripted runs are labeled fixtures or fallback.
 
 ## R02 implementation handoff
 
-R02 is ready for handoff on `codex/r02-mandate-authority`: migrations adopt existing
+R02 is implemented for the agreed merge/deployment handoff: migrations adopt existing
 UUID auth, LEASH identity/agent ownership, exact signed human confirmation, immutable
 versions, replacement/revocation/history and committed `/agent-runs` registration.
 The 81-test API suite passes, including 19 real PostgreSQL tests for ownership,
@@ -300,7 +301,9 @@ expiry, mode authorization, retries, rollback and concurrency; correctness lint
 passes. Frozen shared files are unchanged. See [api/r02-handoff.md](api/r02-handoff.md).
 
 Cameron must update the API build to repo-root context and readiness to `/readyz`,
-configure the existing signing/auth variables and provision the shopper binding.
+configure the signing/auth variables and distinct live/scripted agent tokens.
+The API operator provisions both agents to the same intended human with their
+respective mode; Aditya's latest credential selection must merge before fallback runs.
 Rishi must complete independent checkout verification, payments and R06 provenance/
 stream delivery. Authority mutations are atomic in SQL; R04/R05 and Cameron must
 add coordinated Valkey grant invalidation before issuing any rail grant. Hosted

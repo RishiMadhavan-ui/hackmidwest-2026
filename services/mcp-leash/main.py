@@ -1,13 +1,15 @@
-"""Leash MCP server.
+"""Leash MCP server (Deployment mcp-leash, port 8002, path /mcp).
 
-A thin, stateless adapter: each tool forwards to exactly one api route with the
-caller's bearer token, unchanged. The api decides whether the token is valid
+Payment tools only; shopping lives in the separate store MCP service
+(services/mcp-store). A thin, stateless adapter: each tool forwards to exactly
+one api route with the caller's bearer token, unchanged. The api decides whether the token is valid
 and what the agent may do. Nothing here can approve a mandate or payment, raise
 a limit, or touch the kill switch; those routes need a human's token.
 """
 
 import contextvars
 import os
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -15,8 +17,10 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 # The caller's raw "Bearer ..." header for the current request. Set by
 # BearerAuthMiddleware, read by every tool.
@@ -258,27 +262,23 @@ async def check_status(payment_id: str) -> dict[str, Any]:
   return await _call_api("GET", f"/payments/{payment_id}")
 
 
-# /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
-@mcp.custom_route("/health", methods=["GET"])
-@mcp.custom_route("/healthz", methods=["GET"])
-async def healthz(_: Request) -> JSONResponse:
-  return JSONResponse({"status": "ok", "service": "mcp"})
+async def health(_: Request) -> JSONResponse:
+  # /health matches the api and the LKE probes; /healthz is the AGENTS.md name.
+  return JSONResponse({"status": "ok", "service": "mcp-leash"})
 
 
 class BearerAuthMiddleware:
-  """Require a bearer token and stash it for the tools to forward.
+  """Require a bearer token and stash it for the Leash tools to forward.
 
   Only checks that a token is present. The api is the one that validates it, so
   this server never needs to know any secrets.
   """
 
-  OPEN_PATHS = frozenset({"/health", "/healthz"})
-
   def __init__(self, app):
     self.app = app
 
   async def __call__(self, scope, receive, send):
-    if scope["type"] != "http" or scope["path"] in self.OPEN_PATHS:
+    if scope["type"] != "http":
       await self.app(scope, receive, send)
       return
 
@@ -304,17 +304,33 @@ class BearerAuthMiddleware:
 def _allowed_hosts() -> list[str]:
   # DNS-rebinding protection rejects any Host header not listed here. Once
   # deployed, the public hostname must be added or every request fails.
-  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp:*")
+  raw = os.environ.get("MCP_ALLOWED_HOSTS", "localhost:*,127.0.0.1:*,mcp-leash:*")
   return [h.strip() for h in raw.split(",") if h.strip()]
 
 
-app = BearerAuthMiddleware(
-  mcp.streamable_http_app(
-    stateless_http=True,
-    json_response=True,
-    transport_security=TransportSecuritySettings(
-      enable_dns_rebinding_protection=True,
-      allowed_hosts=_allowed_hosts(),
-    ),
-  )
+leash_app = mcp.streamable_http_app(
+  streamable_http_path="/mcp",
+  stateless_http=True,
+  json_response=True,
+  transport_security=TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=_allowed_hosts(),
+  ),
+)
+
+
+@asynccontextmanager
+async def lifespan(_: Starlette):
+  # The routed MCP sub-app doesn't run its own lifespan, so start it here.
+  async with mcp.session_manager.run():
+    yield
+
+
+app = Starlette(
+  routes=[
+    Route("/health", health),
+    Route("/healthz", health),
+    Route("/mcp", BearerAuthMiddleware(leash_app)),
+  ],
+  lifespan=lifespan,
 )

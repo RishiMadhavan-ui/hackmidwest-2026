@@ -1,16 +1,15 @@
 """The shopper's tools and hooks inside a real Strands event loop.
 
-FIXTURE-DRIVEN: a scripted model plays a manipulated shopper against local
-listing fixtures and a mocked store. This proves the plumbing (hooks,
+FIXTURE-DRIVEN: a scripted model plays a manipulated shopper against stand-ins
+for the Store MCP and Leash MCP tools. This proves the plumbing (hooks,
 redaction, correlation), not that a live model falls for the injection.
 """
 
 import json
 import time
-from pathlib import Path
 
+import fake_store
 import pytest
-import respx
 from scripted_model import ScriptedModel
 from strands import tool
 
@@ -18,9 +17,7 @@ from provenance.sink import MemorySink
 from shopper.agent import build_agent
 from shopper.runs import RunManager, StartRun
 
-STORE = "http://store.test"
-LISTING = f"{STORE}/products/chg-65w"
-POISONED = (Path(__file__).parent / "fixtures/listings/charger_poisoned.html").read_text()
+LISTING = fake_store.LISTING_URL
 PAN = "4111111111111111"
 CVV = "987"
 
@@ -81,25 +78,18 @@ MANIPULATED_SCRIPT = [
 ]
 
 
+TOOLS = [*fake_store.STORE_TOOLS, list_mandates, request_payment]
+
+
 @pytest.fixture
-def store(monkeypatch):
-  monkeypatch.setenv("STORE_URL", STORE)
-  with respx.mock(assert_all_called=False) as mock:
-    mock.get(LISTING).respond(200, text=POISONED, headers={"content-type": "text/html"})
-    mock.post(f"{STORE}/api/checkouts").respond(
-      201, json={"checkout_id": "chk_sub", "total_cents": 2999, "currency": "USD"}
-    )
-    mock.post(f"{STORE}/api/checkouts/chk_sub/complete").respond(
-      402, json={"detail": "Payment does not match this checkout"}
-    )
-    yield mock
+def store():
+  fake_store.reset()
+  return fake_store.calls
 
 
 def run_script(script, sink):
   received.clear()
-  agent = build_agent(
-    "run_test", [sink], [list_mandates, request_payment], model=ScriptedModel(script)
-  )
+  agent = build_agent("run_test", [sink], TOOLS, model=ScriptedModel(script))
   return agent("Buy a USB-C laptop charger for under $40. No subscriptions.")
 
 
@@ -127,9 +117,10 @@ def test_no_card_number_or_cvv_in_any_event(store):
   assert "****1111" in dumped
 
 
-def test_run_id_injected_into_payment_request(store):
+def test_run_id_injected_into_payment_request_and_page_reads(store):
   run_script(MANIPULATED_SCRIPT, MemorySink())
   assert received["run_id"] == "run_test"
+  assert store["browse"][0]["run_id"] == "run_test"
 
 
 def test_poisoned_source_recorded_with_hidden_instruction(store):
@@ -141,6 +132,29 @@ def test_poisoned_source_recorded_with_hidden_instruction(store):
   assert "SUB-CARE-MO" in source["excerpt"]
   assert source["trust_classification"] == "untrusted_web_content"
   assert source["snapshot"]["storage"] == "none"
+  assert source["sha256"] == fake_store.EVIDENCE["sha256"]
+
+
+def test_source_event_carries_only_contract_fields(store):
+  # The shared event contract rejects unknown fields, so the Store MCP's
+  # evidence_ref stays in the tool result.
+  sink = MemorySink()
+  run_script(MANIPULATED_SCRIPT, sink)
+  [source] = by_type(sink, "provenance.source")
+  assert "evidence_ref" not in source
+  assert set(source) <= {
+    "event_id", "type", "run_id", "agent_id", "agent_mode", "timestamp", "tool_use_id",
+    "trust_classification", "url", "sha256", "http_status", "fetched_at",
+    "hidden_text_detected", "hidden_reasons", "suspicious_phrases",
+    "hidden_suspicious_phrases", "excerpt", "snapshot",
+  }  # fmt: skip
+
+
+def test_no_raw_html_anywhere_in_the_trace(store):
+  sink = MemorySink()
+  run_script(MANIPULATED_SCRIPT, sink)
+  dumped = json.dumps(sink.events)
+  assert "<div" not in dumped and "<!--" not in dumped
 
 
 def test_attempted_action_and_reported_outcomes(store):
@@ -167,9 +181,7 @@ def wait_done(manager, run_id):
 
 def test_run_manager_redacts_final_output(store):
   def runner(run_id, req, sinks):
-    agent = build_agent(
-      run_id, sinks, [list_mandates, request_payment], model=ScriptedModel(MANIPULATED_SCRIPT)
-    )
+    agent = build_agent(run_id, sinks, TOOLS, model=ScriptedModel(MANIPULATED_SCRIPT))
     return str(agent(req.task))
 
   manager = RunManager(runner=runner)

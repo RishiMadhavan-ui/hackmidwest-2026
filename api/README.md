@@ -183,11 +183,12 @@ Strands, merchant, Lithic, database, concurrent consumption, or end-to-end accep
 
 ## Integrated branch review
 
-Main at `1818a43` includes Cameron's build/deployment PRs and Aditya's `2e6f940`
-agents/MCP branch. R01 incorporates it with the AGENTS.md conflict resolved. API JWT auth and a
-PostgreSQL users table are present; LEASH domain persistence remains pending. Current
-payloads, run registration, 52 passing contract tests, peer-suite results, deployment
-gaps and architecture decisions are recorded in [the handoff](agent-interface-handoff.md).
+The `9edadab` baseline includes R01, Cameron's auth/deployment work and Aditya's
+two MCP services. R02 adds SQL authority persistence, signed human confirmation,
+identity mapping and registered runs. Payments, provenance intake and merchant/rail
+implementation remain pending. Current contracts, validation and deployment gaps
+are in [the R02 handoff](r02-handoff.md); historical R01 peer checks remain in
+[the interface handoff](agent-interface-handoff.md).
 
 To refresh peer captures with their SDK dependencies installed:
 
@@ -197,7 +198,9 @@ To refresh peer captures with their SDK dependencies installed:
 
 The utility invokes current serializers/evaluator/hooks with fixture inputs and
 substituted HTTP, model, and S3 calls, then names the capture after the inspected
-peer commit. It does not start a live model or upload data. Consume the matching
+merged-main peer commit. Run from a checkout synchronized with that baseline;
+the `9edadab` capture reflects the merged service split, not Aditya's newer
+unmerged credential commits. It does not start a live model or upload data. Consume the matching
 capture in the contract tests when reviewing a new peer revision.
 
 ### R01 merge decision — October 10
@@ -205,12 +208,13 @@ capture in the contract tests when reviewing a new peer revision.
 Rishi authorized the initial R01 integration baseline after checking peer compatibility.
 Separate approval messages from all three teammates are not claimed. Subsequent
 shared-contract changes retain the dedicated PR and all-three coordination rule.
-Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
-to LEASH's `usr_` identities in R02 before issuing purchase authority.
+Cameron's PR #5 auth code is preserved; R02 maps its UUID user IDs
+to LEASH's `usr_` identities before issuing purchase authority.
 
-The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` in one MCP service.
-Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate scoped credentials, store-only browsing
+The agreed MCP direction uses separate `services/mcp-leash/` and
+`services/mcp-store/` services, both at `/mcp`, on ports 8002 and 8003. Aditya owns
+both; Cameron owns the underlying merchant and deployment. Store tools are merged;
+no direct Python shopping tools remain. Use separate scoped credentials, store-only browsing
 with off-host/internal redirects rejected, server-side original HTML inspection,
 redacted snapshots, and listing text plus evidence references/source hashes in tool
 results. The API independently retrieves canonical checkout facts. Live injection

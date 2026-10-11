@@ -30,14 +30,16 @@ Operator commands run from `api/` with server environment configured:
 ```text
 python manage.py migrate
 python manage.py demo-user
-python manage.py bind-agent --user-id usr_demo --agent-id agt_shopper --mode live
+python manage.py bind-agent --user-id usr_demo --agent-id agt_shopper --token-env AGENT_TOKEN_SHOPPER --mode live
+python manage.py bind-agent --user-id usr_demo --agent-id agt_shopper_scripted --token-env AGENT_TOKEN_SHOPPER_SCRIPTED --mode scripted
 ```
 
 For a real account, use its `GET /identity` result instead of `usr_demo`.
 Alternatively, `python manage.py map-user --auth-user-id <existing UUID>` creates
 that mapping. `--token-env` defaults to `AGENT_TOKEN_SHOPPER`; it never accepts a
-token on the command line. For a scripted fixture, provision scripted mode explicitly
-or use a separate agent credential; do not label it live.
+token on the command line. For scripted fixtures, use the separate scripted agent/token above. Each agent
+requires its own human-confirmed mandates; a scripted agent cannot use the live
+agent's mandate. Bind both to the same intended human, never label a fixture live.
 
 ## Routes and request bodies
 
@@ -128,7 +130,7 @@ it excludes `.env`, credentials, tests and local environments from the build con
 Use `/readyz` for the API readiness probe and retain `/health` for liveness.
 Ensure existing `DATABASE_URL`, `JWT_SECRET`, `MANDATE_SIGNING_KEY` and agent/demo
 credential settings are supplied through Secrets. Apply migrations, bind the
-shopper to the intended human and mode, then deploy. No changes were made to
+live and scripted agents to the same intended human and their respective mode, then deploy. No changes were made to
 Cameron's scripts, manifests or environment template, and no shared database was
 migrated by this implementation session.
 
@@ -155,20 +157,39 @@ No hosted deployment or complete Compose boot is claimed.
 
 Implementation references: [PyNaCl signing](https://pynacl.readthedocs.io/en/latest/signing/) and [Psycopg transaction contexts](https://www.psycopg.org/psycopg3/docs/basic/transactions.html).
 
-## Concurrent MCP changes to reconcile
+## MCP integration and remaining handoff
 
-At the final refresh, main remains `916e01b`. Aditya's `cc17e79` adds Store
-`/store/mcp` alongside Leash `/mcp` in one service. Its financial mandate and
-registration payloads remain compatible with R02; its changed hooks are not part
-of the earlier R01 wire capture, and this session does not claim its new suite passes.
+Main at `9edadab` merges Cameron's two MCP deployments and Aditya's Store tools.
+`services/mcp-leash/` and `services/mcp-store/` both expose `/mcp`, on 8002 and
+8003; the shopper uses `MCP_LEASH_URL` and `MCP_STORE_URL`. Aditya owns both
+services and Cameron owns the underlying merchant/deployment. R02's frozen
+contracts remain unchanged. The peer capture helper follows the moved paths and
+server-side source evidence; its HTTP, storage and model calls are fixture-only.
 
-Cameron's [PR #6](https://github.com/RishiMadhavan-ui/hackmidwest-2026/pull/6)
-instead creates separate `mcp-leash`/`mcp-store` deployments/directories and
-`MCP_LEASH_URL`/`MCP_STORE_URL`, with a store scaffold. That differs from Aditya's
-new implementation and the latest accepted two-endpoint direction. The owners
-must reconcile deployment, paths and URLs before merging that integration;
-R02 does not choose or rewrite their code. PR #6 still uses `api/` build context,
-so the API root-context/probe handoff above is still required whichever MCP layout
-they select. Preserve R01/R02 status in docs rather than restoring stale scaffold
-claims. Directory renames also require updating Rishi's peer-capture utility at
-integration time. No MCP or teammate branch is merged by this R02 task.
+Aditya's latest separate mode credentials are pushed on `aditya-mcp` at `ec6b9a9`
+but are not in the `9edadab` baseline. Merge them and supply the distinct
+`AGENT_TOKEN_SHOPPER_SCRIPTED` through the agents' Secret before exercising
+fallbacks. Registration, Leash MCP, trace identity and trace outbox must all use
+the run's own credential. Provision with the operator commands above; no shared
+credentials, database bindings or environment settings were changed in this merge.
+
+Cameron agreed to apply the build-context/readiness changes after R02 merges.
+Until then, the existing deploy script's API build will fail; this is a known
+handoff gap, not a claim that main is deployable. Add persistent storage at
+`/app/trace-spool` for traces to survive pod replacement. The current public MCP
+web rewrites also remain a team reconciliation item against the earlier
+internal-only request. R02 changes neither teammate implementation nor deployment.
+
+## Merge verification — October 10
+
+After integrating `9edadab`, the API suite passes 81 tests with all 19 real
+PostgreSQL tests enabled. Leash MCP passes 33 locked tests; Store MCP passes 40
+locked tests. The merged agents runtime passes 120 tests; the two subprocess
+wiring tests initially skipped for missing `uv` on PATH pass in a targeted rerun
+with that path configured, for 122 agent tests validated. Two live-inference
+tests remain deselected. The wiring services use stub responses, not real payment enforcement. The refreshed
+fixture capture and its contract tests pass. Ruff E4/E7/E9/F, Markdown links,
+fences, conflict-marker and whitespace checks pass. Frozen R01 files are unchanged.
+No real inference, complete merchant/payment flow, fresh Docker build or hosted
+deployment is claimed; Compose is still absent. The disposable localhost test
+server is stopped after verification. The shared database remains untouched.

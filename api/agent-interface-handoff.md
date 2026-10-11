@@ -186,7 +186,7 @@ These are contract choices for later route work, not implemented API endpoints.
 |---|---|
 | Rishi | R02 implements registered ownership/mandate/mode persistence; R06 intake acknowledgment remains pending; guardian calls now require `AGENTS_SERVICE_TOKEN`. Aditya's registration and retry/spooling code is present. |
 | Aditya | Fix the restart test's scheduling assumption; wait for a delivery attempt and synchronize old worker shutdown instead of requiring an attempt within 0.3 seconds. Consider joining on `OutboxSink.stop()`. Require the mode echo rather than accepting null in registration responses. |
-| Aditya | After C01, consume the accepted shared validators, including numeric/string constraint validation. Align the live attack demo and move shopping tools to the agreed Store `/store/mcp` endpoint. |
+| Aditya | After C01, consume the accepted shared validators, including numeric/string constraint validation. Store MCP and the live-first demo are merged; merge the latest separate live/scripted credential changes and validate against R02. |
 | Cameron | Mount persistent storage at `/app/trace-spool`. `k8s/agents.yaml` has no volumes/mounts, so image-local spooling does not survive pod replacement. Supply exact OBJ names, configured STORE_URL/token, service tokens and documented MCP hosts. |
 | Cameron + Rishi | C01 installable shared package/runtime; R02 API image includes all API modules, shared sources and migrations using root context; Cameron must update the current `api/`-context deployment command before deploying it. Rishi owns the API Dockerfile; Cameron owns the matching deploy build context. Change these together before product API deployment. |
 | Cameron + Rishi | Agree authenticated canonical retrieval, session/owner assignment, revision/expiry, protected grant/instrument binding and atomic Valkey protocol. CheckoutSnapshot binds session ID; product billing interval is preserved/hash-bound. |
@@ -214,7 +214,12 @@ Use Aditya's draft catalog: `CHG-65W` / `laptop_charger` and `SUB-CARE-MO` /
 `"5732"` / USD, pending Cameron's catalog implementation. Injection changes listing
 text, not canonical facts. No edits were made in Aditya's or Cameron's lanes.
 
-## Evidence and decisions to reconcile
+## Historical R01 verification and current integration
+
+The following counts describe the earlier R01 review, not the current rerun.
+The R02 merge refresh captures `9edadab`'s serializers/guardian/source hooks in
+`api/tests/fixtures/aditya-9edadab-wire.json`; HTTP, S3 and model calls are substituted.
+Contract tests use that fixture; the older capture remains historical evidence.
 
 - R01: 52 tests passed, refreshed peer captures passed; selected correctness lint
   (E4/E7/E9/F), documentation links/fences and whitespace checked separately.
@@ -225,7 +230,7 @@ text, not canonical facts. No edits were made in Aditya's or Cameron's lanes.
 - The failed restart test also failed in isolation. First mocked HTTP attempt
   measured 0.563 seconds versus its 0.3-second flush window. A diagnostic waiting
   for the attempt and joining the old worker recovered both pending events.
-  This explains the local failure; the checked-in suite still needs Aditya's fix.
+  This explains the historical local failure; Aditya's merged worker-stop and restart-test fixes are now present. This earlier result is not a rerun of those fixes.
 - Six deployed-stack tests skipped because live E2E was not enabled; no real
   inference, merchant/rail enforcement, ASA or settlement was exercised.
 - Kubernetes YAML/selectors/service and probe ports/exposure match; deployment
@@ -234,46 +239,24 @@ text, not canonical facts. No edits were made in Aditya's or Cameron's lanes.
 - Web lint and Next.js production build passed with the merged configuration.
   This validates the frontend build, not an authenticated purchase flow.
 
-The MCP decision is resolved: keep Leash's four financial tools on Leash MCP;
-Aditya implements Store `/store/mcp` alongside Leash `/mcp` in the same service for browse/create_checkout/complete_checkout
-over Cameron's merchant. The shopper loads both clients. Restrict browsing to the
-controlled store, reject off-host/internal redirects and separate credential handling.
-Inspect original HTML server-side, redact stored snapshots and return listing text
-plus source hash/evidence references rather than raw HTML. API verification still
-retrieves canonical checkout independently. Current direct Python shopping tools
-remain until Aditya implements this change; no new server is claimed here.
-
-`docs/demo-script.md` makes the attack scripted by default and labels it honestly.
-The spec still requires a real live shopper encountering the injected listing for
-the signature demonstration; scripted runs are repeatable security fixtures or
-an explicit fallback. The same script uses remote agent port 8001, but LKE Service
-port is now 8000: port-forward must be `8001:8000`. Aditya owns that correction.
-
-Rishi authorized merging this compatible R01 baseline. Future shared-contract
-changes retain the dedicated PR/all-three coordination rule. Unfinished runtime
-services and live acceptance remain separate tasks, not schema completion claims.
+The MCP decision is resolved: Leash financial tools use `services/mcp-leash/`
+and shopping tools use `services/mcp-store/`, each at `/mcp` on its own deployment.
+Both are owned by Aditya; Cameron owns the merchant and deployment. Store MCP
+restricts browsing, handles inspection/redacted snapshots, and returns source
+evidence to hooks. The API independently retrieves trusted checkout facts.
+The demo is live-first; no real live injection evidence is claimed here.
 
 ### R01 merge decision — October 10
 
-Rishi authorized the initial R01 integration baseline after checking peer compatibility.
-Separate approval messages from all three teammates are not claimed. Subsequent
-shared-contract changes retain the dedicated PR and all-three coordination rule.
-Cameron's PR #5 auth code is preserved; its UUID user IDs need an explicit mapping
-to LEASH's `usr_` identities in R02 before issuing purchase authority.
-
-The agreed MCP direction uses Leash `/mcp` and Store `/store/mcp` in one MCP service.
-Aditya implements Store MCP over Cameron's merchant; current shopping tools remain
-direct Python until that lands. Use separate credential handling, store-only browsing
-with off-host/internal redirects rejected, server-side original HTML inspection,
-redacted snapshots, and listing text plus evidence references/source hashes in tool
-results. The API independently retrieves canonical checkout facts. Live injection
-remains required; scripted runs are labeled fixtures or fallback.
-
-Merge integration also fixes the no-token auth restoration branch in web/src/lib/auth.tsx: it completes asynchronously through the existing cancellation-aware promise chain instead of synchronously setting state inside an effect.
+Rishi authorized the initial compatible R01 baseline; separate approval messages
+from all three teammates are not claimed. Future shared-contract changes retain
+the dedicated PR/all-three coordination rule. R02 preserves Cameron's UUID auth
+and implements the explicit LEASH identity mapping. The R01 integration also
+preserved the cancellation-aware no-token auth restoration in `web/src/lib/auth.tsx`.
 
 ## R02 API implementation update
 
-The mandate and `/agent-runs` contracts above are implemented on the R02 branch.
+The mandate and `/agent-runs` contracts above are implemented in R02.
 [The R02 handoff](r02-handoff.md) is the current route/provisioning guide: assigned
 agent bearer, server-derived owner/version/hash, one operator-selected live/scripted
 mode, durable commit before 201 and identical retry echo. Mandates now have proposal,
