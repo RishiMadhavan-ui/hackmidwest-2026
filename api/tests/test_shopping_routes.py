@@ -20,12 +20,13 @@ from shopping_routes import StartShoppingBody, _agents_payload, start_shopping  
 NOW = datetime(2026, 10, 11, 12, 0, 0, tzinfo=timezone.utc)
 SIG = base64.b64encode(bytes(64)).decode()
 MND = "mnd_charger_demo"
+USER = "usr_" + "a" * 32
 
 
 def _mandate(**overrides) -> PurchaseMandate:
   base = {
     "id": MND,
-    "user_id": "usr_" + "a" * 32,
+    "user_id": USER,
     "agent_id": "agt_" + "b" * 32,
     "description": "Buy a USB-C laptop charger for under $40. No subscriptions.",
     "category": "laptop_charger",
@@ -39,6 +40,14 @@ def _mandate(**overrides) -> PurchaseMandate:
   }
   base.update(overrides)
   return PurchaseMandate.model_validate(base)
+
+
+def _http_client(response: MagicMock) -> MagicMock:
+  client = MagicMock()
+  client.__enter__.return_value = client
+  client.__exit__.return_value = None
+  client.post.return_value = response
+  return client
 
 
 class ShoppingPayloadTests(unittest.TestCase):
@@ -77,11 +86,13 @@ class ShoppingPayloadTests(unittest.TestCase):
 
 class ShoppingStartTests(unittest.TestCase):
   def setUp(self):
-    self.human = Principal("human", "usr_" + "a" * 32)
+    self.human = Principal("human", USER)
     self.env = {
       "AGENTS_URL": "http://agents.test",
       "AGENTS_SERVICE_TOKEN": "s" * 32,
       "STORE_URL": "http://store:8000",
+      "AGENT_TOKEN_SHOPPER": "c" * 32,
+      "AGENT_TOKEN_SHOPPER_SCRIPTED": "d" * 32,
     }
 
   def test_refuses_when_agents_token_missing(self):
@@ -90,14 +101,23 @@ class ShoppingStartTests(unittest.TestCase):
         start_shopping(StartShoppingBody(mandate_id=MND), self.human)
       self.assertEqual(err.exception.status, 503)
 
+  def test_rejects_live_subscription_attack(self):
+    with patch.dict("os.environ", self.env):
+      with self.assertRaises(AuthorityError) as err:
+        start_shopping(
+          StartShoppingBody(
+            mandate_id=MND,
+            agent_mode="live",
+            scenario="subscription_attack",
+          ),
+          self.human,
+        )
+      self.assertEqual(err.exception.status, 422)
+
   def test_launches_then_proxies_with_run_and_launch_ids(self):
     mandate = _mandate()
     conn = MagicMock()
-    # Preflight agent modes, then auth_user_id for activity emit.
-    conn.execute.return_value.fetchone.side_effect = [
-      {"allowed_modes": ["live"]},
-      {"auth_user_id": "auth-user-1"},
-    ]
+    conn.execute.return_value.fetchone.return_value = {"auth_user_id": "auth-user-1"}
     response = MagicMock()
     response.status_code = 202
     response.json.return_value = {
@@ -105,27 +125,23 @@ class ShoppingStartTests(unittest.TestCase):
       "status": "queued",
       "agent_mode": "live",
     }
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.__exit__.return_value = None
-    client.post.return_value = response
+    client = _http_client(response)
     launched = {
       "run_id": "run_from_launch",
       "launch_id": "launch_secret_value_at_least_32_charsxx",
       "agent_mode": "live",
       "mandate_id": mandate.id,
     }
-    env = {**self.env, "AGENT_TOKEN_SHOPPER": "c" * 32}
 
     with (
-      patch.dict("os.environ", env),
+      patch.dict("os.environ", self.env),
       patch("shopping_routes.get_conn") as get_conn,
       patch("shopping_routes.lock_user_authority"),
       patch("shopping_routes.current_mandate", return_value=mandate),
       patch("shopping_routes.utc_now", return_value=NOW),
       patch(
-        "shopping_routes.require_claimable_shopper",
-      ) as claimable,
+        "shopping_routes.ensure_cluster_shopper", return_value="agt_shopper",
+      ) as ensure,
       patch("shopping_routes.create_human_launch", return_value=launched) as launch,
       patch("shopping_routes.emit_activity") as emit,
       patch("shopping_routes.httpx.Client", return_value=client),
@@ -136,11 +152,13 @@ class ShoppingStartTests(unittest.TestCase):
         StartShoppingBody(mandate_id=mandate.id, agent_mode="live"),
         self.human,
       )
-    claimable.assert_called_once()
 
+    ensure.assert_called_once()
+    self.assertEqual(ensure.call_args.args[1:], (USER, "live"))
     self.assertEqual(result["run_id"], "run_from_launch")
     self.assertEqual(result["label"], "Live Strands shopper")
     launch.assert_called_once()
+    self.assertEqual(launch.call_args.args[0].agent_mode, "live")
     body = client.post.call_args.kwargs["json"]
     self.assertEqual(body["run_id"], "run_from_launch")
     self.assertEqual(body["launch_id"], launched["launch_id"])
@@ -148,10 +166,97 @@ class ShoppingStartTests(unittest.TestCase):
     self.assertNotIn("launch_id", result)
     emit.assert_called_once()
 
-  def test_rejects_mode_mismatch_before_launch(self):
+  def test_scripted_attack_starts_despite_live_mandate_agent(self):
+    """Mission Control drafts use the live UI agent; scripted start must still bind."""
+    mandate = _mandate()
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.return_value = {"auth_user_id": "auth-user-1"}
+    response = MagicMock()
+    response.status_code = 202
+    response.json.return_value = {
+      "run_id": "run_scripted",
+      "status": "queued",
+      "agent_mode": "scripted",
+    }
+    client = _http_client(response)
+    launched = {
+      "run_id": "run_scripted",
+      "launch_id": "launch_secret_value_at_least_32_charsxx",
+      "agent_mode": "scripted",
+      "mandate_id": mandate.id,
+    }
+
+    with (
+      patch.dict("os.environ", self.env),
+      patch("shopping_routes.get_conn") as get_conn,
+      patch("shopping_routes.lock_user_authority"),
+      patch("shopping_routes.current_mandate", return_value=mandate),
+      patch("shopping_routes.utc_now", return_value=NOW),
+      patch(
+        "shopping_routes.ensure_cluster_shopper",
+        return_value="agt_shopper_scripted",
+      ) as ensure,
+      patch("shopping_routes.create_human_launch", return_value=launched) as launch,
+      patch("shopping_routes.emit_activity"),
+      patch("shopping_routes.httpx.Client", return_value=client),
+    ):
+      get_conn.return_value.__enter__.return_value = conn
+      get_conn.return_value.__exit__.return_value = None
+      result = start_shopping(
+        StartShoppingBody(
+          mandate_id=mandate.id,
+          agent_mode="scripted",
+          scenario="subscription_attack",
+        ),
+        self.human,
+      )
+
+    ensure.assert_called_once()
+    self.assertEqual(ensure.call_args.args[1:], (USER, "scripted"))
+    self.assertEqual(launch.call_args.args[0].agent_mode, "scripted")
+    self.assertEqual(result["agent_mode"], "scripted")
+    self.assertEqual(result["scenario"], "subscription_attack")
+    self.assertEqual(result["label"], "Simulated compromised agent")
+    body = client.post.call_args.kwargs["json"]
+    self.assertEqual(body["sku"], "SUB-CARE-MO")
+    self.assertEqual(body["claim_sku"], "CHG-65W")
+    self.assertEqual(body["agent_mode"], "scripted")
+
+  def test_refuses_when_scripted_cluster_token_missing(self):
+    mandate = _mandate()
+    env = {**self.env, "AGENT_TOKEN_SHOPPER_SCRIPTED": ""}
+    with (
+      patch.dict("os.environ", env, clear=False),
+      patch("shopping_routes.get_conn") as get_conn,
+      patch("shopping_routes.lock_user_authority"),
+      patch("shopping_routes.current_mandate", return_value=mandate),
+      patch("shopping_routes.utc_now", return_value=NOW),
+      patch("shopping_routes.create_human_launch") as launch,
+      patch("shopping_routes.httpx.Client") as client_cls,
+    ):
+      get_conn.return_value.__enter__.return_value = MagicMock()
+      get_conn.return_value.__exit__.return_value = None
+      with self.assertRaises(AuthorityError) as err:
+        start_shopping(
+          StartShoppingBody(
+            mandate_id=mandate.id,
+            agent_mode="scripted",
+            scenario="subscription_attack",
+          ),
+          self.human,
+        )
+      self.assertEqual(err.exception.status, 503)
+      self.assertIn("AGENT_TOKEN_SHOPPER_SCRIPTED", err.exception.detail)
+      launch.assert_not_called()
+      client_cls.assert_not_called()
+
+  def test_refuses_when_cluster_token_bound_to_other_human(self):
     mandate = _mandate()
     conn = MagicMock()
     conn.execute.return_value.fetchone.return_value = {
+      "id": "agt_shopper",
+      "user_id": "usr_" + "f" * 32,
+      "enabled": True,
       "allowed_modes": ["live"],
     }
     with (
@@ -167,44 +272,11 @@ class ShoppingStartTests(unittest.TestCase):
       get_conn.return_value.__exit__.return_value = None
       with self.assertRaises(AuthorityError) as err:
         start_shopping(
-          StartShoppingBody(
-            mandate_id=mandate.id,
-            agent_mode="scripted",
-            scenario="charger",
-          ),
-          self.human,
-        )
-      self.assertEqual(err.exception.status, 409)
-      launch.assert_not_called()
-      client_cls.assert_not_called()
-
-  def test_rejects_when_cluster_shopper_not_bound_to_mandate(self):
-    mandate = _mandate()
-    conn = MagicMock()
-    # First fetchone: agent modes; second: token binding for another agent.
-    conn.execute.return_value.fetchone.side_effect = [
-      {"allowed_modes": ["live"]},
-      {"id": "agt_other", "user_id": mandate.user_id},
-    ]
-    env = {**self.env, "AGENT_TOKEN_SHOPPER": "c" * 32}
-    with (
-      patch.dict("os.environ", env),
-      patch("shopping_routes.get_conn") as get_conn,
-      patch("shopping_routes.lock_user_authority"),
-      patch("shopping_routes.current_mandate", return_value=mandate),
-      patch("shopping_routes.utc_now", return_value=NOW),
-      patch("shopping_routes.create_human_launch") as launch,
-      patch("shopping_routes.httpx.Client") as client_cls,
-    ):
-      get_conn.return_value.__enter__.return_value = conn
-      get_conn.return_value.__exit__.return_value = None
-      with self.assertRaises(AuthorityError) as err:
-        start_shopping(
           StartShoppingBody(mandate_id=mandate.id, agent_mode="live"),
           self.human,
         )
       self.assertEqual(err.exception.status, 409)
-      self.assertIn("cluster agent credential", err.exception.detail)
+      self.assertIn("bound to another human", err.exception.detail)
       launch.assert_not_called()
       client_cls.assert_not_called()
 

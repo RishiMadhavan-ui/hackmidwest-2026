@@ -109,6 +109,9 @@ class Launch(Contract):
   canonical_payload_hash: Sha256
   confirmed: Literal[True]
   start_url: str | None = Field(default=None, max_length=1000)
+  # When set (Mission Control Start shopping), register the run under the
+  # cluster shopper for this mode instead of mandate_heads.agent_id.
+  agent_mode: Literal["live", "scripted"] | None = None
 
 
 @router.post("/agent-runs/launch", status_code=201)
@@ -120,9 +123,26 @@ def launch(body: Launch, principal: Annotated[Principal, Depends(require_human)]
     mandate = current_mandate(conn, body.mandate_id, principal, now=utc_now(), lock=True)
     if (body.version, body.canonical_payload_hash) != (mandate.version, mandate.canonical_payload_hash):
       raise AuthorityError(409, "Confirm the current mandate version and hash")
-    agent = conn.execute("SELECT * FROM leash_agents WHERE id=%s AND user_id=%s AND enabled", (mandate.agent_id, principal.user_id)).fetchone()
+    if body.agent_mode is not None:
+      from principals import ensure_cluster_shopper
+      shopper_id = ensure_cluster_shopper(conn, principal.user_id, body.agent_mode)
+      agent = conn.execute(
+        "SELECT * FROM leash_agents WHERE id=%s AND user_id=%s AND enabled",
+        (shopper_id, principal.user_id),
+      ).fetchone()
+      mode = body.agent_mode
+    else:
+      agent = conn.execute(
+        "SELECT * FROM leash_agents WHERE id=%s AND user_id=%s AND enabled",
+        (mandate.agent_id, principal.user_id),
+      ).fetchone()
+      mode = None
     if not agent or len(agent["allowed_modes"]) != 1:
       raise AuthorityError(409, "Mandate agent has not been provisioned")
+    if mode is None:
+      mode = agent["allowed_modes"][0]
+    elif agent["allowed_modes"][0] != mode:
+      raise AuthorityError(409, "Cluster shopper mode does not match the launch request")
     if conn.execute("""SELECT 1 FROM payment_operations WHERE user_id=%s AND mandate_id=%s
         AND state IN ('prepared','activating','ready','authorizing','reconciling','authorized')""",
         (principal.user_id, mandate.id)).fetchone():
@@ -132,7 +152,6 @@ def launch(body: Launch, principal: Annotated[Principal, Depends(require_human)]
         AND NOT EXISTS (SELECT 1 FROM run_cancellations c WHERE c.run_id=e.run_id)""",
         (principal.user_id, mandate.id)).fetchone():
       raise AuthorityError(409, "An active launch already owns this mandate")
-    mode = agent["allowed_modes"][0]
     run = register_run(conn, AgentRunRegistration(id=run_id, mandate_id=mandate.id, agent_mode=mode),
       Principal("agent", principal.user_id, agent["id"], (mode,)), now=utc_now())
     conn.execute("INSERT INTO run_executions(run_id,launch_hash,deadline) VALUES (%s,%s,%s)",

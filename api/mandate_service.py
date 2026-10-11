@@ -16,7 +16,7 @@ from leash_shared.models import (
   AgentRun, AgentRunRegistration, MandateProposal, MandateStatus,
   PurchaseMandate, canonical_json,
 )
-from principals import Principal, bind_agent, token_digest
+from principals import Principal, bind_agent
 from signing import sign_confirmation, signing_key, verify_confirmation
 from payment_operations import cancel_prepared
 
@@ -50,8 +50,18 @@ def scope_head(conn, mandate_id: str, principal: Principal, *, lock=False):
     "SELECT * FROM mandate_heads WHERE id = %s AND user_id = %s" + (" FOR UPDATE" if lock else ""),
     (mandate_id, principal.user_id),
   ).fetchone()
-  if row is None or (principal.role == "agent" and row["agent_id"] != principal.agent_id):
+  if row is None:
     raise AuthorityError(404, "Mandate not found")
+  if principal.role == "agent" and row["agent_id"] != principal.agent_id:
+    # Human-confirmed mandates are owned by the user. Any of that human's enabled
+    # shoppers (live or scripted) may execute them so Mission Control can run a
+    # scripted fixture under a mandate drafted for the live UI agent.
+    peer = conn.execute(
+      "SELECT 1 FROM leash_agents WHERE id = %s AND user_id = %s AND enabled",
+      (principal.agent_id, principal.user_id),
+    ).fetchone()
+    if peer is None:
+      raise AuthorityError(404, "Mandate not found")
   return row
 
 
@@ -119,24 +129,15 @@ def propose(conn, proposal: MandateProposal, principal: Principal, *, now: datet
 def draft_agent_for_user(conn, user_id: str) -> str:
   """Pick an owned shopper agent for a human-authored draft.
 
-  Prefers the live agent bound to AGENT_TOKEN_SHOPPER when that credential is
-  configured and owned by this human (required for agents-pod claim). Falls back
-  to any owned live agent, then provisions a new binding. Refuses a silent
-  random UI agent when the cluster shopper token belongs to someone else.
+  Prefers the live cluster shopper (AGENT_TOKEN_SHOPPER), including demo idle
+  rebind via ensure_cluster_shopper. Falls back to any owned live agent, then a
+  UI-only binding when the cluster token is not configured.
   """
+  from principals import ensure_cluster_shopper
+
   env_token = os.getenv("AGENT_TOKEN_SHOPPER", "").strip()
   if len(env_token) >= 32:
-    owned = conn.execute(
-      "SELECT id, user_id FROM leash_agents WHERE token_sha256 = %s",
-      (token_digest(env_token),),
-    ).fetchone()
-    if owned is not None:
-      if str(owned["user_id"]) != user_id:
-        raise AuthorityError(
-          409,
-          "Configured AGENT_TOKEN_SHOPPER is bound to another human",
-        )
-      return str(owned["id"])
+    return ensure_cluster_shopper(conn, user_id, "live")
 
   row = conn.execute(
     """SELECT id FROM leash_agents
@@ -147,13 +148,6 @@ def draft_agent_for_user(conn, user_id: str) -> str:
   ).fetchone()
   if row:
     return str(row["id"])
-
-  if len(env_token) >= 32:
-    agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
-    bind_agent(
-      conn, user_id=user_id, agent_id=agent_id, token=env_token, modes=("live",),
-    )
-    return agent_id
 
   agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
   bind_agent(
@@ -267,7 +261,12 @@ def list_mandates(conn, principal: Principal, *, status: MandateStatus | None, n
   items = []
   for head in heads:
     if principal.role == "agent" and head["agent_id"] != principal.agent_id:
-      continue
+      peer = conn.execute(
+        "SELECT 1 FROM leash_agents WHERE id = %s AND user_id = %s AND enabled",
+        (principal.agent_id, principal.user_id),
+      ).fetchone()
+      if peer is None:
+        continue
     mandate = version_record(conn, head["id"], head["current_version"], now=now)
     if status is not None and mandate.status != status:
       continue
