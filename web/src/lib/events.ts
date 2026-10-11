@@ -45,6 +45,7 @@ const LABELS: Record<string, string> = {
   "security.incident_recorded": "Security incident",
   "killswitch.changed": "Kill switch",
   "run.stop.requested": "Run stop requested",
+  "shopping.start.requested": "Shopping start requested",
 };
 
 export function labelFor(type: string): string {
@@ -53,7 +54,12 @@ export function labelFor(type: string): string {
 
 export function groupFor(type: string): EventGroup {
   if (type.startsWith("mandate.")) return "mandate";
-  if (type.startsWith("agent.") || type.startsWith("provenance.") || type.startsWith("run.")) {
+  if (
+    type.startsWith("agent.") ||
+    type.startsWith("provenance.") ||
+    type.startsWith("run.") ||
+    type.startsWith("shopping.")
+  ) {
     return "agent";
   }
   if (type.startsWith("killswitch.") || type.startsWith("card.control.")) return "control";

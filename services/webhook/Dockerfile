@@ -17,6 +17,7 @@ COPY services/webhook/decide.py \
      services/webhook/handler.py \
      services/webhook/asa.py \
      services/webhook/activity_notify.py \
+     services/webhook/execution_routes.py \
      services/webhook/main.py \
      ./
 COPY shared/leash_shared /shared/leash_shared

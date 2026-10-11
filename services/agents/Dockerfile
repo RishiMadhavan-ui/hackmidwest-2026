@@ -12,6 +12,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY services/agents/pyproject.toml services/agents/uv.lock services/agents/.python-version ./
 RUN uv sync --frozen --no-dev --no-install-project
 
+# Includes shopper/workflow.py, control.py, runtime.py and provenance/workflow.py.
+# Keep the package-tree copy: local imports alone do not put modules in images.
 COPY services/agents/ ./
 COPY shared/leash_shared/ ./leash_shared/
 

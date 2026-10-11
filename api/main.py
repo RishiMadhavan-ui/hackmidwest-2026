@@ -11,15 +11,20 @@ from fastapi.responses import JSONResponse
 from activity import internal_router as activity_internal_router
 from activity import router as activity_router
 from auth import router as auth_router
-from attack_lab import LabBodyLimit, router as lab_router
 from authority_errors import AuthorityError, DatabaseUnavailable
 from cards import router as cards_router
 from db import init_db
 from mandate_routes import router as mandate_router
 from payment_routes import router as payment_router
 from provenance_routes import router as provenance_router
-from purchase_history import router as purchase_history_router
 from workflow_control import router as workflow_router
+from execution import router as execution_router
+import purchase_execution  # noqa: F401; registers protected completion on the merchant router.
+from merchant_execution import router as merchant_router
+from workflow_events import router as workflow_event_router
+from attack_lab import router as attack_lab_router, LabBodyLimit
+from purchase_history import router as purchase_history_router
+from shopping_routes import router as shopping_router
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -46,10 +51,14 @@ app.include_router(payment_router)
 app.include_router(activity_router)
 app.include_router(provenance_router)
 app.include_router(workflow_router)
-app.include_router(activity_internal_router)
-app.include_router(lab_router)
+app.include_router(attack_lab_router)
 app.include_router(purchase_history_router)
 app.add_middleware(LabBodyLimit)
+app.include_router(shopping_router)
+app.include_router(activity_internal_router)
+app.include_router(execution_router)
+app.include_router(merchant_router)
+app.include_router(workflow_event_router)
 
 
 @app.exception_handler(AuthorityError)

@@ -27,7 +27,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from provenance.outbox import shared_outbox
-from shopper.runs import RunManager, StartRun, run_shopper
+from shopper.runs import RunManager, StartRun, make_model_for, mcp_urls
+from shopper.agent import build_agent, task_prompt
+from shopper.credentials import credential_for
 
 AGENTS_DIR = Path(__file__).parents[1]
 LEASH_DIR = AGENTS_DIR.parent / "mcp-leash"
@@ -205,8 +207,20 @@ def env(stack, monkeypatch):
   return stack
 
 
+def historical_fixture_runner(run_id, req, sinks):
+  """Historical single-Agent wiring fixture; never exposed by the service."""
+  from strands.tools.mcp import MCPClient
+  credential = credential_for(req.agent_mode)
+  leash_url, store_url = mcp_urls()
+  with MCPClient(url=leash_url, headers=credential.bearer()) as leash:
+    with MCPClient(url=store_url, headers={"Authorization": f"Bearer {STORE_MCP_TOKEN}"}) as store:
+      agent = build_agent(run_id, sinks, [*store.list_tools_sync(), *leash.list_tools_sync()],
+        model=make_model_for(req), agent_mode=req.agent_mode, agent_id=credential.agent_id)
+      return str(agent(task_prompt(req.task, req.mandate_id, req.start_url)))
+
+
 def run(req: StartRun) -> dict:
-  manager = RunManager(runner=run_shopper)
+  manager = RunManager(runner=historical_fixture_runner)
   run_id = manager.start(req)["id"]
   for _ in range(300):
     record = manager.get(run_id)

@@ -66,6 +66,40 @@ def stop_rail(user_id: str) -> dict:
   }
 
 
+def stop_rail_run(user_id: str, run_id: str) -> dict:
+  """Atomic unused-grant barrier for one run. Does not stop the account."""
+  token = os.getenv("WEBHOOK_INTERNAL_TOKEN", "").strip()
+  url = os.getenv("WEBHOOK_URL", "").strip().rstrip("/")
+  if len(token) < 32 or not url:
+    return {"status": "pending", "reason": "Rail enforcement is not configured"}
+  try:
+    with httpx.Client(base_url=url, timeout=3, follow_redirects=False) as client:
+      response = client.post(
+        "/internal/run-stop",
+        headers={"Authorization": "Bearer " + token},
+        json={"user_id": user_id, "run_id": run_id},
+      )
+    data = response.json()
+    if (
+      response.is_success
+      and data.get("user_id") == user_id
+      and data.get("run_id") == run_id
+      and data.get("run_stop_on") is True
+      and type(data.get("unused_grants_revoked")) is int
+      and data["unused_grants_revoked"] >= 0
+    ):
+      return {
+        "status": "enforced",
+        "unused_grants_revoked": data["unused_grants_revoked"],
+      }
+  except (httpx.HTTPError, ValueError, AttributeError):
+    pass
+  return {
+    "status": "pending",
+    "reason": "Rail did not acknowledge run stop; retry this stop request",
+  }
+
+
 def close_owned_cards(user_id):
   """Reconcile durable CLOSED intents. Historical PAUSE records remain intact."""
   token = os.getenv("WEBHOOK_INTERNAL_TOKEN", "").strip()
@@ -314,22 +348,34 @@ def _owned_run(conn, run_id, user_id):
   return run
 
 
-def _run_stop_state(conn, run):
+def _run_stop_state(conn, run, *, rail: dict | None = None):
   cancelled = conn.execute(
     "SELECT requested_at FROM run_cancellations WHERE run_id=%s", (run["id"],)
   ).fetchone()
+  # Run-scoped Graph executions record their own rail stop and Graph ack.
+  execution = conn.execute("SELECT rail_stopped_at,graph_ack_at FROM run_executions WHERE run_id=%s", (run["id"],)).fetchone()
+  enforced = bool(rail and rail.get("status") == "enforced") or bool(execution and execution["rail_stopped_at"])
+  if not cancelled:
+    financial = "not_requested"
+    status = "not_requested"
+  elif enforced:
+    financial = "enforced"
+    status = "enforced"
+  else:
+    financial = "pending_rail_ack"
+    status = "pending_enforcement"
   return {
     "run_id": run["id"],
     "scope": "run",
     "cancel_requested": bool(cancelled),
     "requested_at": cancelled["requested_at"] if cancelled else None,
-    "status": "pending_enforcement" if cancelled else "not_requested",
-    # R01 grants/cards have no authoritative run binding. Never broaden a run
-    # stop to an account stop or report a rail barrier that does not exist.
-    "financial_revocation": "pending_run_binding" if cancelled else "not_requested",
-    "graph_cancellation": "not_acknowledged",
-    "provider_card_controls": "pending_run_binding" if cancelled else "not_requested",
+    "status": status,
+    # Rail run-stop latches unused grants for this run_id; shared mandate intact.
+    "financial_revocation": financial,
+    "graph_cancellation": "acknowledged" if execution and execution["graph_ack_at"] else "not_acknowledged",
+    "provider_card_controls": "not_required_local_rail" if execution else "pending_dedicated_card_binding" if cancelled else "not_requested",
     "previous_authorizations_reversed": False,
+    "rail": rail,
   }
 
 
@@ -372,8 +418,11 @@ def stop_run(run_id: RunId, principal: Annotated[Principal, Depends(require_huma
     if created:
       emit_activity(
         conn, user_id=principal.user_id, event_type="run.stop.requested",
-        data={"run_id": run_id, "scope": "run", "financial_revocation": "pending_run_binding",
+        data={"run_id": run_id, "scope": "run", "financial_revocation": "pending_rail_ack",
               "graph_cancellation": "not_acknowledged"},
         auth_user_id=_auth_id(conn, principal.user_id),
       )
-    return _run_stop_state(conn, run)
+  # Outside the SQL lock: Valkey run latch + unused grant revoke for this run only.
+  rail = stop_rail_run(principal.user_id, run_id)
+  with get_conn() as conn:
+    return _run_stop_state(conn, _owned_run(conn, run_id, principal.user_id), rail=rail)

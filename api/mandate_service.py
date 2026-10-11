@@ -1,6 +1,8 @@
 """Transactional authority lifecycle; no model or merchant content can approve."""
 
 import base64
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -14,7 +16,7 @@ from leash_shared.models import (
   AgentRun, AgentRunRegistration, MandateProposal, MandateStatus,
   PurchaseMandate, canonical_json,
 )
-from principals import Principal
+from principals import Principal, bind_agent, token_digest
 from signing import sign_confirmation, signing_key, verify_confirmation
 from payment_operations import cancel_prepared
 

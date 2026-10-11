@@ -8,6 +8,7 @@ import { AttackLab } from "@/components/mission-control/attack-lab";
 import { AuthorityPanel } from "@/components/mission-control/authority-panel";
 import { ComparisonPanel } from "@/components/mission-control/comparison-panel";
 import { PurchaseHistory } from "@/components/purchase-history";
+import { StartShopping } from "@/components/mission-control/start-shopping";
 import { EmptyState } from "@/components/page";
 import { useActivity } from "@/lib/activity";
 import type { PurchaseMandate } from "@/lib/mandates";
@@ -25,8 +26,6 @@ export default function MissionControlPage() {
   const instruction =
     mandate?.description ??
     "Confirm a mandate to lock human purchase authority for the shopper.";
-  const purchaseRevision = events.reduce((latest, event) =>
-    event.type.startsWith("payment.") ? Math.max(latest, event.sequence) : latest, 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -54,10 +53,15 @@ export default function MissionControlPage() {
       </header>
 
       <AuthorityPanel onMandateChange={onMandateChange} />
-      <PurchaseHistory revision={purchaseRevision} />
+      <PurchaseHistory revision={events.filter((e) => e.type.startsWith("payment.") || e.type.startsWith("payment_operation.")).length} />
 
-      <div className="rounded-lg border border-border px-4 py-4 md:px-5">
-        <ComparisonPanel mandate={mandate} events={events} />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-border px-4 py-4 md:px-5">
+          <StartShopping mandate={mandate} />
+        </div>
+        <div className="rounded-lg border border-border px-4 py-4 md:px-5">
+          <ComparisonPanel mandate={mandate} events={events} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

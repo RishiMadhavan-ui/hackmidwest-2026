@@ -64,6 +64,11 @@ class GrantSnapshot:
   checkout_id: str = ""
   checkout_hash: str = ""
   merchant_binding_id: str = ""
+  # Private rail envelope; the frozen shared AuthorizationGrant is unchanged.
+  run_id: str = ""
+  execution_generation: int = 0
+  rail_epoch: str = ""
+  authorization_event_id: str = ""
 
 
 @dataclass(frozen=True)

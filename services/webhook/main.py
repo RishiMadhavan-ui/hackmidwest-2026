@@ -105,6 +105,11 @@ class KillswitchBody(Contract):
   on: Literal[True]
 
 
+class RunStopBody(Contract):
+  user_id: UserId
+  run_id: Text = Field(min_length=1, max_length=128)
+
+
 class CardStateBody(Contract):
   card_token: Text = Field(max_length=128)
   state: Literal["PAUSED", "CLOSED"] = "PAUSED"
@@ -272,14 +277,29 @@ async def lithic_asa(
 
 
 @app.put("/internal/grants")
-def put_grant(
-  body: AuthorizationGrant,
+async def put_grant(
+  request: Request,
   _: Annotated[None, Depends(require_internal)],
   store: Annotated[MemoryGrantStore | RedisGrantStore, Depends(get_store)],
 ) -> dict[str, str]:
-  """Operator/API seeding of a short-lived grant into Valkey. Not a public mint."""
-  from datetime import timezone
+  """Operator/API seeding of a short-lived grant into Valkey. Not a public mint.
 
+  Optional top-level ``run_id`` (rail-local) scopes the grant for run Stop.
+  """
+  from datetime import timezone
+  from pydantic import ValidationError
+
+  try:
+    payload = await request.json()
+  except json.JSONDecodeError as exc:
+    raise HTTPException(422, "Invalid grant payload") from exc
+  if not isinstance(payload, dict):
+    raise HTTPException(422, "Invalid grant payload")
+  run_id = str(payload.pop("run_id", "") or "")
+  try:
+    body = AuthorizationGrant.model_validate(payload)
+  except ValidationError as exc:
+    raise HTTPException(422, "Invalid grant payload") from exc
   clock = datetime.now(timezone.utc)
   if (
     body.status.value != "ISSUED"
@@ -304,6 +324,7 @@ def put_grant(
     checkout_id=body.verified_checkout_id,
     checkout_hash=body.verified_checkout_hash,
     merchant_binding_id=body.merchant_binding_id,
+    run_id=run_id,
   )
   try:
     store.set_mandate(body.mandate_id, status="active", version=body.mandate_version)
@@ -323,6 +344,23 @@ def set_killswitch(
   return {
     "user_id": body.user_id,
     "killswitch_on": True,
+    "unused_grants_revoked": revoked,
+    "previous_authorizations_reversed": False,
+  }
+
+
+@app.post("/internal/run-stop")
+def stop_run(
+  body: RunStopBody,
+  _: Annotated[None, Depends(require_internal)],
+  store: Annotated[MemoryGrantStore | RedisGrantStore, Depends(get_store)],
+) -> dict[str, Any]:
+  """Revoke unused grants for one run without account-wide kill switch."""
+  revoked = store.stop_run(body.user_id, body.run_id)
+  return {
+    "user_id": body.user_id,
+    "run_id": body.run_id,
+    "run_stop_on": True,
     "unused_grants_revoked": revoked,
     "previous_authorizations_reversed": False,
   }
@@ -392,3 +430,7 @@ def enroll_asa(
       502, "Enrollment outcome is unknown; inspect provider configuration before retry"
     ) from None
   return {"provider": "lithic_sandbox", "enrollment": result, "url": body.url}
+
+
+from execution_routes import router as execution_router  # noqa: E402
+app.include_router(execution_router)

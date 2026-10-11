@@ -1,5 +1,13 @@
 # AGENTS.md
 
+**October 11 agent branch update (`aditya/strands-graph`, based on `138d636`):**
+the bounded Strands Graph, fresh-context recovery, local cancellation and genuine
+execution-event spooling are implemented with fixture tests. This is not live
+acceptance: human-launch/worker-fencing APIs, MCP scope enforcement, workflow-event
+intake/SSE integration and the contained merchant/payment flow remain dependencies.
+The client fails closed against today's backend. No API/database/web ownership or
+frozen contract changed. See [Graph handoff](services/agents/graph-handoff.md).
+
 **P0 Attack Lab containment (October 11):** anonymous deployed
 `/store/products/chg-65w?evil=1` served a poisoned listing; `/attack-lab` was 404.
 The source now denies runtime poison selection in both the web route and store,
@@ -12,25 +20,20 @@ for identity review; it is not approved operator provisioning.
 See [Attack Lab audit](docs/ATTACK_LAB_SECURITY_AUDIT.md) and
 [spec section 29](docs/LEASH_SPEC.md#29-attack-lab-access-control-p0).
 
-**Current R03/R11 foundation (over `11d6696`, on main):** payment operations
-now commit before merchant retrieval, with immutable human/agent/run/mandate
-version/hash and stable private grant/instrument/issuance/authorization references.
-Identical retries retain one operation; changed claims conflict; unresolved
-operations block replacement purchases across mandate versions. Full canonical
-observations, source hash, normalized snapshot/hash and verification are persisted
-atomically with the blocked result/events. Stop, replacement, revocation and
-expiry cancel prepared work; unknown outcomes remain reconciling and cannot be
-cleared by a retry or Stop. No financial write is enabled.
-
-Current store responses lack verified checkout owner/session, revision, expiry
-and freeze. A service credential authenticates transport only. Evidence is
-explicitly observed_unverified; the verifier receives checkout_authenticated=False.
-A charger returns blocked with checkout_source_unavailable_or_wrong_owner plus
-financial_authority_unavailable; subscription failures remain explicit. Reserved
-UUIDs are not issued cards or usable grants. R03/R11 are **partially implemented**;
-merchant proof, financial activation/reconciliation workers, atomic run revocation,
-real Graph/recovery and the complete product UI remain required. See [R03/R11 handoff](api/r03-r11-handoff.md).
-Frozen shared models/events, historical migrations, team lanes and LKE are preserved.
+**Current protected-charge path (branch work over R03/R11 foundation):** payment
+operations still commit before merchant retrieval with immutable
+human/agent/run/mandate version/hash and stable private references. Verified
+charger checkouts now own/freeze via `STORE_CHARGE_TOKEN`, bind the reserved
+`authorization_event_id`, seed a one-use local-rail grant (`PUT /internal/grants`
+with `run_id`), and finish `prepared → authorized` (migration `0011`).
+`POST /payments` returns instrument/event secrets once; GET never re-discloses.
+Store `complete` charges `POST {WEBHOOK_URL}/local/authorize` with that durable
+event id; unbound remains 403; rail unknown outcomes stay 503 without inventing
+a new event. Run Stop latches Valkey unused grants for that `run_id`
+(`pending_rail_ack`). Subscriptions and fail-closed verification still block.
+Lithic issuance, provider reconciliation workers, real Graph/recovery and full
+product UI remain required. See [R03/R11 handoff](api/r03-r11-handoff.md).
+Frozen shared models/events, historical migrations and LKE topology are preserved.
 
 **Historical containment baseline (`d773079` + fixes committed at `11d6696`):** Cameron's checkout/payment work is
 preserved with security containment. Authenticated configured merchant retrieval,

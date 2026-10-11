@@ -1,5 +1,13 @@
 # LEASH — Product and MVP Implementation Specification
 
+**October 11 agent branch status (`aditya/strands-graph`, base `138d636`):**
+the actual bounded Strands Graph, isolated recovery context, local cancellation
+and execution-event outbox have fixture coverage. Durable worker/financial
+fencing, human launch, workflow intake/SSE and live payment recovery remain open
+acceptance gates. The new client refuses an unfenced launch against current main.
+Requirements, ownership and frozen schemas are unchanged; proposed integration
+details are in the [Graph handoff](../services/agents/graph-handoff.md).
+
 **Current R03/R11 foundation (over `11d6696`, on main):** payment operations
 now commit before merchant retrieval, with immutable human/agent/run/mandate
 version/hash and stable private grant/instrument/issuance/authorization references.

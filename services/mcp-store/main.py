@@ -18,6 +18,7 @@ canonical checkout from the store itself.
 """
 
 import hmac
+import contextvars
 import os
 import re
 from contextlib import asynccontextmanager
@@ -44,6 +45,24 @@ MAX_PAGE_CHARS = 12_000
 MAX_REDIRECTS = 3
 _RUN_ID = re.compile(r"^run_[A-Za-z0-9_-]+$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+scope_headers = contextvars.ContextVar("scope_headers", default={})
+
+
+async def authorize_tool(action):
+  """Validate the opaque audience-bound scope on every direct tool invocation."""
+  headers = scope_headers.get()
+  api_url = os.getenv("API_URL", "").rstrip("/")
+  if not api_url or not headers.get("x-leash-execution-token"):
+    raise StoreUnavailable("A live run-scoped store credential is required")
+  try:
+    async with httpx.AsyncClient(base_url=api_url, timeout=3, follow_redirects=False) as client:
+      response = await client.post("/execution/authorize", headers=headers,
+        json={"audience": "mcp-store", "action": action})
+    if not response.is_success:
+      raise StoreUnavailable("Run execution scope is unavailable")
+    return response.json()
+  except (httpx.HTTPError, ValueError):
+    raise StoreUnavailable("Execution scope check failed closed") from None
 
 # TODO(C02/H05): confirm these with Cameron's store. Proposed routes:
 #   POST {STORE_URL}/api/checkouts               {"sku", "quantity"} -> checkout
@@ -124,24 +143,35 @@ async def fetch_store_page(target: str) -> tuple[httpx.URL, int, str]:
 
 
 def _store_headers() -> dict[str, str]:
-  # TODO(C02/H05): the scoped caller/session credential agreed with Cameron.
-  # The caller's bearer is never forwarded to the store.
+  # Browse/create use the store API credential. Never forward the caller bearer.
   token = os.environ.get("STORE_API_TOKEN")
-  return {"Authorization": f"Bearer {token}"} if token else {}
+  return {**({"Authorization": f"Bearer {token}"} if token else {}), **scope_headers.get()}
+
+
+def _store_charge_headers() -> dict[str, str]:
+  # Complete requires the distinct charge credential (same as the API bind path).
+  # Forward run-scoped fencing headers so store→API /begin can authorize the lease.
+  token = os.environ.get("STORE_CHARGE_TOKEN")
+  return {**({"Authorization": f"Bearer {token}"} if token else {}), **scope_headers.get()}
 
 
 def _error(reason: str, **extra: Any) -> dict[str, Any]:
   return {"status": "error", "reason": reason, **extra}
 
 
-async def _store_post(path: str, body: dict[str, Any]) -> dict[str, Any]:
+async def _store_post(
+  path: str, body: dict[str, Any], *, headers: dict[str, str] | None = None
+) -> dict[str, Any]:
   try:
+    await authorize_tool("create_checkout" if path == CHECKOUTS_PATH else "complete_checkout")
     store_url = _store_url()
   except StoreUnavailable as exc:
     return _error(str(exc))
   try:
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
-      res = await client.post(str(store_url) + path, json=body, headers=_store_headers())
+      res = await client.post(
+        str(store_url) + path, json=body, headers=headers or _store_headers()
+      )
   except httpx.HTTPError as exc:
     return _error(f"store unreachable ({type(exc).__name__})")
   try:
@@ -166,6 +196,9 @@ async def browse(url: str, run_id: str | None = None) -> CallToolResult:
     run_id: Optional id of your current agent run, to file the page snapshot.
   """
   try:
+    binding = await authorize_tool("browse")
+    if run_id != binding.get("run_id"):
+      raise StoreUnavailable("Browsing run does not match the execution scope")
     final_url, status, html = await fetch_store_page(url)
   except StoreUnavailable as exc:
     return CallToolResult(
@@ -245,7 +278,11 @@ async def complete_checkout(
   body: dict[str, Any] = {"payment_id": payment_id}
   if card_number:
     body["card"] = {"number": card_number, "exp_month": exp_month, "exp_year": exp_year, "cvv": cvv}
-  return await _store_post(f"{CHECKOUTS_PATH}/{checkout_id}/complete", body)
+  return await _store_post(
+    f"{CHECKOUTS_PATH}/{checkout_id}/complete",
+    body,
+    headers=_store_charge_headers(),
+  )
 
 
 class StoreAuthMiddleware:
@@ -279,7 +316,13 @@ class StoreAuthMiddleware:
       )
       await res(scope, receive, send)
       return
-    await self.app(scope, receive, send)
+    headers = dict(scope["headers"])
+    reset = scope_headers.set({k.decode("latin-1"): v.decode("latin-1") for k, v in headers.items()
+      if k in {b"x-leash-run-id", b"x-leash-worker-id", b"x-leash-generation", b"x-leash-execution-token"}})
+    try:
+      await self.app(scope, receive, send)
+    finally:
+      scope_headers.reset(reset)
 
 
 async def health(_: Request) -> JSONResponse:

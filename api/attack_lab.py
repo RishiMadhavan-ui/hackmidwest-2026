@@ -28,7 +28,11 @@ def utc_now() -> datetime:
 
 
 def operator_ids() -> set[str]:
-  value = os.getenv("ATTACK_LAB_OPERATOR_IDS", "").strip()
+  primary = os.getenv("ATTACK_LAB_OPERATOR_USER_IDS", "").strip()
+  legacy = os.getenv("ATTACK_LAB_OPERATOR_IDS", "").strip()
+  if primary and legacy and set(primary.split(",")) != set(legacy.split(",")):
+    raise AuthorityError(503, "Attack Lab operator configuration conflicts")
+  value = primary or legacy
   if not value:
     return set()
   items = value.split(",")
@@ -43,6 +47,12 @@ def server_enabled() -> bool:
   return value == "1"
 
 
+def require_attack_lab_operator(principal: Principal) -> Principal:
+  if principal.role != "human" or principal.user_id not in operator_ids():
+    raise AuthorityError(403, "Attack Lab requires an authorized demo operator")
+  return principal
+
+
 def require_operator(request: Request, credentials: Credentials) -> Principal:
   # Verify the current real JWT account/session; the static demo USER_TOKEN,
   # service credentials and role claims never satisfy this dependency.
@@ -54,8 +64,7 @@ def require_operator(request: Request, credentials: Credentials) -> Principal:
          if name in service_keys or name.startswith("AGENT_TOKEN_")):
     raise AuthorityError(403, "Service credentials cannot authorize Attack Lab")
   user_id = leash_user_id(user.id)
-  if user_id not in operator_ids():
-    raise AuthorityError(403, "Attack Lab requires an authorized demo operator")
+  require_attack_lab_operator(Principal("human", user_id))
   if request.method not in {"GET", "HEAD", "OPTIONS"}:
     origin = request.headers.get("origin")
     allowed = {item.strip() for item in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")}
@@ -214,3 +223,26 @@ def scenario(namespace_id: str, body: ScenarioRequest, principal: Operator):
 @router.post("/namespaces/{namespace_id}/simulate-authorization")
 def blocked_operation(namespace_id: str, body: EmptyRequest, principal: Operator):
   unavailable(namespace_id, principal)
+
+
+def attack_lab_status(principal: Principal):
+  require_attack_lab_operator(principal)
+  return {"execution": "disabled_pending_isolated_executor", "operator_authorized": True,
+          "can_run_attacks": False, "server_enabled": server_enabled()}
+
+
+@router.get("/status")
+def status(principal: Operator):
+  return attack_lab_status(principal)
+
+
+@router.post("/scenarios/{scenario_id}/start")
+def start_scenario(scenario_id: str, principal: Operator):
+  raise AuthorityError(503 if server_enabled() else 403,
+                       "Use an enabled isolated namespace; direct scenario execution is disabled")
+
+
+@router.get("/products/{product_id}")
+def product_preview(product_id: str, principal: Operator):
+  # No raw HTML from a merchant is served in the application's origin.
+  raise AuthorityError(503 if server_enabled() else 403, "Isolated listing preview is not configured")

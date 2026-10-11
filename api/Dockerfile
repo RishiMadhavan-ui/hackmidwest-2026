@@ -12,7 +12,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY api/pyproject.toml api/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Includes operator Attack Lab routes/body guard and all backend runtime modules.
+# Includes execution, operator authorization, evidence and all API runtime modules.
 COPY api/*.py ./
 COPY shared/leash_shared /shared/leash_shared
 COPY db/migrations /db/migrations

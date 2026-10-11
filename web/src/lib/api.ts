@@ -386,6 +386,29 @@ export async function stopRun(runId: string) {
   });
 }
 
+export type StartShoppingRequest = {
+  mandate_id: string;
+  agent_mode?: "live" | "scripted";
+  scenario?: "charger" | "subscription_attack";
+};
+
+export type StartShoppingResult = {
+  run_id: string;
+  status: string;
+  agent_mode: "live" | "scripted";
+  mandate_id: string;
+  scenario: string;
+  label: string;
+};
+
+/** Human JWT only — API holds AGENTS_SERVICE_TOKEN server-side. */
+export async function startShopping(body: StartShoppingRequest) {
+  return apiFetch<StartShoppingResult>("/shopping/start", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export type KillSwitchState = {
   on: boolean;
   rail_enforced: boolean;
