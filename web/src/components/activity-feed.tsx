@@ -124,23 +124,42 @@ function formatWhen(iso: string): string {
   });
 }
 
-export function ActivityFeed() {
+export function ActivityFeed({
+  title = "Activity",
+  description = "Live feed of account, card, and LEASH events for this profile",
+  onEventsChange,
+  className,
+}: {
+  title?: string;
+  description?: string;
+  onEventsChange?: (events: ActivityEvent[]) => void;
+  className?: string;
+} = {}) {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const seen = useRef(new Set<string>());
+  const eventsRef = useRef<ActivityEvent[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
+  eventsRef.current = events;
 
   useEffect(() => {
-    seen.current = new Set();
+    // Resume from the highest sequence already held. Clearing `seen` while keeping
+    // state (React Strict Mode remount) used to replay after=0 and duplicate rows.
+    const held = eventsRef.current;
+    seen.current = new Set(held.map((event) => event.event_id));
+    const after = held.reduce((max, event) => Math.max(max, event.sequence), 0);
 
     const stop = streamActivity({
-      after: 0,
+      after,
       onStatus: (next) => { setStatus(next); if (next === "live") setError(null); },
       onEvent: (event) => {
         if (seen.current.has(event.event_id)) return;
         seen.current.add(event.event_id);
         setEvents((prev) => {
+          if (prev.some((row) => row.event_id === event.event_id || row.sequence === event.sequence)) {
+            return prev;
+          }
           const next = [...prev, event];
           next.sort((a, b) => a.sequence - b.sequence);
           return next.slice(-500);
@@ -153,6 +172,10 @@ export function ActivityFeed() {
   }, []);
 
   useEffect(() => {
+    onEventsChange?.(events);
+  }, [events, onEventsChange]);
+
+  useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
@@ -161,13 +184,11 @@ export function ActivityFeed() {
   const newestFirst = [...events].reverse();
 
   return (
-    <section className="flex min-h-[22rem] flex-col">
+    <section className={`flex min-h-[22rem] flex-col ${className ?? ""}`}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold tracking-tight">Activity</h2>
-          <p className="text-xs text-muted-foreground">
-            Live feed of account, card, and LEASH events for this profile
-          </p>
+          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
         <span
           className={

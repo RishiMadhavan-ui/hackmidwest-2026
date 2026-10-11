@@ -21,15 +21,34 @@ export default function Home() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>LEASH</CardTitle>
-          <CardDescription>Hack Midwest 2026</CardDescription>
+          <CardDescription>
+            Intent-aware purchase authority for AI shoppers — Hack Midwest 2026
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {loading ? (
             <p className="text-sm text-muted-foreground">Checking session…</p>
           ) : user ? (
-            <p className="text-sm">
-              Signed in as <span className="font-medium">{user.email}</span>
-            </p>
+            <>
+              <p className="text-sm">
+                Signed in as <span className="font-medium">{user.email}</span>
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  onClick={() => router.push("/mission-control")}
+                >
+                  Open Mission Control
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => router.push("/profile")}
+                >
+                  Profile
+                </Button>
+              </div>
+            </>
           ) : (
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button type="button" onClick={() => router.push("/signin")}>
