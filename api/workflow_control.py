@@ -256,6 +256,8 @@ def stop_workflow(
         "UPDATE user_workflow_controls SET rail_enforced_at=%s WHERE user_id=%s",
         (utc_now(), principal.user_id),
       )
+      conn.execute("""UPDATE run_executions SET rail_stopped_at=COALESCE(rail_stopped_at,now())
+                      WHERE run_id IN (SELECT id FROM agent_runs WHERE user_id=%s)""", (principal.user_id,))
     emit_activity(
       conn,
       user_id=principal.user_id,
@@ -425,4 +427,9 @@ def stop_run(run_id: RunId, principal: Annotated[Principal, Depends(require_huma
   # Outside the SQL lock: Valkey run latch + unused grant revoke for this run only.
   rail = stop_rail_run(principal.user_id, run_id)
   with get_conn() as conn:
+    if rail.get("status") == "enforced":
+      conn.execute("UPDATE run_executions SET rail_stopped_at=COALESCE(rail_stopped_at,now()) WHERE run_id=%s", (run_id,))
+      emit_activity(conn, user_id=principal.user_id, event_type="run.stop.enforced",
+                    data={"run_id": run_id, "scope": "run", "financial_revocation": "enforced"},
+                    auth_user_id=_auth_id(conn, principal.user_id))
     return _run_stop_state(conn, _owned_run(conn, run_id, principal.user_id), rail=rail)

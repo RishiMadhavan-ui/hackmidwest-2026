@@ -15,6 +15,7 @@ import os
 import threading
 import time
 import uuid
+import ssl
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ INTAKE_PATH = "/provenance"
 
 DEFAULT_SPOOL_DIR = "trace-spool"
 MAX_BACKOFF_SECONDS = 30.0
+TLS_CONTEXT = ssl.create_default_context()
 # These mean the api will never accept this exact event; retrying won't help.
 _PERMANENT_STATUSES = {400, 401, 403, 404, 413, 422}
 # 409 means the api already stored this event_id: delivered.
@@ -46,6 +48,7 @@ class OutboxSink:
   ) -> None:
     self.url = api_url.rstrip("/") + INTAKE_PATH
     self.headers = {"Authorization": f"Bearer {token}"}
+    self.service_delivery = False
     self.timeout = timeout
     root = Path(spool_dir or os.environ.get("TRACE_SPOOL_DIR") or DEFAULT_SPOOL_DIR)
     self.pending = root / "pending"
@@ -125,9 +128,11 @@ class OutboxSink:
       # Workflow metadata uses a private versioned intake. Frozen R01
       # /provenance still accepts only genuine tool/source reports.
       url = self.url
-      if body.get("type") == "agent.step" and body.get("schema_version") == 1:
+      if self.service_delivery:
+        url = self.url.removesuffix(INTAKE_PATH) + "/internal/agent-events"
+      elif body.get("type") == "agent.step" and body.get("schema_version") == 1:
         url = self.url.removesuffix(INTAKE_PATH) + "/workflow-events"
-      res = httpx.post(url, json=body, headers=self.headers, timeout=self.timeout)
+      res = httpx.post(url, json=body, headers=self.headers, timeout=self.timeout, verify=TLS_CONTEXT)
     except httpx.HTTPError as exc:
       log.warning("trace intake unreachable (%s); will retry", type(exc).__name__)
       return "retry"
@@ -185,4 +190,5 @@ def shared_outbox(api_url: str, token: str, lane: str) -> OutboxSink:
   with _shared_lock:
     if key not in _shared:
       _shared[key] = OutboxSink(api_url, token, root / lane)
+      _shared[key].service_delivery = lane == "delegated"
     return _shared[key]

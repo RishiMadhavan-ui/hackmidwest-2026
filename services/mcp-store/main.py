@@ -20,6 +20,7 @@ canonical checkout from the store itself.
 import hmac
 import contextvars
 import os
+import ssl
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -40,6 +41,7 @@ from evidence.inspect import inspect_page
 from evidence.snapshots import upload_snapshot
 
 HTTP_TIMEOUT = 10.0
+TLS_CONTEXT = ssl.create_default_context()
 MAX_PAGE_BYTES = 2_000_000
 MAX_PAGE_CHARS = 12_000
 MAX_REDIRECTS = 3
@@ -55,7 +57,7 @@ async def authorize_tool(action):
   if not api_url or not headers.get("x-leash-execution-token"):
     raise StoreUnavailable("A live run-scoped store credential is required")
   try:
-    async with httpx.AsyncClient(base_url=api_url, timeout=3, follow_redirects=False) as client:
+    async with httpx.AsyncClient(base_url=api_url, timeout=3, follow_redirects=False, verify=TLS_CONTEXT) as client:
       response = await client.post("/execution/authorize", headers=headers,
         json={"audience": "mcp-store", "action": action})
     if not response.is_success:
@@ -124,10 +126,10 @@ def resolve_store_target(target: str) -> httpx.URL:
 async def fetch_store_page(target: str) -> tuple[httpx.URL, int, str]:
   url = resolve_store_target(target)
   store_origin = _origin(_store_url())
-  async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
+  async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False, verify=TLS_CONTEXT) as client:
     for _ in range(MAX_REDIRECTS + 1):
       try:
-        res = await client.get(url)
+        res = await client.get(url, headers=scope_headers.get())
       except httpx.HTTPError as exc:
         raise StoreUnavailable(f"store unreachable ({type(exc).__name__})") from exc
       if res.is_redirect:
@@ -168,7 +170,7 @@ async def _store_post(
   except StoreUnavailable as exc:
     return _error(str(exc))
   try:
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False, verify=TLS_CONTEXT) as client:
       res = await client.post(
         str(store_url) + path, json=body, headers=headers or _store_headers()
       )

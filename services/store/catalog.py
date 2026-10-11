@@ -14,6 +14,12 @@ MERCHANT_DESCRIPTOR = "VOLT SUPPLY CO"
 MERCHANT_MCC = "5732"
 
 PRODUCTS: dict[str, dict[str, Any]] = {
+  "chg-65w-clean": {
+    "id": "chg-65w-clean", "sku": "CHG-65W-SAFE", "name": "65W USB-C Charger (clean alternative)",
+    "price_cents": 2999, "recurring": False, "category": "laptop_charger", "subscription": False,
+    "billing_interval": None, "attributes": [{"name": "connector", "value": "USB-C"}, {"name": "wattage", "value": 65}],
+    "merchant_descriptor": MERCHANT_DESCRIPTOR, "mcc": MERCHANT_MCC,
+  },
   "chg-65w": {
     "id": "chg-65w",
     "sku": "CHG-65W",
@@ -44,6 +50,7 @@ PRODUCTS: dict[str, dict[str, Any]] = {
 
 # Agent / fixture aliases → canonical product id (case-insensitive lookup).
 _ALIASES: dict[str, str] = {
+  "CHG-65W-SAFE": "chg-65w-clean",
   "chg-65w": "chg-65w",
   "chg_65w": "chg-65w",
   "chg65w": "chg-65w",

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LabScenarios } from "@/components/lab-scenarios";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -69,12 +70,12 @@ export function AttackLab() {
   }
 
   return (
-    <section className="flex flex-col gap-3">
+    <section id="attack-lab" className="flex flex-col gap-3">
       <header>
         <h2 className="text-base font-semibold tracking-tight">Attack Lab</h2>
         <p className="text-xs text-muted-foreground">
-          Attack execution is disabled pending server-verified operator access
-          and isolated demo scenarios. Clean browsing remains available.
+          Verified operators can run bounded scenarios in separate demo identities.
+          Clean browsing remains available to ordinary users.
         </p>
       </header>
 
@@ -102,7 +103,7 @@ export function AttackLab() {
             pass. Ordinary sign-in does not authorize attack execution.
           </p>
           <p className="mt-3 text-xs font-medium text-muted-foreground">
-            Attack scenarios disabled
+            {access?.execution_available ? "Use the isolated scenario controls below" : "Attack scenarios disabled"}
           </p>
         </div>
       </div>
@@ -116,7 +117,7 @@ export function AttackLab() {
         <p className="mt-1 text-xs text-muted-foreground">
           Server controls {access.server_enabled ? "enabled" : "disabled"}.
           Workspace controls {access.namespace?.enabled ? "enabled" : "disabled"}.
-          Scenario execution remains unavailable.
+          Scenario execution {access.execution_available ? "available in this isolated workspace" : "awaiting enabled workspace and server configuration"}.
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           {!access.namespace && <button className={linkBtn} disabled={busy || !access.server_enabled}
@@ -130,6 +131,8 @@ export function AttackLab() {
         </div>
         {view && <iframe title="Server-verified operator view" sandbox="" srcDoc={view}
           className="mt-3 h-64 w-full rounded border bg-white text-black" />}
+        {access.namespace && <LabScenarios key={access.namespace.id} namespaceId={access.namespace.id}
+          enabled={access.execution_available} onReset={() => { void labAccess().then(setAccess); }} />}
       </div>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </section>

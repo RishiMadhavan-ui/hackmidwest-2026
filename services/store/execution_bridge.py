@@ -2,16 +2,34 @@
 
 import hmac
 import os
+import ssl
 from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException
 
 SCOPE_HEADERS = {"x-leash-run-id", "x-leash-worker-id", "x-leash-generation", "x-leash-execution-token"}
+TLS_CONTEXT = ssl.create_default_context()
 
 
 def enabled():
   return os.getenv("LEASH_EXECUTION_ENABLED") == "1"
+
+
+def scope_context(headers):
+  base = os.getenv("API_URL", "").rstrip("/")
+  if not base or not enabled():
+    raise HTTPException(503, "Execution backend is not configured")
+  scoped = {k: v for k,v in headers.items() if k.lower() in SCOPE_HEADERS}
+  try:
+    with httpx.Client(timeout=3, follow_redirects=False, verify=TLS_CONTEXT) as client:
+      result = client.post(base+"/execution/authorize", headers=scoped,
+        json={"audience":"mcp-store", "action":"browse"})
+    if not result.is_success:
+      raise HTTPException(403, "Listing execution scope is not current")
+    return result.json()
+  except (httpx.HTTPError, ValueError):
+    raise HTTPException(503, "Listing scope verification unavailable") from None
 
 
 def backend_auth(authorization):
@@ -29,7 +47,7 @@ def call(method, path, body=None, headers=None):
     raise HTTPException(503, "Durable merchant backend is not configured")
   scoped = {k: v for k, v in (headers or {}).items() if k.lower() in SCOPE_HEADERS}
   try:
-    with httpx.Client(base_url=base, timeout=5, follow_redirects=False) as client:
+    with httpx.Client(base_url=base, timeout=5, follow_redirects=False, verify=TLS_CONTEXT) as client:
       res = client.request(method, "/internal/merchant" + path, json=body,
         headers={"Authorization": "Bearer " + token, **scoped})
     if not res.is_success:
@@ -52,7 +70,7 @@ def complete(checkout_id, payment_id, headers):
   try:
     # No automatic HTTP retries or fresh authorization IDs. The API owns the
     # persisted event ID and independently reads the rail's cached result.
-    with httpx.Client(timeout=3, follow_redirects=False) as client:
+    with httpx.Client(timeout=3, follow_redirects=False, verify=TLS_CONTEXT) as client:
       client.post(url + "/local/authorize", json=payload, headers={"Authorization": "Bearer " + token})
   except httpx.HTTPError:
     pass

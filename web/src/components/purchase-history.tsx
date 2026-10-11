@@ -54,22 +54,32 @@ export function PurchaseHistory({ revision = 0 }: { revision?: number }) {
       setCursor(result.next_cursor);
     } catch (cause) { if (owner === actorRef.current) setError(cause instanceof Error ? cause.message : "History unavailable"); }
   }
+  async function reconcile(id: string) {
+    const owner = actorRef.current;
+    try {
+      const current = await apiFetch<Attempt>(`/purchase-attempts/${encodeURIComponent(id)}/reconcile`, { method: "POST" });
+      if (owner !== actorRef.current) return;
+      setRows((previous) => previous.map((row) => row.id === id ? current : row));
+      await inspect(id);
+    } catch (cause) { if (owner === actorRef.current) setError(cause instanceof Error ? cause.message : "Outcome readback pending"); }
+  }
   const owned = actor === user?.id;
   return <section className="rounded-xl border border-border p-4">
     <h2 className="text-base font-semibold">Purchase attempts</h2>
-    <p className="text-xs text-muted-foreground">Persisted checkout observations and decisions. These attempts have no verified payment execution.</p>
+    <p className="text-xs text-muted-foreground">Persisted checkout evidence and local simulator decisions. Authorization is not settlement.</p>
     {loading && <p className="mt-3 text-sm">Loading recorded attempts…</p>}
     {owned && rows.length === 0 && !loading && <p className="mt-3 text-sm text-muted-foreground">No recorded purchase attempts.</p>}
     {owned && rows.map((row) => <div key={row.id} className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
       <div><p className="text-sm">{row.state} · {row.checkout_id}</p>
         <p className="text-xs text-muted-foreground">{row.reason ?? "Decision pending"}</p></div>
       <button className="rounded border px-3 py-1 text-xs" onClick={() => void inspect(row.id)}>Inspect evidence</button>
+      {["activating", "ready", "authorizing", "reconciling"].includes(row.state) && <button className="rounded border px-3 py-1 text-xs" onClick={() => void reconcile(row.id)}>Read original rail outcome</button>}
     </div>)}
     {owned && cursor && <button className="mt-3 rounded border px-3 py-1 text-xs" onClick={() => void more()}>Load earlier attempts</button>}
     {owned && evidence && <div className="mt-4 rounded border bg-muted/20 p-3">
       <p className="text-sm font-medium">Original confirmed intent</p>
       <p className="mt-1 text-sm">{evidence.mandate.description}</p>
-      <p className="mt-2 text-xs">Evidence: {evidence.evidence_status}. Merchant ownership and checkout freeze are unverified; no payment is authorized.</p>
+      <p className="mt-2 text-xs">Evidence: {evidence.evidence_status} · payment operation: {evidence.attempt.state}.</p>
       {evidence.observation ? <>
         <p className="mt-2 text-sm">Observed total: {(evidence.observation.checkout.total_cents / 100).toFixed(2)} {evidence.observation.checkout.currency}</p>
         {evidence.observation.checkout.items.map((item, index) => <p className="mt-1 text-sm" key={`${item.sku}-${index}`}>

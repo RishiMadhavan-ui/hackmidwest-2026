@@ -9,19 +9,21 @@ import asyncio
 import threading
 import time
 import uuid
+import ssl
 from contextlib import suppress
 from urllib.parse import quote
 
 import httpx
 
 from shopper.workflow import WorkflowStopped
+TLS_CONTEXT = ssl.create_default_context()
 
 
 class ExecutionControl:
   def __init__(self, api_url, token, run_id, *, poll_seconds=0.5, client=None):
     self.client = client or httpx.AsyncClient(
       base_url=api_url.rstrip("/"), headers={"Authorization": f"Bearer {token}"},
-      timeout=3.0, follow_redirects=False,
+      timeout=3.0, follow_redirects=False, verify=TLS_CONTEXT,
     )
     self.run_id = run_id
     self.path = "/agent-runs/" + quote(run_id, safe="")

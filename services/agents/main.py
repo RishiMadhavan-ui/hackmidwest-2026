@@ -13,6 +13,11 @@ async def lifespan(_: FastAPI):
   # Start each credential's trace outbox right away so events spooled before a
   # restart are delivered even if no new run starts.
   if api_configured():
+    import os
+    token = os.environ.get("AGENTS_SERVICE_TOKEN", "")
+    if len(token) >= 32:
+      for sink in default_sinks(token, "delegated"):
+        sink.start()
     for mode in ("live", "scripted"):
       try:
         credential = credential_for(mode)

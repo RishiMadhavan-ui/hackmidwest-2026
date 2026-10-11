@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,49 @@ URL = os.getenv("LEASH_TEST_VALKEY_URL", "")
 
 
 class AtomicStoreTests(unittest.TestCase):
+  def scoped(self):
+    suffix = uuid4().hex
+    run_id = "run_"+suffix
+    epoch = self.store.epoch()
+    self.store.lease_run(run_id,self.grant.user_id,1,epoch,datetime.now(timezone.utc)+timedelta(seconds=10))
+    grant = replace(self.grant,grant_id="grt_scope_"+suffix,instrument_token="ins_scope_"+suffix,
+                    run_id=run_id,execution_generation=1,rail_epoch=epoch,authorization_event_id=self.attempt.event_id)
+    self.store.put_grant(grant)
+    return grant,replace(self.attempt,instrument_token=grant.instrument_token)
+
+  def test_scoped_authorization_requires_original_event_and_duplicates_are_stable(self):
+    grant,attempt = self.scoped()
+    wrong = authorize(self.store,replace(attempt,event_id="evt_other"))
+    self.assertEqual(wrong.reason,"authorization_event_mismatch")
+    self.assertEqual(self.store.get_grant(grant.grant_id).status,"ISSUED")
+    first = authorize(self.store,attempt)
+    self.assertEqual(first.result,"APPROVED")
+    self.store.stop_execution_run(grant.run_id,grant.user_id)
+    self.assertEqual(authorize(self.store,attempt),first)
+    with self.assertRaises(ValueError):
+      self.store.lease_run(grant.run_id,grant.user_id,1,grant.rail_epoch,datetime.now(timezone.utc)+timedelta(seconds=10))
+
+  def test_expired_execution_cannot_consume_or_renew_its_scope(self):
+    grant,attempt = self.scoped()
+    if isinstance(self.store,MemoryGrantStore):
+      self.store._runs[grant.run_id]["lease_until"] = datetime.now(timezone.utc)-timedelta(seconds=1)
+    else:
+      self.store._r.hset("leash:execution:run:"+grant.run_id,"lease_until",str(time.time()-1))
+    self.assertNotEqual(authorize(self.store,attempt).result,"APPROVED")
+    with self.assertRaises(ValueError):
+      self.store.lease_run(grant.run_id,grant.user_id,1,grant.rail_epoch,datetime.now(timezone.utc)+timedelta(seconds=10))
+
+  def test_rail_epoch_loss_cannot_recreate_prior_execution_authority(self):
+    grant,attempt = self.scoped()
+    if isinstance(self.store,MemoryGrantStore):
+      self.store._epoch = uuid4().hex
+    else:
+      self.store._r.delete("leash:execution:epoch")
+      self.store.epoch()
+    self.assertNotEqual(authorize(self.store,attempt).result,"APPROVED")
+    with self.assertRaises(ValueError):
+      self.store.put_grant(replace(grant,grant_id="grt_reissue",instrument_token="ins_reissue"))
+
   def setUp(self):
     self.store = MemoryGrantStore()
     self.prepare()

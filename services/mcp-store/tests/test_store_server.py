@@ -26,6 +26,15 @@ def store_env(monkeypatch):
   monkeypatch.setenv("STORE_URL", STORE)
   monkeypatch.setenv("STORE_MCP_TOKEN", STORE_TOKEN)
   monkeypatch.setenv("STORE_PUBLIC_URLS", PUBLIC)
+  # These tests isolate merchant adaptation/evidence. Real execution binding is
+  # exercised by the full HTTP Graph stack and dedicated scope rejection tests.
+  import main
+  async def authorized(action):
+    run = main.scope_headers.get().get("x-leash-run-id", "run_demo")
+    if not main._RUN_ID.fullmatch(run):
+      raise main.StoreUnavailable("Invalid execution run")
+    return {"run_id": run}
+  monkeypatch.setattr(main, "authorize_tool", authorized)
 
 
 @pytest.fixture
@@ -36,6 +45,10 @@ def store():
 
 
 def call(client, name, arguments, headers=HEADERS):
+  arguments = dict(arguments)
+  if name == "browse":
+    arguments.setdefault("run_id", "run_demo")
+  headers = {**headers, "x-leash-run-id": arguments.get("run_id", "run_demo")}
   return client.post(
     "/mcp",
     headers=headers,
@@ -177,8 +190,9 @@ def test_bad_run_id_cannot_steer_the_snapshot_key(client, store, monkeypatch):
   for name in ("OBJ_ENDPOINT", "OBJ_BUCKET", "OBJ_ACCESS_KEY", "OBJ_SECRET_KEY"):
     monkeypatch.setenv(name, "x")
   monkeypatch.setattr(snapshots, "_s3_client", lambda *args: FakeS3())
-  result(call(client, "browse", {"url": "/products/chg-65w", "run_id": "../../etc"}))
-  assert keys[0].startswith("runs/unattributed/")
+  r = result(call(client, "browse", {"url": "/products/chg-65w", "run_id": "../../etc"}))
+  assert r["isError"]
+  assert keys == []
 
 
 # -- checkout goes to the store with the store's credential --------------------

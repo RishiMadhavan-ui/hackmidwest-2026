@@ -9,6 +9,7 @@ a limit, or touch the kill switch; those routes need a human's token.
 
 import contextvars
 import os
+import ssl
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
@@ -30,6 +31,7 @@ scope_headers: contextvars.ContextVar[dict] = contextvars.ContextVar("scope_head
 # POST /payments fetches and verifies the checkout with the merchant before it
 # answers, so give the api headroom.
 API_TIMEOUT_SECONDS = 30.0
+TLS_CONTEXT = ssl.create_default_context()
 
 INSTRUCTIONS = """\
 Leash is a payment firewall. You never get the user's real card. To spend money:
@@ -90,7 +92,7 @@ async def _call_api(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     "check_status" if path.startswith("/payments/") else "list_mandates")
   if action == "request_payment" or scope_headers.get():
     try:
-      async with httpx.AsyncClient(base_url=_api_url(), timeout=3, follow_redirects=False) as client:
+      async with httpx.AsyncClient(base_url=_api_url(), timeout=3, follow_redirects=False, verify=TLS_CONTEXT) as client:
         checked = await client.post("/execution/authorize", headers=headers,
           json={"audience": "mcp-leash", "action": action})
       if not checked.is_success:
@@ -103,7 +105,7 @@ async def _call_api(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     except (httpx.HTTPError, ValueError):
       return {"status": "error", "reason": "Execution scope check failed closed"}
   try:
-    async with httpx.AsyncClient(base_url=_api_url(), timeout=API_TIMEOUT_SECONDS) as client:
+    async with httpx.AsyncClient(base_url=_api_url(), timeout=API_TIMEOUT_SECONDS, verify=TLS_CONTEXT) as client:
       res = await client.request(method, path, headers=headers, **kwargs)
   except httpx.TimeoutException:
     return {"status": "error", "reason": "Leash api timed out; outcome unknown. Do not retry purchases or request new credentials. Reconcile the same operation before proceeding."}

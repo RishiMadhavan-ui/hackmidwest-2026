@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
+import { NaturalMandate } from "@/components/natural-mandate";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -182,6 +183,12 @@ export function AuthorityPanel({
     };
   }
 
+  const edited = (() => {
+    if (!selected) return false;
+    try { return JSON.stringify(buildProposal()) !== JSON.stringify(mandateToProposal(selected)); }
+    catch { return true; }
+  })();
+
   async function createDraft() {
     setBusy(true);
     setError(null);
@@ -200,7 +207,7 @@ export function AuthorityPanel({
   }
 
   async function confirm() {
-    if (!selected) return;
+    if (!selected || edited) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -396,19 +403,13 @@ export function AuthorityPanel({
                 </span>
                 <span className="text-muted-foreground">v{selected.version}</span>
               </div>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => applyProposalToForm(DEMO_CHARGER_PROPOSAL)}
-                disabled={busy}
-              >
-                Load demo charger
-              </Button>
-            )}
+            ) : null}
           </div>
 
+          {composing ? <NaturalMandate onDraft={(mandate) => {
+            setMandates((old) => [mandate, ...old]);
+            selectMandate(mandate);
+          }} /> : <>
           <div className="grid gap-3">
             <label className="grid gap-1.5">
               <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -569,11 +570,12 @@ export function AuthorityPanel({
                   type="button"
                   onClick={() => void confirm()}
                   disabled={
-                    busy || !selected || selected.status !== "proposed"
+                    busy || edited || !selected || selected.status !== "proposed"
                   }
                 >
                   Confirm mandate
                 </Button>
+                {edited && <p className="text-xs">Save edited terms as a new version before confirming them.</p>}
                 <Button
                   type="button"
                   variant="secondary"
@@ -603,6 +605,7 @@ export function AuthorityPanel({
               </>
             )}
           </div>
+          </>}
         </div>
       </div>
 

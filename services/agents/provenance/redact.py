@@ -21,6 +21,7 @@ _SECRET_KEYS = {
   "apikey",
   "token",
   "access_token",
+  "agent_credential",
   "secret",
   "password",
   "launch_id",

@@ -16,7 +16,7 @@ export async function verifyLabOperator(token: string | null): Promise<number> {
     });
     if (!response.ok) return [401, 403].includes(response.status) ? response.status : 503;
     const state = await response.json();
-    return state.operator_authorized === true && state.execution_available === false
+    return state.operator_authorized === true && typeof state.execution_available === "boolean"
       && typeof state.server_enabled === "boolean" ? 200 : 503;
   } catch {
     return 503;

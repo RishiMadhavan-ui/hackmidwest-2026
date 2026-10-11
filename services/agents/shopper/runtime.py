@@ -278,14 +278,15 @@ class MCPWorkflowPorts:
       and operation.get("mandate_version") == state.mandate.get("version")
       and operation.get("mandate_hash") == state.mandate.get("canonical_payload_hash")
     )
-    return {**current.model_dump(mode="json"), "pre_payment": pre_payment, "verified": verified}
+    return {**current.model_dump(mode="json"), "pre_payment": pre_payment, "verified": verified,
+            "trusted_checkout": status.get("checkout_evidence")}
 
   async def investigate(self, state):
     # Merchant observations through MCP are not trusted checkout snapshots.
     # The guardian gets backend reason codes and explicitly untrusted evidence.
     prompt = json.dumps({"confirmed_mandate": state.mandate,
       "backend_rejection_reasons": state.reasons, "checkout_id": state.candidate["checkout_id"],
-      "trusted_checkout": None, "untrusted_sources": self.sources[:5]}, sort_keys=True)
+      "trusted_checkout": state.decision.get("trusted_checkout"), "untrusted_sources": self.sources[:5]}, sort_keys=True)
     self.emit("investigation.started", attempt=state.attempt,
               source_hashes=state.candidate["source_hashes"], payment_id=state.decision.get("id"))
     if self.mode == "scripted" and self.guardian_model is None:

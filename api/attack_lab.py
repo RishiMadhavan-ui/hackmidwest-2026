@@ -153,9 +153,11 @@ def projection(row):
 def access_state(conn, principal):
   row = conn.execute("SELECT * FROM attack_lab_namespaces WHERE operator_user_id=%s",
                      (principal.user_id,)).fetchone()
+  from lab_execution import configured
+  available = bool(server_enabled() and row and row["enabled"] and configured())
   return {"operator_authorized": True, "server_enabled": server_enabled(),
-          "namespace": projection(row), "execution_available": False,
-          "reason": "isolated_fixture_rail_and_graph_executor_pending", "limits": LIMITS}
+          "namespace": projection(row), "execution_available": available,
+          "reason": "isolated_local_rail_graph" if available else "enable_isolated_workspace_and_configure_execution", "limits": LIMITS}
 
 
 @router.get("/access")
@@ -198,8 +200,15 @@ def control(namespace_id: str, body: ControlRequest, principal: Operator):
       conn.execute("""UPDATE attack_lab_namespaces SET enabled=%s,revision=revision+1,updated_at=%s
                       WHERE id=%s""", (body.enabled, utc_now(), namespace_id))
       record(conn, principal, "control.changed", {"namespace_id": namespace_id, "enabled": body.enabled,
-        "execution_available": False, "cancellation": "not_applicable_no_executor"}, now=utc_now())
-    return access_state(conn, principal)
+        "execution_available": access_state(conn, principal)["execution_available"],
+        "cancellation": "not_requested" if body.enabled else "requested"}, now=utc_now())
+    result = access_state(conn, principal)
+    runs = conn.execute("SELECT run_id FROM attack_lab_runs WHERE namespace_id=%s", (namespace_id,)).fetchall() if not body.enabled else []
+    demo = Principal("human", row["demo_user_id"])
+  if runs:
+    from workflow_control import stop_run
+    result["stops"] = [stop_run(item["run_id"], demo) for item in runs]
+  return result
 
 
 def unavailable(namespace_id, principal):
@@ -212,12 +221,10 @@ def unavailable(namespace_id, principal):
     raise AuthorityError(503, "Attack Lab execution awaits isolated fixture/rail and Graph integration")
 
 
-@router.post("/namespaces/{namespace_id}/scenarios")
 def scenario(namespace_id: str, body: ScenarioRequest, principal: Operator):
   unavailable(namespace_id, principal)
 
 
-@router.post("/namespaces/{namespace_id}/reset")
 @router.post("/namespaces/{namespace_id}/replays")
 @router.post("/namespaces/{namespace_id}/tamper")
 @router.post("/namespaces/{namespace_id}/simulate-authorization")
@@ -227,8 +234,9 @@ def blocked_operation(namespace_id: str, body: EmptyRequest, principal: Operator
 
 def attack_lab_status(principal: Principal):
   require_attack_lab_operator(principal)
-  return {"execution": "disabled_pending_isolated_executor", "operator_authorized": True,
-          "can_run_attacks": False, "server_enabled": server_enabled()}
+  with get_conn() as conn:
+    state = access_state(conn, principal)
+  return {**state, "execution": state["reason"], "can_run_attacks": state["execution_available"]}
 
 
 @router.get("/status")

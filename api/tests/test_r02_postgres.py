@@ -185,8 +185,9 @@ class PostgresAuthorityTests(unittest.TestCase):
       return _store_checkout()
     with patch("payment_service._fetch_store_checkout", side_effect=fetch):
       response = self.payment_direct(body)
-    self.assertEqual(response.status, "approved")
-    self.assertIsNotNone(response.grant_id)
+    self.assertEqual(response.status, "blocked")
+    self.assertEqual(response.reasons, ("execution_scope_required",))
+    self.assertIsNone(response.grant_id)
     with db.get_conn() as conn:
       observation = conn.execute("SELECT * FROM checkout_observations WHERE payment_id=%s", (response.id,)).fetchone()
       self.assertEqual(observation["snapshot"]["items"][0]["sku"], "CHG-65W")
@@ -199,11 +200,11 @@ class PostgresAuthorityTests(unittest.TestCase):
       self.assertEqual(observation["run_id"], run["id"])
       self.assertEqual(observation["evidence_assessment"]["merchant_ownership"], "verified")
       self.assertEqual(observation["evidence_assessment"]["checkout_freeze"], "verified")
-      self.assertTrue(observation["evidence_assessment"]["financial_authority"])
-      self.assertEqual(self.payment_operation(run)["state"], "authorized")
+      self.assertFalse(observation["evidence_assessment"]["financial_authority"])
+      self.assertEqual(self.payment_operation(run)["state"], "blocked")
       events = conn.execute("SELECT record FROM audit_events WHERE record->'data'->>'payment_id'=%s ORDER BY sequence", (response.id,)).fetchall()
       self.assertEqual([row["record"]["type"] for row in events],
-                       ["payment.operation.prepared", "payment.operation.checkout_observed", "payment.approved", "payment.operation.authorized"])
+                       ["payment.operation.prepared", "payment.operation.checkout_observed", "payment.denied", "payment.operation.blocked"])
     for statement in ("UPDATE checkout_observations SET source_hash=repeat('0',64) WHERE payment_id=%s",
                       "DELETE FROM checkout_observations WHERE payment_id=%s",
                       "UPDATE payment_operations SET issuance_key=gen_random_uuid() WHERE id=%s",
@@ -227,7 +228,7 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(fetch.call_count, 1)
     for key in ("id", "grant_reference", "instrument_reference", "issuance_key", "authorization_event_id"):
       self.assertEqual(first[key], final[key])
-    self.assertEqual(final["state"], "authorized")
+    self.assertEqual(final["state"], "blocked")
     self.assertEqual(final["revision"], 2)
 
   def test_unresolved_operation_blocks_another_checkout_and_another_run(self):
@@ -402,7 +403,8 @@ class PostgresAuthorityTests(unittest.TestCase):
     with patch("payment_service._fetch_store_checkout", return_value=_store_checkout()):
       charger = self.payment_direct(body)
     self.assertNotEqual(attacked.id, charger.id)
-    self.assertEqual(charger.status, "approved")
+    self.assertEqual(charger.status, "blocked")
+    self.assertEqual(charger.reasons, ("execution_scope_required",))
     self.assertEqual(self.request("GET", f"/mandates/{active['id']}").json()["canonical_payload_hash"], active["canonical_payload_hash"])
 
   def test_checkout_secrets_are_rejected_before_persisting_source_or_snapshot(self):
@@ -538,18 +540,18 @@ class PostgresAuthorityTests(unittest.TestCase):
       fetch.assert_not_called()
       first = self.request("POST", "/payments", body=proposal)
       self.assertEqual(first.status_code, 200, first.text)
-      self.assertEqual(first.json()["status"], "approved")
-      self.assertTrue(first.json()["grant_id"])
-      self.assertIn("instrument_token", first.json())
-      seed.assert_called_once()
-      bind.assert_called_once()
+      self.assertEqual(first.json()["status"], "blocked")
+      self.assertIsNone(first.json()["grant_id"])
+      self.assertNotIn("instrument_token", first.json())
+      seed.assert_not_called()
+      bind.assert_not_called()
       again = self.request("POST", "/payments", body=proposal)
       # Retry replays without re-disclosing once-only instrument secrets.
-      self.assertEqual(again.json()["status"], "approved")
+      self.assertEqual(again.json()["status"], "blocked")
       self.assertEqual(again.json()["grant_id"], first.json()["grant_id"])
       self.assertNotIn("instrument_token", again.json())
       self.assertEqual(fetch.call_count, 1)
-      self.assertEqual(seed.call_count, 1)
+      self.assertEqual(seed.call_count, 0)
       path = f"/payments/{first.json()['id']}"
       self.assertEqual(self.request("GET", path).status_code, 200)
       self.assertEqual(self.request("GET", path, token=self.other_agent_token).status_code, 404)
@@ -563,8 +565,8 @@ class PostgresAuthorityTests(unittest.TestCase):
       self.assertEqual(stop.status_code, 200, stop.text)
       self.assertEqual(self.request("POST", "/payments", body=proposal).status_code, 409)
       self.assertEqual(fetch.call_count, 1)
-      self.assertEqual(seed.call_count, 1)
-      self.assertEqual(bind.call_count, 1)
+      self.assertEqual(seed.call_count, 0)
+      self.assertEqual(bind.call_count, 0)
     with db.get_conn() as conn:
       row = conn.execute("SELECT count(*) n FROM payment_attempts WHERE run_id=%s", (run["id"],)).fetchone()
       self.assertEqual(row["n"], 1)
@@ -1060,14 +1062,17 @@ class PostgresAuthorityTests(unittest.TestCase):
       before = conn.execute("SELECT count(*) AS n FROM leash_agents").fetchone()["n"]
     with patch.dict(os.environ, {"AGENT_TOKEN_SHOPPER": "unclaimed-deployment-token-"+"x"*32}):
       denied = self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal)
-    self.assertEqual(denied.status_code, 409)
+    self.assertEqual(denied.status_code, 201, denied.text)
+    self.assertNotEqual(denied.json()["agent_id"], self.agent_id)
     with db.get_conn() as conn:
-      self.assertEqual(conn.execute("SELECT count(*) AS n FROM leash_agents").fetchone()["n"], before)
+      self.assertEqual(conn.execute("SELECT count(*) AS n FROM leash_agents").fetchone()["n"], before+1)
 
   def test_human_draft_rejects_scripted_only_and_ambiguous_live_bindings(self):
     with db.get_conn() as conn:
       conn.execute("UPDATE leash_agents SET allowed_modes='[\"scripted\"]' WHERE id=%s", (self.agent_id,))
-    self.assertEqual(self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal).status_code, 409)
+    separate = self.request("POST", "/mandates/draft", token=self.user_token, body=self.proposal)
+    self.assertEqual(separate.status_code, 201, separate.text)
+    self.assertNotEqual(separate.json()["agent_id"], self.agent_id)
     with db.get_conn() as conn:
       conn.execute("UPDATE leash_agents SET allowed_modes='[\"live\"]' WHERE id=%s", (self.agent_id,))
       bind_agent(conn, user_id=self.owner, agent_id="agt_second_"+uuid4().hex,
@@ -1087,7 +1092,7 @@ class PostgresAuthorityTests(unittest.TestCase):
     record = detail.json()
     self.assertEqual(record["mandate"]["canonical_payload_hash"], active["canonical_payload_hash"])
     self.assertEqual(record["observation"]["checkout"]["items"][0]["sku"], "CHG-65W")
-    self.assertEqual(record["evidence_status"], "observed_unverified")
+    self.assertEqual(record["evidence_status"], "merchant_owned_frozen")
     self.assertFalse(record["attempt"]["financial_authority"])
     self.assertFalse(record["observation"]["assessment"]["financial_authority"])
     self.assertEqual(detail.headers["cache-control"], "no-store")

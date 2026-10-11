@@ -42,6 +42,9 @@ class AttackLabTests(unittest.TestCase):
       for path, body in [("/attack-lab/namespaces", {}),
         ("/attack-lab/namespaces/lab_missing/control", {"enabled": True, "expected_revision": 1}),
         ("/attack-lab/namespaces/lab_missing/scenarios", {"scenario": "signature_attack"}),
+        ("/attack-lab/namespaces/lab_missing/draft", {"scenario":"signature_attack"}),
+        ("/attack-lab/namespaces/lab_missing/execute", {}),
+        ("/attack-lab/namespaces/lab_missing/runs/run_missing/stop", {}),
         *[(f"/attack-lab/namespaces/lab_missing/{action}", {}) for action in ["reset", "replays", "tamper", "simulate-authorization"]]]:
         with self.subTest(token_type=bool(token), path=path):
           headers = {"Authorization": "Bearer " + token} if token else {}
@@ -107,7 +110,7 @@ class AttackLabTests(unittest.TestCase):
   def test_lab_006_007_no_operator_override_can_enable_effects_or_select_rail(self):
     namespace = self.create()
     self.assertEqual(self.control(namespace).status_code, 200)
-    for action in ("reset", "replays", "tamper", "simulate-authorization", "scenarios"):
+    for action in ("replays", "tamper", "simulate-authorization", "scenarios"):
       body = {"scenario": "signature_attack"} if action == "scenarios" else {}
       response = self.request("POST", f'/attack-lab/namespaces/{namespace["id"]}/{action}', token=self.user_token, body=body)
       self.assertEqual(response.status_code, 503, response.text)
@@ -158,6 +161,29 @@ class AttackLabTests(unittest.TestCase):
                             ("DELETE FROM attack_lab_namespaces WHERE operator_user_id=%s AND id=%s", self.owner)):
       with self.assertRaises(psycopg.errors.CheckViolation), db.get_conn() as conn:
         conn.execute(statement, (actor, namespace["id"]))
+
+  def test_lab_008_concurrent_launches_share_one_namespace_reservation(self):
+    from types import SimpleNamespace
+    namespace = self.create()
+    self.assertEqual(self.control(namespace).status_code,200)
+    env = {"LEASH_EXECUTION_ENABLED":"1","AGENTS_URL":"http://agents.test","AGENTS_SERVICE_TOKEN":"service-"+"x"*40,
+      "STORE_URL":"http://store.test","WEBHOOK_URL":"http://rail.test"}
+    base = f'/attack-lab/namespaces/{namespace["id"]}'
+    with patch.dict(os.environ,env):
+      drafts = [self.request("POST",base+"/draft",token=self.user_token,body={"scenario":"legitimate_charger"}).json()["mandate"] for _ in range(2)]
+      def dispatch(*args,**kwargs):
+        return SimpleNamespace(is_success=True,json=lambda:{"run_id":kwargs["json"]["run_id"]})
+      def start(mandate):
+        with TestClient(app) as client:
+          return client.post(base+"/execute",headers={"Authorization":"Bearer "+self.user_token},json={
+            "mandate_id":mandate["id"],"version":mandate["version"],"canonical_payload_hash":mandate["canonical_payload_hash"],"confirmed":True})
+      with patch("lab_execution.httpx.Client") as transport:
+        transport.return_value.__enter__.return_value.post.side_effect=dispatch
+        with ThreadPoolExecutor(max_workers=2) as pool:
+          responses = list(pool.map(start,drafts))
+      self.assertEqual(sorted(response.status_code for response in responses),[202,409],[r.text for r in responses])
+      with db.get_conn() as conn:
+        self.assertEqual(conn.execute("SELECT count(*) n FROM attack_lab_runs WHERE namespace_id=%s",(namespace["id"],)).fetchone()["n"],1)
 
 
 if __name__ == "__main__":

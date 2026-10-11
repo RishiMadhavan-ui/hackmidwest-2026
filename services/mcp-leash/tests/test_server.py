@@ -15,6 +15,7 @@ MCP_HEADERS = {
 
 ITEMS = [{"name": "VoltPro 65W USB-C charger", "sku": "CHG-65W", "quantity": 1, "unit_cents": 2999}]
 PAYMENT_ARGS = {
+  "run_id": "run_1",
   "mandate_id": "mnd_1",
   "checkout_id": "chk_1",
   "items": ITEMS,
@@ -31,6 +32,7 @@ def api_url(monkeypatch):
 @pytest.fixture
 def api():
   with respx.mock(base_url=API, assert_all_called=False) as mock:
+    mock.post("/execution/authorize").respond(200, json={"run_id":"run_1","mandate_id":"mnd_1"})
     yield mock
 
 

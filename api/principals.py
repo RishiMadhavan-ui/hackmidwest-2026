@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import TypeAdapter
 
@@ -23,6 +23,7 @@ class Principal:
   user_id: str
   agent_id: str | None = None
   allowed_modes: tuple[str, ...] = ()
+  delegated_run: str | None = None
 
 
 Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
@@ -87,15 +88,31 @@ def agent_from_token(token: str) -> Principal | None:
       "SELECT id, user_id, allowed_modes FROM leash_agents WHERE token_sha256 = %s AND enabled",
       (token_digest(token),),
     ).fetchone()
+    if row is None:
+      scoped = conn.execute("""SELECT r.id AS run_id,r.agent_id,r.user_id,r.registration
+        FROM run_credentials c JOIN agent_runs r ON r.id=c.run_id
+        JOIN leash_agents a ON a.id=r.agent_id AND a.enabled
+        WHERE c.token_sha256=%s AND c.expires_at>now()""", (token_digest(token),)).fetchone()
+      if scoped:
+        return Principal("agent", scoped["user_id"], scoped["agent_id"],
+                         (scoped["registration"]["agent_mode"],), scoped["run_id"])
   if row is None:
     return None
   return Principal("agent", row["user_id"], row["id"], tuple(row["allowed_modes"]))
 
 
-def require_agent(credentials: Credentials) -> Principal:
+def require_agent(credentials: Credentials, request: Request) -> Principal:
   principal = agent_from_token(credential_token(credentials))
   if principal is None:
     raise AuthorityError(401, "Invalid or disabled agent credential")
+  if principal.delegated_run:
+    path = request.url.path
+    permitted = (path.startswith(f"/agent-runs/{principal.delegated_run}/execution/")
+                 or path == f"/agent-runs/{principal.delegated_run}/control"
+                 or path == "/payments" or path.startswith("/payments/")
+                 or path in {"/provenance", "/workflow-events"})
+    if not permitted:
+      raise AuthorityError(403, "Temporary worker credential cannot access this operation")
   return principal
 
 

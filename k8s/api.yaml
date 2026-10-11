@@ -122,6 +122,30 @@ spec:
                   name: app-env
                   key: ATTACK_LAB_OPERATOR_USER_IDS
                   optional: true
+            - name: ATTACK_LAB_ENABLED
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: ATTACK_LAB_ENABLED
+                  optional: true
+            - name: OPENAI_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: OPENAI_BASE_URL
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: OPENAI_API_KEY
+                  optional: true
+            - name: CHAT_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: CHAT_MODEL
+                  optional: true
             - name: AGENTS_URL
               value: http://agents:8000
             - name: AGENTS_SERVICE_TOKEN
@@ -130,8 +154,8 @@ spec:
                   name: app-env
                   key: AGENTS_SERVICE_TOKEN
                   optional: true
-            # Same credentials the agents pod uses to claim launches. Required so
-            # Mission Control drafting/start can bind and refuse orphan UI agents.
+            # Legacy operator-provisioned CLI/demo identities only. Browser
+            # launches use separate expiring run credentials delivered privately.
             - name: AGENT_TOKEN_SHOPPER
               valueFrom:
                 secretKeyRef:

@@ -19,4 +19,13 @@ def append_event(conn, record: dict, *, duplicate_ok: bool = False) -> bool:
   conn.execute(
     "INSERT INTO audit_deliveries (event_id) VALUES (%s)", (record["event_id"],)
   )
+  namespace = conn.execute("SELECT id,operator_user_id FROM attack_lab_namespaces WHERE demo_user_id=%s",
+                           (record["user_id"],)).fetchone() if record["user_id"].startswith("usr_lab_") else None
+  if namespace:
+    import hashlib
+    mirrored = {**record, "event_id": "evt_"+hashlib.sha256(("lab:"+record["event_id"]).encode()).hexdigest(),
+      "user_id": namespace["operator_user_id"],
+      "data": {**record.get("data", {}), "lab_namespace_id": namespace["id"],
+               "demo_user_id": record["user_id"], "source_event_id": record["event_id"]}}
+    append_event(conn, mirrored, duplicate_ok=True)
   return True

@@ -13,10 +13,10 @@ from psycopg.types.json import Jsonb
 
 from authority_errors import AuthorityError
 from db import get_conn
-from execution import enabled, locked, rail, validate_scope
+from execution import enabled, locked, rail, validate_scope, TLS_CONTEXT
 from leash_shared.models import AuthorizationGrant, CheckoutSnapshot, PaymentResponse, canonical_json
 from merchant_execution import merchant_auth, router, checkout_projection
-from payment_operations import prepare, finish, event
+from payment_operations import prepare, finish, event, persist_observation
 from payment_service import (_lock_payment_authority, _map_checkout, _confirmation_valid,
   _successful_purchases, _persist, _original_response)
 from checkout_verifier import verify_checkout
@@ -58,7 +58,7 @@ def _merchant_facts(checkout_id):
   if len(token) < 32:
     raise AuthorityError(503, "Merchant backend credential is not configured")
   try:
-    with httpx.Client(timeout=4, follow_redirects=False) as client:
+    with httpx.Client(timeout=4, follow_redirects=False, verify=TLS_CONTEXT) as client:
       res = client.get(_store_url() + "/api/checkouts/" + quote(checkout_id, safe=""),
         headers={"Authorization": "Bearer " + token})
     if not res.is_success:
@@ -111,6 +111,7 @@ def request_verified(conn, body, principal, headers):
   verified = verify_checkout(mandate, checkout, now=utc_now(),
     confirmation_valid=_confirmation_valid(conn, mandate), checkout_authenticated=True,
     successful_purchases=_successful_purchases(conn, principal.user_id, mandate))
+  persist_observation(conn, op, checkout, facts, financial_authority=verified.decision.value == "VERIFIED")
   if verified.decision.value != "VERIFIED":
     result = PaymentResponse(id=op["id"], status="blocked", reasons=verified.reasons, verification_id=verified.id)
     _persist(conn, payment_id=op["id"], principal=principal, mandate=mandate,

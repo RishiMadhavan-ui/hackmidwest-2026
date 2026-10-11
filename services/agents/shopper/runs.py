@@ -23,7 +23,7 @@ from leash_shared.models import RunId
 from provenance.redact import redact, redact_text
 from provenance.sink import MemorySink, Sink, api_configured, default_sinks
 from service_auth import require_service_token
-from shopper.credentials import credential_for
+from shopper.credentials import credential_for, AgentCredential
 from shopper.registration import register_run
 from shopper.scripted import ScriptedShopper
 from shopper.workflow import WorkflowStopped
@@ -54,12 +54,23 @@ class StartRun(BaseModel):
   # into authority. The execution backend must validate and consume the launch.
   run_id: RunId | None = None
   launch_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
+  agent_credential: str | None = Field(default=None, min_length=32, max_length=256, repr=False, exclude=True)
+  agent_id: str | None = Field(default=None, pattern=r"^agt_[A-Za-z0-9_-]+$")
+  lab_execution: bool = False
 
   @model_validator(mode="after")
   def _scripted_needs_target(self):
     if self.agent_mode == "scripted" and not (self.sku and self.mandate_id):
       raise ValueError("scripted runs need sku and mandate_id")
+    if bool(self.agent_credential) != bool(self.agent_id):
+      raise ValueError("Worker identity and credential must be supplied together")
     return self
+
+
+def run_credential(req: StartRun):
+  if req.agent_credential:
+    return AgentCredential(req.agent_mode, req.agent_id, "run-scoped", req.agent_credential)
+  return credential_for(req.agent_mode)
 
 
 def model_identity(req: StartRun) -> tuple[str, str]:
@@ -74,7 +85,7 @@ def register(run_id: str, req: StartRun) -> dict[str, Any] | None:
   if not api_configured():
     return None
   model, provider = model_identity(req)
-  credential = credential_for(req.agent_mode)
+  credential = run_credential(req)
   return register_run(
     run_id, req.mandate_id, req.agent_mode, credential.token, model=model, provider=provider
   )
@@ -84,6 +95,11 @@ def trace_sinks(req: StartRun) -> list[Sink]:
   """Where this run's traces go: the outbox for its own credential."""
   if not api_configured():
     return default_sinks(None, req.agent_mode)
+  if req.agent_credential:
+    token = os.environ.get("AGENTS_SERVICE_TOKEN", "")
+    if len(token) < 32:
+      raise RuntimeError("Agent evidence service credential is not configured")
+    return default_sinks(token, "delegated")
   return default_sinks(credential_for(req.agent_mode).token, req.agent_mode)
 
 
@@ -118,7 +134,7 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
   from shopper.workflow import PurchaseWorkflow
 
   # Leash calls carry the credential bound to this run's mode, never the other.
-  credential = credential_for(req.agent_mode)
+  credential = run_credential(req)
   store_token = os.environ.get("STORE_MCP_TOKEN")
   if not store_token:
     raise RuntimeError("STORE_MCP_TOKEN is not set")
@@ -153,7 +169,10 @@ async def _run_graph(run_id: str, req: StartRun, sinks: list[Sink]) -> str:
           req.recovery_sku, req.mandate_id, "/catalog", req.recovery_sku)
           if state.attempt > 1 and req.recovery_sku else make_model_for(req))
           if req.agent_mode == "scripted" else None)
-      outcome = await PurchaseWorkflow(run_id, ports).run()
+      from shopper.workflow import Limits
+      limits = Limits(total_seconds=120) if req.lab_execution else Limits()
+      ports.budget.limits = limits
+      outcome = await PurchaseWorkflow(run_id, ports, limits=limits).run()
     return outcome.outcome
   finally:
     await control.close()

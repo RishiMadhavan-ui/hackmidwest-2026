@@ -16,10 +16,10 @@ from pydantic import BaseModel, Field
 from activity import emit_activity
 from authority_errors import AuthorityError
 from db import get_conn
-from execution import Launch, launch as create_human_launch
+from execution import Launch, launch as create_human_launch, worker_credential
 from leash_shared.models import MandateStatus, PurchaseMandate
 from mandate_service import current_mandate, utc_now
-from principals import Principal, require_human, token_digest
+from principals import Principal, require_human
 from workflow_control import lock_user_authority
 
 router = APIRouter(tags=["shopping"])
@@ -28,6 +28,7 @@ DEMO_TASK = "Buy a USB-C laptop charger for under $40. No subscriptions."
 
 
 class StartShoppingBody(BaseModel):
+  model_config = {"extra": "forbid"}
   mandate_id: str = Field(min_length=8, max_length=128)
   # live = real Strands shopper; scripted = labeled fixture tool path.
   agent_mode: Literal["live", "scripted"] = "live"
@@ -93,51 +94,6 @@ def _agents_payload(
   return payload
 
 
-def _cluster_shopper_env(agent_mode: str) -> str:
-  return (
-    "AGENT_TOKEN_SHOPPER"
-    if agent_mode == "live"
-    else "AGENT_TOKEN_SHOPPER_SCRIPTED"
-  )
-
-
-def require_claimable_shopper(
-  conn, mandate: PurchaseMandate, *, agent_mode: str
-) -> None:
-  """Refuse launches the agents pod cannot claim with its mode credential.
-
-  Agents authenticate as the leash_agents row bound to AGENT_TOKEN_SHOPPER
-  (live) or AGENT_TOKEN_SHOPPER_SCRIPTED. Mission Control mandates that use a
-  random UI-only agent produce claim 404 and a stuck queued run.
-  """
-  env_name = _cluster_shopper_env(agent_mode)
-  token = os.getenv(env_name, "").strip()
-  if len(token) < 32:
-    raise AuthorityError(
-      503,
-      f"Shopping start requires {env_name} on the API",
-    )
-  bound = conn.execute(
-    """SELECT id, user_id FROM leash_agents
-       WHERE token_sha256 = %s AND enabled""",
-    (token_digest(token),),
-  ).fetchone()
-  if bound is None:
-    raise AuthorityError(
-      503,
-      f"{env_name} is not bound to an enabled shopper agent",
-    )
-  if (
-    str(bound["user_id"]) != mandate.user_id
-    or str(bound["id"]) != mandate.agent_id
-  ):
-    raise AuthorityError(
-      409,
-      "This mandate's shopper is not bound to the cluster agent credential; "
-      "an operator must bind-agent for this account before Start shopping",
-    )
-
-
 @router.post("/shopping/start")
 def start_shopping(
   body: StartShoppingBody,
@@ -148,6 +104,8 @@ def start_shopping(
   token = _agents_service_token()
   if not agents or len(token) < 32:
     raise AuthorityError(503, "Shopping start is not configured")
+  if body.agent_mode != "live" or body.scenario != "charger":
+    raise AuthorityError(403, "Scripted or adversarial scenarios require an isolated Attack Lab workspace")
 
   with get_conn() as conn:
     lock_user_authority(conn, principal.user_id)
@@ -173,7 +131,6 @@ def start_shopping(
         409,
         f"This mandate's shopper is provisioned for {shopper_mode} mode only",
       )
-    require_claimable_shopper(conn, mandate, agent_mode=shopper_mode)
     task = (mandate.description or "").strip() or DEMO_TASK
     start_url = _scenario_fields(body).get("start_url")
 
@@ -204,6 +161,7 @@ def start_shopping(
     launch_id=launch_id,
     agent_mode=launched_mode,
   )
+  payload.update(worker_credential(run_id, principal))
 
   try:
     with httpx.Client(timeout=10.0, follow_redirects=False) as client:
@@ -216,26 +174,12 @@ def start_shopping(
         },
         json=payload,
       )
-  except httpx.HTTPError as exc:
-    raise AuthorityError(502, "Agents service unreachable") from exc
-
-  if res.status_code >= 400:
-    detail = "Agents service rejected the shopping start"
-    try:
-      err = res.json()
-      if isinstance(err, dict) and err.get("detail"):
-        detail = str(err["detail"])[:200]
-    except ValueError:
-      pass
-    raise AuthorityError(502 if res.status_code >= 500 else 409, detail)
-
-  try:
-    data = res.json()
-  except ValueError as exc:
-    raise AuthorityError(502, "Agents service returned an invalid response") from exc
-
-  if data.get("run_id") != run_id:
-    raise AuthorityError(502, "Agents service returned a different run_id")
+    accepted = res.is_success and res.json().get("run_id") == run_id
+  except (httpx.HTTPError, ValueError, AttributeError):
+    accepted = False
+  # Dispatch ambiguity cannot invite a fresh purchase. Return the durable run
+  # so the human can inspect or stop it; do not expose worker error bodies.
+  data = {"status": "queued" if accepted else "dispatch_unverified"}
 
   with get_conn() as conn:
     emit_activity(

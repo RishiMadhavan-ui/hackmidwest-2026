@@ -552,44 +552,18 @@ def request_payment(
     finish(conn, operation, "blocked", verification.reasons[0] if verification.reasons else "verification_blocked")
     return response, None
 
-  event_id = "evt_" + _uuid_text(operation["authorization_event_id"])
-  grant = _build_grant(
-    operation=operation,
-    mandate=mandate,
-    checkout=checkout,
-    verification=verification,
-    store_facts_hash=str(store["facts_hash"]),
-    now=now,
-  )
-  # Merchant bind before Valkey install so a usable grant always has correlation.
-  _bind_store(
-    checkout_id=body.checkout_id,
-    payment_id=operation["id"],
-    grant=grant,
-    authorization_event_id=event_id,
-  )
-  _seed_grant(grant, run_id=body.run_id)
-  response = PaymentResponse(
-    id=operation["id"],
-    status="approved",
-    reasons=(),
-    verification_id=verification.id,
-    grant_id=grant.grant_id,
-  )
-  persist_observation(conn, operation, checkout, source_facts, financial_authority=True)
-  _persist(
-    conn, payment_id=operation["id"], principal=principal, mandate=mandate,
-    checkout_id=body.checkout_id, run_id=body.run_id, status="approved",
-    verification=verification, grant=grant, instrument_token=grant.payment_instrument_id,
-    checkout_hash=checkout.checkout_hash, response=response,
-  )
-  finish(conn, operation, "authorized", "grant_issued_local_rail")
-  once = {
-    "instrument_token": grant.payment_instrument_id,
-    "authorization_event_id": event_id,
-    "rail": "local_payment_rail_simulator",
-  }
-  return response, once
+  # The historical connector is observation-only. A model or old client may
+  # inspect policy results but cannot obtain financial authority without a
+  # human launch, current lease, exact trusted checkout and scoped activation.
+  response = PaymentResponse(id=operation["id"], status="blocked",
+    reasons=("execution_scope_required",), verification_id=verification.id)
+  persist_observation(conn, operation, checkout, source_facts, financial_authority=False)
+  _persist(conn, payment_id=operation["id"], principal=principal, mandate=mandate,
+    checkout_id=body.checkout_id, run_id=body.run_id, status="blocked",
+    verification=verification, grant=None, instrument_token=None,
+    checkout_hash=checkout.checkout_hash, response=response)
+  finish(conn, operation, "blocked", "execution_scope_required")
+  return response, None
 
 
 def _lock_payment_authority(conn, body, principal):
@@ -651,10 +625,13 @@ def get_payment(conn, payment_id: str, principal: Principal) -> dict[str, Any]:
   require_role(principal, "agent")
   row = conn.execute(
     """SELECT p.record,o.state,o.revision,o.reason FROM payment_operations o
-       LEFT JOIN payment_attempts p ON p.id=o.id WHERE o.id=%s AND o.user_id=%s AND o.agent_id=%s""",
-    (payment_id, principal.user_id, principal.agent_id),
+       LEFT JOIN payment_attempts p ON p.id=o.id WHERE o.id=%s AND o.user_id=%s AND o.agent_id=%s
+       AND (%s::text IS NULL OR o.run_id=%s)""",
+    (payment_id, principal.user_id, principal.agent_id, principal.delegated_run, principal.delegated_run),
   ).fetchone()
   if row is None:
+    if principal.delegated_run:
+      raise AuthorityError(404,"Payment not found in this run")
     legacy = conn.execute("SELECT record FROM payment_attempts WHERE id=%s AND user_id=%s AND agent_id=%s",
                           (payment_id, principal.user_id, principal.agent_id)).fetchone()
     if not legacy:

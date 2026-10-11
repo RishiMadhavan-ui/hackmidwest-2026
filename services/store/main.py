@@ -347,7 +347,12 @@ def product_page(
   pid = resolve_product_id(product_id)
   if not pid:
     raise HTTPException(status_code=404, detail="Unknown product")
-  html = render_product_page(pid, evil=False)
+  evil = False
+  if request.headers.get("x-leash-execution-token"):
+    from execution_bridge import scope_context
+    lab = scope_context(request.headers).get("lab_context")
+    evil = bool(lab and lab["scenario"] == "signature_attack" and pid == "chg-65w")
+  html = render_product_page(pid, evil=evil)
   return HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
 
 
@@ -356,7 +361,7 @@ def clean_catalog():
   # A separate clean discovery source. It is still untrusted agent evidence;
   # the API retrieves and checks every resulting checkout independently.
   from html import escape
-  products = [get_product("CHG-65W"), get_product("SUB-CARE-MO")]
+  products = [get_product("CHG-65W-SAFE"), get_product("CHG-65W"), get_product("SUB-CARE-MO")]
   rows = [f"<li>{escape(p['name'])}: SKU {escape(p['sku'])}, {p['price_cents']} cents; "
           f"category {escape(p['category'])}; subscription {bool(p['subscription'])}</li>" for p in products]
   return HTMLResponse("<h1>Volt Supply canonical catalog</h1><ul>" + "".join(rows) + "</ul>",
@@ -370,7 +375,9 @@ def attack_lab_product_page(
   authorization: Annotated[str | None, Header()] = None,
 ) -> HTMLResponse:
   """Poisoned listing for the API operator path only — not public ?evil=1."""
-  _require_attack_lab_auth(authorization)
+  # Legacy preview credentials cannot execute attacks. Only a currently scoped
+  # isolated operator scenario can select poison through the regular listing.
+  raise HTTPException(403, "Use an isolated run-scoped Attack Lab listing")
   selectors = request.query_params.getlist("evil")
   if not selectors or any(value.lower() not in {"1", "true", "yes", "on"} for value in selectors):
     raise HTTPException(status_code=403, detail="Attack Lab product preview requires evil=1")

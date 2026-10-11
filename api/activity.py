@@ -71,6 +71,13 @@ def emit_activity(
   auth_user_id: str | None = None,
 ) -> dict[str, Any]:
   """Append one sanitized activity/audit row. Caller commits the transaction."""
+  # Events preserve an existing identity binding. Internal domain callers know
+  # the LEASH identity, but need not repeat its authentication-provider UUID.
+  # Creating a new binding still goes through ensure_user's ownership check.
+  if auth_user_id is None:
+    existing = conn.execute("SELECT auth_user_id FROM leash_users WHERE id=%s", (user_id,)).fetchone()
+    if existing:
+      auth_user_id = existing["auth_user_id"]
   ensure_user(conn, user_id, auth_user_id)
   now = at or datetime.now(timezone.utc)
   payload = dict(data or {})

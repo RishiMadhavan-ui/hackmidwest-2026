@@ -11,9 +11,10 @@ import { Logo } from "@/components/logo";
 import { Dot } from "@/components/ui/badge";
 import { ActivityProvider, useActivity } from "@/lib/activity";
 import { useAuth } from "@/lib/auth";
-import { TOKEN_STORAGE_KEY } from "@/lib/api";
+import { TOKEN_STORAGE_KEY, apiFetch } from "@/lib/api";
 
 const NAV = [
+  { href: "/mission-control", label: "Mission Control" },
   { href: "/overview", label: "Overview" },
   { href: "/mandates", label: "Mandates" },
   { href: "/activity", label: "Activity" },
@@ -31,6 +32,13 @@ function NavLinks({ active }: { active: string | null }) {
   async function openLab() {
     setLabError(null);
     try {
+      if (location.protocol === "http:" && !["localhost", "127.0.0.1"].includes(location.hostname)) {
+        // The HTTP hackathon address cannot transport a Secure view cookie.
+        // Reuse the verified Bearer-only controls; never weaken that cookie.
+        await apiFetch("/attack-lab/access");
+        router.push("/mission-control#attack-lab");
+        return;
+      }
       const token = localStorage.getItem(TOKEN_STORAGE_KEY);
       const response = await fetch("/attack-lab/session", {
         method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {},

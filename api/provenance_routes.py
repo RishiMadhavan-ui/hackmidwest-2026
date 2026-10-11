@@ -38,6 +38,8 @@ async def post_provenance(
 
 
 def store_report(report, principal: Principal):
+  if principal.delegated_run and principal.delegated_run != report.run_id:
+    raise AuthorityError(404, "Registered agent run not found")
   with get_conn() as conn:
     row = conn.execute(
       "SELECT * FROM agent_runs WHERE id = %s AND user_id = %s AND agent_id = %s",

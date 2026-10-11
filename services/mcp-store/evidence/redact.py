@@ -21,8 +21,12 @@ _SECRET_KEYS = {
   "apikey",
   "token",
   "access_token",
+  "agent_credential",
   "secret",
   "password",
+  "launch_id",
+  "scope_tokens",
+  "x_leash_execution_token",
 }
 # Keys that hold a card number. The value keeps its last four digits so the UI
 # can still say which card was used.

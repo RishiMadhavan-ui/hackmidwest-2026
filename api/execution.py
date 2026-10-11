@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import ssl
 from datetime import timedelta
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -22,6 +23,7 @@ from principals import Principal, require_agent, require_human
 
 router = APIRouter(tags=["execution"])
 LEASE_SECONDS = 10
+TLS_CONTEXT = ssl.create_default_context()
 ACTIONS = {
   "mcp-leash": {"list_mandates", "request_payment", "check_status"},
   "mcp-store": {"browse", "create_checkout", "complete_checkout"},
@@ -42,7 +44,7 @@ def rail(method, path, body=None):
   if not url or len(token) < 32:
     raise AuthorityError(503, "Execution rail is not configured")
   try:
-    with httpx.Client(base_url=url, timeout=3, follow_redirects=False) as client:
+    with httpx.Client(base_url=url, timeout=3, follow_redirects=False, verify=TLS_CONTEXT) as client:
       response = client.request(method, path, json=body, headers={"Authorization": "Bearer " + token})
     if not response.is_success:
       raise AuthorityError(503, "Execution rail did not acknowledge the operation")
@@ -62,6 +64,8 @@ def event(conn, run, phase, **data):
 
 
 def locked(conn, run_id, principal=None, *, current=True):
+  if principal and principal.delegated_run and principal.delegated_run != run_id:
+    raise AuthorityError(404, "Execution run not found")
   run = conn.execute("SELECT * FROM agent_runs WHERE id=%s", (run_id,)).fetchone()
   if not run or (principal and (run["user_id"] != principal.user_id or
       (principal.role == "agent" and run["agent_id"] != principal.agent_id))):
@@ -71,6 +75,12 @@ def locked(conn, run_id, principal=None, *, current=True):
   if not lease:
     raise AuthorityError(409, "A human launch is required")
   if current:
+    lab = conn.execute("""SELECT l.namespace_id,l.expires_at,n.enabled,n.operator_user_id
+      FROM attack_lab_runs l JOIN attack_lab_namespaces n ON n.id=l.namespace_id WHERE l.run_id=%s""", (run_id,)).fetchone()
+    if lab:
+      from attack_lab import server_enabled, operator_ids
+      if not (server_enabled() and lab["enabled"] and lab["operator_user_id"] in operator_ids() and lab["expires_at"] > utc_now()):
+        raise AuthorityError(409, "Isolated scenario authority is no longer current")
     p = Principal("agent", run["user_id"], run["agent_id"], (run["registration"]["agent_mode"],))
     mandate = current_mandate(conn, run["mandate_id"], p, now=utc_now(), lock=True)
     stopped = conn.execute("SELECT stopped FROM user_workflow_controls WHERE user_id=%s", (run["user_id"],)).fetchone()
@@ -140,6 +150,16 @@ def launch(body: Launch, principal: Annotated[Principal, Depends(require_human)]
     event(conn, {"id": run_id, "user_id": principal.user_id}, "launched", mandate_id=mandate.id)
   return {"run_id": run_id, "launch_id": secret, "mandate_id": mandate.id,
     "task": mandate.description, "agent_mode": run.agent_mode, "start_url": body.start_url}
+
+
+def worker_credential(run_id: str, principal: Principal):
+  """Delivered only to the authenticated worker service, never the browser."""
+  token = secrets.token_urlsafe(48)
+  with get_conn() as conn:
+    run, lease = locked(conn, run_id, principal)
+    conn.execute("INSERT INTO run_credentials(token_sha256,run_id,expires_at) VALUES (%s,%s,%s)",
+                 (digest(token), run_id, lease["deadline"]))
+    return {"agent_credential": token, "agent_id": run["agent_id"]}
 
 
 class Claim(Contract):
@@ -273,6 +293,32 @@ def authorize_scope(body: ToolScope, request: Request):
   with get_conn() as conn:
     run, lease = validate_scope(conn, request.headers, body.audience, body.action,
       live=body.action != "check_status")
+    lab = conn.execute("SELECT namespace_id,scenario FROM attack_lab_runs WHERE run_id=%s", (run["id"],)).fetchone()
     return {"run_id": run["id"], "mandate_id": run["mandate_id"], "user_id": run["user_id"],
       "generation": lease["generation"], "agent_id": run["agent_id"],
-      "agent_mode": run["registration"]["agent_mode"]}
+      "agent_mode": run["registration"]["agent_mode"], "lab_context": dict(lab) if lab else None}
+
+
+@router.get("/agent-runs/{run_id}/execution")
+def read_execution(run_id: RunId, principal: Annotated[Principal, Depends(require_human)]):
+  with get_conn() as conn:
+    run, lease = locked(conn, run_id, principal, current=False)
+    cancelled = bool(conn.execute("SELECT 1 FROM run_cancellations WHERE run_id=%s", (run_id,)).fetchone())
+    return {"run_id": run_id, "state": lease["state"], "progress": lease["progress"],
+      "financial_state": financial_state(conn, run_id), "cancel_requested": cancelled,
+      "graph_acknowledged": bool(lease["graph_ack_at"]), "rail_stopped": bool(lease["rail_stopped_at"]),
+      "lease_active": bool(lease["lease_until"] and lease["lease_until"] > utc_now()),
+      "deadline": lease["deadline"], "agent_mode": run["registration"]["agent_mode"],
+      "rail": "local_payment_rail_simulator", "settlement": "not_claimed"}
+
+
+@router.get("/shopping/runs")
+def owned_runs(principal: Annotated[Principal, Depends(require_human)], mandate_id: str | None = None):
+  with get_conn() as conn:
+    rows = conn.execute("""SELECT r.id AS run_id,r.mandate_id,r.registration,e.state,e.deadline
+      FROM agent_runs r JOIN run_executions e ON e.run_id=r.id WHERE r.user_id=%s
+      AND (%s::text IS NULL OR r.mandate_id=%s) ORDER BY e.created_at DESC LIMIT 20""",
+      (principal.user_id,mandate_id,mandate_id)).fetchall()
+    return {"runs": [{"run_id":r["run_id"],"mandate_id":r["mandate_id"],"agent_mode":r["registration"]["agent_mode"],
+      "status":r["state"],"label":"Live Strands shopper" if r["registration"]["agent_mode"]=="live" else "Scripted fixture",
+      "scenario":"live" if r["registration"]["agent_mode"]=="live" else "scripted"} for r in rows]}

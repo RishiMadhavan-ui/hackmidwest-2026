@@ -84,8 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     // Remove the scoped read-only Lab cookie even if backend logout is unavailable.
-    await fetch("/attack-lab/session", { method: "DELETE" }).catch(() => undefined);
     setUser(null);
+    await fetch("/attack-lab/session", { method: "DELETE", signal: AbortSignal.timeout(3000) }).catch(() => undefined);
   }, []);
 
   const value = useMemo(

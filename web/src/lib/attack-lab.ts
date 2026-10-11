@@ -4,7 +4,7 @@ export type LabAccess = {
   operator_authorized: true;
   server_enabled: boolean;
   namespace: { id: string; demo_user_id: string; enabled: boolean; revision: number; rail: string } | null;
-  execution_available: false;
+  execution_available: boolean;
   reason: string;
   limits: { mutations_per_minute: number; active_scenarios: number; candidate_attempts: number;
     scenario_seconds: number; payload_bytes: number };

@@ -19,12 +19,15 @@ from payment_routes import router as payment_router
 from provenance_routes import router as provenance_router
 from workflow_control import router as workflow_router
 from execution import router as execution_router
-import purchase_execution  # noqa: F401; registers protected completion on the merchant router.
+import purchase_execution  # noqa: F401
 from merchant_execution import router as merchant_router
 from workflow_events import router as workflow_event_router
 from attack_lab import router as attack_lab_router, LabBodyLimit
 from purchase_history import router as purchase_history_router
 from shopping_routes import router as shopping_router
+from agent_evidence import router as agent_evidence_router
+from mandate_interpretation import router as interpretation_router
+import lab_execution  # noqa: F401
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -55,6 +58,8 @@ app.include_router(attack_lab_router)
 app.include_router(purchase_history_router)
 app.add_middleware(LabBodyLimit)
 app.include_router(shopping_router)
+app.include_router(agent_evidence_router)
+app.include_router(interpretation_router)
 app.include_router(activity_internal_router)
 app.include_router(execution_router)
 app.include_router(merchant_router)
@@ -91,9 +96,19 @@ def on_startup() -> None:
         init_db()
         app.state.schema_ready = True
         logger.info("Database migrations ready")
+        from reconciliation import start
+        app.state.reconciler = start()
     except Exception:
         logger.error("Database migration failed; readiness remains unavailable")
         raise DatabaseUnavailable("Database migration failed") from None
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    worker = getattr(app.state, "reconciler", None)
+    if worker:
+        worker.stop()
+        app.state.reconciler = None
 
 
 @app.get("/health")

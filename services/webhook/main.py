@@ -282,56 +282,7 @@ async def put_grant(
   _: Annotated[None, Depends(require_internal)],
   store: Annotated[MemoryGrantStore | RedisGrantStore, Depends(get_store)],
 ) -> dict[str, str]:
-  """Operator/API seeding of a short-lived grant into Valkey. Not a public mint.
-
-  Optional top-level ``run_id`` (rail-local) scopes the grant for run Stop.
-  """
-  from datetime import timezone
-  from pydantic import ValidationError
-
-  try:
-    payload = await request.json()
-  except json.JSONDecodeError as exc:
-    raise HTTPException(422, "Invalid grant payload") from exc
-  if not isinstance(payload, dict):
-    raise HTTPException(422, "Invalid grant payload")
-  run_id = str(payload.pop("run_id", "") or "")
-  try:
-    body = AuthorizationGrant.model_validate(payload)
-  except ValidationError as exc:
-    raise HTTPException(422, "Invalid grant payload") from exc
-  clock = datetime.now(timezone.utc)
-  if (
-    body.status.value != "ISSUED"
-    or body.expires_at <= clock
-    or body.issued_at > clock
-    or (body.expires_at - body.issued_at).total_seconds() > 1800
-  ):
-    raise HTTPException(422, "Only an unexpired verified ISSUED grant may be installed")
-  grant = GrantSnapshot(
-    grant_id=body.grant_id,
-    status=body.status.value,
-    mandate_id=body.mandate_id,
-    mandate_version=body.mandate_version,
-    instrument_token=body.payment_instrument_id,
-    descriptor=body.merchant_descriptor,
-    mcc=body.mcc,
-    authorized_amount_cents=body.authorized_amount_cents,
-    currency=body.currency,
-    expires_at=body.expires_at,
-    user_id=body.user_id,
-    mandate_hash=body.mandate_hash,
-    checkout_id=body.verified_checkout_id,
-    checkout_hash=body.verified_checkout_hash,
-    merchant_binding_id=body.merchant_binding_id,
-    run_id=run_id,
-  )
-  try:
-    store.set_mandate(body.mandate_id, status="active", version=body.mandate_version)
-    store.put_grant(grant)
-  except ValueError:
-    raise HTTPException(409, "Grant or mandate authority conflicts with existing state") from None
-  return {"status": "ok", "grant_id": grant.grant_id}
+  raise HTTPException(410, "Unscoped grant installation is disabled; use verified execution grants")
 
 
 @app.post("/internal/killswitch")

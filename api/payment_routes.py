@@ -13,6 +13,22 @@ router = APIRouter(tags=["payments"])
 Agent = Annotated[Principal, Depends(require_agent)]
 
 
+def checkout_evidence(conn, payment_id):
+  from leash_shared.models import CheckoutSnapshot
+  from authority_errors import AuthorityError
+  from pydantic import ValidationError
+  row = conn.execute("SELECT snapshot,checkout_hash FROM checkout_observations WHERE payment_id=%s",(payment_id,)).fetchone()
+  if row is None:
+    return None
+  try:
+    snapshot = CheckoutSnapshot.model_validate(row["snapshot"])
+    if snapshot.checkout_hash != row["checkout_hash"] or snapshot.purchase_attempt_id != payment_id:
+      raise ValueError()
+    return snapshot.model_dump(mode="json")
+  except (ValueError,ValidationError):
+    raise AuthorityError(503,"Stored checkout evidence failed integrity verification") from None
+
+
 @router.post("/payments")
 def create_payment(body: PaymentProposal, principal: Agent, request: Request) -> dict[str, Any]:
   with get_conn() as conn:
@@ -21,12 +37,10 @@ def create_payment(body: PaymentProposal, principal: Agent, request: Request) ->
       # execution activation path. One payment path per run, never both.
       from purchase_execution import request_verified
       return request_verified(conn, body, principal, request.headers).model_dump(mode="json")
-    response, once = request_payment(conn, body, principal)
-  payload = response.model_dump(mode="json")
-  if once:
-    # Shown once on the approving response; GET /payments never re-discloses.
-    payload.update(once)
-  return payload
+    # Compatibility is observation-only. It cannot install a grant or charge;
+    # all executable payments must use the scoped path above.
+    response, _ = request_payment(conn, body, principal)
+    return response.model_dump(mode="json")
 
 
 @router.get("/payments/{payment_id}")
@@ -47,5 +61,8 @@ def read_payment(payment_id: str, principal: Agent, request: Request) -> dict[st
           operation={k: op[k] for k in ("state","revision","run_id","checkout_id","mandate_id","mandate_version","mandate_hash")})
         result["operation"]["financial_authority"] = op["state"] == "ready"
         result["rail"] = "local_payment_rail_simulator"
+        result["checkout_evidence"] = checkout_evidence(conn,payment_id)
         return result
-    return get_payment(conn, payment_id, principal)
+    result = get_payment(conn, payment_id, principal)
+    result["checkout_evidence"] = checkout_evidence(conn,payment_id)
+    return result

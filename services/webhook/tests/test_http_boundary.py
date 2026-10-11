@@ -194,7 +194,7 @@ class HttpBoundaryTests(unittest.TestCase):
         headers={"Authorization": "Bearer " + os.environ["WEBHOOK_INTERNAL_TOKEN"]},
         json={"grant_id": "grt_fake"},
       ).status_code,
-      422,
+      410,
     )
 
   def test_http_grant_installation_enforces_short_lifetime(self):
@@ -227,7 +227,7 @@ class HttpBoundaryTests(unittest.TestCase):
       headers={"Authorization": "Bearer " + os.environ["WEBHOOK_INTERNAL_TOKEN"]},
       json=body,
     )
-    self.assertEqual(response.status_code, 422, response.text)
+    self.assertEqual(response.status_code, 410, response.text)
     self.assertIsNone(rail_main._store.get_grant("grt_long"))
 
   def test_authorization_rejects_caller_clock_and_lax_money(self):

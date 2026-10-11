@@ -70,14 +70,13 @@ class StoreTests(unittest.TestCase):
     lab = "isolated-attack-lab-token-" + "c" * 32
     with patch.dict("os.environ", {"ATTACK_LAB_TOKEN": lab}, clear=False):
       denied = self.client.get("/internal/attack-lab/products/chg-65w?evil=1")
-      self.assertEqual(denied.status_code, 401)
+      self.assertEqual(denied.status_code, 403)
       ok = self.client.get(
         "/internal/attack-lab/products/chg-65w?evil=1",
         headers={"Authorization": "Bearer " + lab},
       )
-      self.assertEqual(ok.status_code, 200)
-      self.assertIn("fulfillmentNote", ok.text)
-      self.assertEqual(ok.headers.get("x-leash-attack-lab"), "1")
+      self.assertEqual(ok.status_code, 403)
+      self.assertNotIn("fulfillmentNote", ok.text)
       # Public path remains denied.
       self.assertEqual(self.client.get("/products/chg-65w?evil=1").status_code, 403)
 

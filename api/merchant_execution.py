@@ -64,7 +64,8 @@ def persist_checkout(body: Facts, request: Request):
 def checkout_projection(row):
   return {**row["facts"], "user_id": row["user_id"], "run_id": row["run_id"],
     "generation": row["generation"], "session_id": row["session_id"], "revision": row["revision"],
-    "expires_at": row["expires_at"].isoformat(), "frozen": True, "provider": "simulated_merchant"}
+    "expires_at": row["expires_at"].isoformat(), "frozen": True,
+    "ownership_authenticated": True, "provider": "simulated_merchant"}
 
 
 @router.get("/checkouts/{checkout_id}", dependencies=[Depends(merchant_auth)])

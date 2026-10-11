@@ -77,6 +77,7 @@ class Ports(Protocol):
 # to keep shopping or repeatedly contact a broken integration.
 RECOVERABLE = frozenset({
   "category_mismatch", "product_constraint_unmet",
+  "product_attribute_unknown",
   "quantity_exceeded", "subscription_prohibited", "recurring_prohibited",
   "amount_over_limit",
   "merchant_not_allowed",

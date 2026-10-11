@@ -123,9 +123,8 @@ class ShoppingStartTests(unittest.TestCase):
       patch("shopping_routes.lock_user_authority"),
       patch("shopping_routes.current_mandate", return_value=mandate),
       patch("shopping_routes.utc_now", return_value=NOW),
-      patch(
-        "shopping_routes.require_claimable_shopper",
-      ) as claimable,
+      patch("shopping_routes.worker_credential", return_value={"agent_credential":"private-"+"x"*40,
+                                                             "agent_id":mandate.agent_id}) as delegated,
       patch("shopping_routes.create_human_launch", return_value=launched) as launch,
       patch("shopping_routes.emit_activity") as emit,
       patch("shopping_routes.httpx.Client", return_value=client),
@@ -136,7 +135,7 @@ class ShoppingStartTests(unittest.TestCase):
         StartShoppingBody(mandate_id=mandate.id, agent_mode="live"),
         self.human,
       )
-    claimable.assert_called_once()
+    delegated.assert_called_once_with("run_from_launch", self.human)
 
     self.assertEqual(result["run_id"], "run_from_launch")
     self.assertEqual(result["label"], "Live Strands shopper")
@@ -146,6 +145,8 @@ class ShoppingStartTests(unittest.TestCase):
     self.assertEqual(body["launch_id"], launched["launch_id"])
     self.assertEqual(body["mandate_id"], mandate.id)
     self.assertNotIn("launch_id", result)
+    self.assertNotIn("agent_credential", result)
+    self.assertEqual(body["agent_id"], mandate.agent_id)
     emit.assert_called_once()
 
   def test_rejects_mode_mismatch_before_launch(self):
@@ -174,17 +175,16 @@ class ShoppingStartTests(unittest.TestCase):
           ),
           self.human,
         )
-      self.assertEqual(err.exception.status, 409)
+      self.assertEqual(err.exception.status, 403)
       launch.assert_not_called()
       client_cls.assert_not_called()
 
-  def test_rejects_when_cluster_shopper_not_bound_to_mandate(self):
+  def test_rejects_unprovisioned_mandate_identity_before_launch(self):
     mandate = _mandate()
     conn = MagicMock()
     # First fetchone: agent modes; second: token binding for another agent.
     conn.execute.return_value.fetchone.side_effect = [
-      {"allowed_modes": ["live"]},
-      {"id": "agt_other", "user_id": mandate.user_id},
+      None,
     ]
     env = {**self.env, "AGENT_TOKEN_SHOPPER": "c" * 32}
     with (
@@ -204,7 +204,7 @@ class ShoppingStartTests(unittest.TestCase):
           self.human,
         )
       self.assertEqual(err.exception.status, 409)
-      self.assertIn("cluster agent credential", err.exception.detail)
+      self.assertIn("not been provisioned", err.exception.detail)
       launch.assert_not_called()
       client_cls.assert_not_called()
 

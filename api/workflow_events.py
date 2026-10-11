@@ -77,6 +77,8 @@ async def intake(request: Request, principal: Annotated[Principal, Depends(requi
 
 
 def store(report, principal):
+  if principal.delegated_run and principal.delegated_run != report.run_id:
+    raise AuthorityError(404, "Registered run not found")
   with get_conn() as conn:
     run = conn.execute("SELECT * FROM agent_runs WHERE id=%s AND user_id=%s AND agent_id=%s",
       (report.run_id, principal.user_id, principal.agent_id)).fetchone()

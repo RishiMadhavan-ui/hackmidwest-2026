@@ -46,6 +46,10 @@ def transition(conn, mandate: PurchaseMandate, status: MandateStatus, now: datet
 
 
 def scope_head(conn, mandate_id: str, principal: Principal, *, lock=False):
+  if principal.delegated_run:
+    scoped = conn.execute("SELECT mandate_id FROM agent_runs WHERE id=%s", (principal.delegated_run,)).fetchone()
+    if not scoped or scoped["mandate_id"] != mandate_id:
+      raise AuthorityError(404, "Mandate not found")
   row = conn.execute(
     "SELECT * FROM mandate_heads WHERE id = %s AND user_id = %s" + (" FOR UPDATE" if lock else ""),
     (mandate_id, principal.user_id),
@@ -117,7 +121,8 @@ def propose(conn, proposal: MandateProposal, principal: Principal, *, now: datet
 
 
 def draft_agent_for_user(conn, user_id: str) -> str:
-  """Use existing operator-provisioned live ownership; drafting never binds tokens."""
+  """Preserve existing ownership; create a private identity for a new account."""
+  conn.execute("SELECT id FROM leash_users WHERE id=%s FOR UPDATE", (user_id,))
   row = conn.execute(
     """SELECT id FROM leash_agents
        WHERE user_id = %s AND enabled AND allowed_modes = %s::jsonb
@@ -125,7 +130,12 @@ def draft_agent_for_user(conn, user_id: str) -> str:
     (user_id, Jsonb(["live"])),
   ).fetchall()
   if not row:
-    raise AuthorityError(409, "An operator must bind a live shopper to this account before drafting")
+    agent_id = "agt_ui_" + user_id.removeprefix("usr_")
+    # This inaccessible bootstrap token is never shared or delivered. Launch
+    # creates a separate expiring run credential; old demo bindings stay intact.
+    bind_agent(conn, user_id=user_id, agent_id=agent_id,
+               token=secrets.token_urlsafe(48), modes=("live",))
+    return agent_id
   if len(row) != 1:
     raise AuthorityError(409, "An operator must resolve multiple live shopper bindings before drafting")
   return str(row[0]["id"])
@@ -233,6 +243,10 @@ def list_mandates(conn, principal: Principal, *, status: MandateStatus | None, n
   for head in heads:
     if principal.role == "agent" and head["agent_id"] != principal.agent_id:
       continue
+    if principal.delegated_run:
+      scoped = conn.execute("SELECT mandate_id FROM agent_runs WHERE id=%s", (principal.delegated_run,)).fetchone()
+      if not scoped or scoped["mandate_id"] != head["id"]:
+        continue
     mandate = version_record(conn, head["id"], head["current_version"], now=now)
     if status is not None and mandate.status != status:
       continue

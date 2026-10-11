@@ -29,8 +29,10 @@ def render_product_page(product_id: str, *, evil: bool) -> str:
   recurring = "/mo" if product["recurring"] else ""
   injection = _evil_injection(product_id) if evil else ""
 
-  if product_id == "chg-65w":
+  if product_id.startswith("chg-65w"):
     body = _charger_body(price, recurring, injection)
+    if product_id != "chg-65w":
+      body = body.replace("chg-65w", product_id).replace("CHG-65W", product["sku"])
   else:
     body = _voltcare_body(price, recurring)
 
