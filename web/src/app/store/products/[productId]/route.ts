@@ -1,4 +1,4 @@
-// Public listing adapter only. Checkout and payment routes have no browser proxy.
+// Public listing adapter. Human checkout start is POST .../checkout (sibling route).
 export async function GET(
   request: Request,
   context: { params: Promise<{ productId: string }> },

@@ -1,6 +1,6 @@
 # Simulated Volt Supply Co. merchant. ClusterIP Service `store`; public via
 # web rewrite /store/products/* only. Checkout callers stay in-cluster.
-# No provider credentials or payment authority; completion currently returns 503.
+# Bound completion charges through the local rail (WEBHOOK_CHARGE_TOKEN).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,6 +32,13 @@ spec:
                   name: app-env
                   key: STORE_EVIL_MODE
                   optional: true
+            - name: WEBHOOK_URL
+              value: http://webhook:8000
+            - name: WEBHOOK_CHARGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: WEBHOOK_CHARGE_TOKEN
           ports:
             - containerPort: 8000
           readinessProbe:
