@@ -22,7 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt
 
-from catalog import get_product, resolve_product_id
+from catalog import get_product, list_products, resolve_product_id
 from pages import render_checkout_started, render_product_page
 import execution_bridge
 
@@ -356,7 +356,7 @@ def clean_catalog():
   # A separate clean discovery source. It is still untrusted agent evidence;
   # the API retrieves and checks every resulting checkout independently.
   from html import escape
-  products = [get_product("CHG-65W"), get_product("SUB-CARE-MO")]
+  products = list_products()
   rows = [f"<li>{escape(p['name'])}: SKU {escape(p['sku'])}, {p['price_cents']} cents; "
           f"category {escape(p['category'])}; subscription {bool(p['subscription'])}</li>" for p in products]
   return HTMLResponse("<h1>Volt Supply canonical catalog</h1><ul>" + "".join(rows) + "</ul>",

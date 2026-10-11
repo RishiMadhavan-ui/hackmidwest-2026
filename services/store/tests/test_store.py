@@ -17,9 +17,15 @@ class StoreTests(unittest.TestCase):
     reset_checkouts()
     self.token = "isolated-store-credential-" + "a" * 32
     self.charge = "isolated-store-charge-token-" + "b" * 32
+    # Process-memory checkout path; LEASH_EXECUTION_ENABLED from a local .env
+    # must not force the durable merchant backend during unit tests.
     self.auth = patch.dict(
       "os.environ",
-      {"STORE_API_TOKEN": self.token, "STORE_CHARGE_TOKEN": self.charge},
+      {
+        "STORE_API_TOKEN": self.token,
+        "STORE_CHARGE_TOKEN": self.charge,
+        "LEASH_EXECUTION_ENABLED": "0",
+      },
     )
     self.auth.start()
     self.addCleanup(self.auth.stop)
@@ -477,6 +483,53 @@ class StoreTests(unittest.TestCase):
     product = get_product("CHG-65W")
     product["attributes"][0]["value"] = "barrel"
     self.assertEqual(get_product("CHG-65W")["attributes"][0]["value"], "USB-C")
+
+  def test_expanded_one_time_tech_skus(self) -> None:
+    cases = (
+      ("HUB-7P", "hub-7p", "usb_hub", 3499),
+      ("EAR-ANC", "buds-anc", "headphones", 7999),
+      ("SSD-1TB", "ssd-1tb", "storage", 8999),
+    )
+    for sku, product_id, category, cents in cases:
+      with self.subTest(sku=sku):
+        page = self.client.get(f"/products/{product_id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(product_id, page.text)
+        created = self.client.post("/api/checkouts", json={"sku": sku}).json()
+        self.assertEqual(created["total_cents"], cents)
+        self.assertFalse(created["recurring"])
+        item = created["line_items"][0]
+        self.assertEqual(item["product_id"], product_id)
+        self.assertEqual(item["category"], category)
+        self.assertFalse(item["subscription"])
+
+  def test_expanded_subscription_skus(self) -> None:
+    cases = (
+      ("SUB-CLOUD-MO", "voltcloud", "cloud_backup", 999),
+      ("SUB-SHIELD-MO", "voltshield", "security_software", 1499),
+    )
+    for sku, product_id, category, cents in cases:
+      with self.subTest(sku=sku):
+        page = self.client.get(f"/products/{product_id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Subscription", page.text)
+        created = self.client.post("/api/checkouts", json={"sku": sku}).json()
+        self.assertEqual(created["total_cents"], cents)
+        self.assertTrue(created["recurring"])
+        item = created["line_items"][0]
+        self.assertEqual(item["product_id"], product_id)
+        self.assertEqual(item["category"], category)
+        self.assertTrue(item["subscription"])
+        self.assertEqual(item["billing_interval"], "monthly")
+
+  def test_catalog_lists_all_products(self) -> None:
+    r = self.client.get("/catalog")
+    self.assertEqual(r.status_code, 200)
+    for needle in (
+      "CHG-65W", "SUB-CARE-MO", "HUB-7P", "EAR-ANC", "SSD-1TB",
+      "SUB-CLOUD-MO", "SUB-SHIELD-MO",
+    ):
+      self.assertIn(needle, r.text)
 
 
 if __name__ == "__main__":
