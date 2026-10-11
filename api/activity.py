@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import hmac
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -22,9 +24,11 @@ from audit_store import append_event
 from authority_errors import AuthorityError
 from db import get_conn
 from leash_shared.events import AuditEvent, EventType, sanitize_event_data
+from leash_shared.models import Contract, Text, UserId, Cents, Mcc, UtcDatetime
 from principals import Credentials, Principal, ensure_user, human_from_credentials, leash_user_id, require_human
 
 router = APIRouter(prefix="/activity", tags=["activity"])
+internal_router = APIRouter(prefix="/internal", tags=["internal"])
 
 # Account lifecycle (additive profile types; not yet in shared EventType).
 ACCOUNT_CREATED = "account.created"
@@ -148,7 +152,7 @@ def list_activity(
 @router.get("", response_model=ActivityHistoryOut)
 def get_activity(
   principal: Annotated[Principal, Depends(require_human)],
-  after: Annotated[int, Query(ge=0)] = 0,
+  after: Annotated[int, Query(ge=0, le=9223372036854775807)] = 0,
   limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
 ) -> ActivityHistoryOut:
   """Historic activity for the authenticated human (resume with `after` sequence)."""
@@ -162,7 +166,7 @@ async def stream_activity(
   request: Request,
   principal: Annotated[Principal, Depends(require_human)],
   credentials: Credentials,
-  after: Annotated[int | None, Query(ge=0)] = None,
+  after: Annotated[int | None, Query(ge=0, le=9223372036854775807)] = None,
   last_event_id: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
   """SSE: replay from `after`, then poll Postgres for new rows (Bearer auth via fetch)."""
@@ -210,3 +214,98 @@ async def stream_activity(
       "X-Accel-Buffering": "no",
     },
   )
+
+
+class RailDecisionData(Contract):
+  event_id: Text = Field(max_length=128)
+  result: Literal["APPROVED", "DECLINED"]
+  reason: Text = Field(max_length=128)
+  rail: Literal["local_payment_rail_simulator", "lithic_sandbox"]
+  decision_source: Literal["local_rail", "lithic_asa"]
+  provider: Literal["local_rail", "lithic_sandbox"]
+  amount_cents: Cents
+  currency: Literal["USD"]
+  descriptor: Text = Field(max_length=200)
+  mcc: Mcc
+  decided_at: UtcDatetime
+
+
+class InternalActivityIn(Contract):
+  event_id: Text = Field(max_length=128)
+  type: Literal["authorization.decided"]
+  data: RailDecisionData
+  user_id: UserId | None = None
+  auth_user_id: str | None = Field(default=None, max_length=128)
+  instrument_token: Text | None = Field(default=None, max_length=128)
+
+
+def _require_internal_bearer(authorization: str | None) -> None:
+  expected = os.getenv("RAIL_EVENT_TOKEN", "").strip()
+  if len(expected) < 32 or expected == os.getenv("WEBHOOK_INTERNAL_TOKEN", "").strip():
+    raise HTTPException(503, "Distinct rail event credential is not configured")
+  if not authorization or not hmac.compare_digest(authorization, "Bearer " + expected):
+    raise HTTPException(401, "Invalid rail event credential")
+
+
+def _resolve_leash_user(conn, *, user_id, auth_user_id, instrument_token):
+  candidates = []
+  if user_id:
+    candidates.append(user_id)
+  if auth_user_id:
+    try:
+      from uuid import UUID
+      candidates.append(leash_user_id(str(UUID(auth_user_id))))
+    except ValueError:
+      raise HTTPException(422, "Invalid auth user id") from None
+  if instrument_token:
+    rows = conn.execute(
+      """SELECT user_id FROM lithic_cards WHERE card_token=%s
+         UNION SELECT id AS user_id FROM users WHERE lithic_card_token=%s""",
+      (instrument_token, instrument_token),
+    ).fetchall()
+    candidates.extend(leash_user_id(str(row["user_id"])) for row in rows)
+  if not candidates or any(uid != candidates[0] for uid in candidates):
+    raise HTTPException(422, "Rail event owner is missing or inconsistent")
+  # Never invent accounts or change identity mappings during service ingestion.
+  row = conn.execute("SELECT id FROM leash_users WHERE id=%s", (candidates[0],)).fetchone()
+  if row is None:
+    raise HTTPException(422, "Rail event owner does not exist")
+  return candidates[0]
+
+
+def _financial_payload(data):
+  value = sanitize_event_data(data)
+  if value.get("result") not in {"APPROVED", "DECLINED"} or value.get("rail") not in {
+    "local_payment_rail_simulator", "lithic_sandbox"
+  } or not isinstance(value.get("event_id"), str):
+    raise HTTPException(422, "Invalid authorization decision event")
+  # Retry delivery latency is observational; it cannot turn the original
+  # decision into a conflicting financial outcome or another history entry.
+  return {key: item for key, item in value.items() if key != "latency_ms"}
+
+
+@internal_router.post("/activity", status_code=201)
+def ingest_activity(body: InternalActivityIn, authorization: Annotated[str | None, Header()] = None):
+  """Dedicated rail publisher; append an original decision once, never authority."""
+  _require_internal_bearer(authorization)
+  payload = body.data.model_dump(mode="json")
+  _financial_payload(payload)
+  if (payload["rail"], payload["decision_source"], payload["provider"]) not in {
+    ("local_payment_rail_simulator", "local_rail", "local_rail"),
+    ("lithic_sandbox", "lithic_asa", "lithic_sandbox"),
+  }:
+    raise HTTPException(422, "Inconsistent authorization rail attribution")
+  with get_conn() as conn:
+    user_id = _resolve_leash_user(conn, user_id=body.user_id,
+      auth_user_id=body.auth_user_id, instrument_token=body.instrument_token)
+    conn.execute("SELECT pg_advisory_xact_lock(781202606)")
+    previous = conn.execute("SELECT record FROM audit_events WHERE event_id=%s", (body.event_id,)).fetchone()
+    if previous:
+      record = previous["record"]
+      if record["user_id"] != user_id or record["type"] != body.type or _financial_payload(record["data"]) != _financial_payload(payload):
+        raise HTTPException(422, "Event id conflicts with original decision")
+      raise HTTPException(409, "Event is already stored")
+    record = AuditEvent(event_id=body.event_id, type=EventType.AUTHORIZATION_DECIDED,
+      user_id=user_id, data=payload).model_dump(mode="json")
+    append_event(conn, record)
+  return {"status": "stored", "event_id": body.event_id}

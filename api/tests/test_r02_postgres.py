@@ -123,6 +123,60 @@ class PostgresAuthorityTests(unittest.TestCase):
       mapping=conn.execute("SELECT id FROM leash_users WHERE auth_user_id=%s",(self.legacy_auth_id,)).fetchone()
       self.assertEqual(mapping["id"],leash_user_id(str(self.legacy_auth_id)))
 
+  def test_rail_ingest_has_separate_credential_owner_validation_and_original_decision(self):
+    event_id="evt_rail_"+uuid4().hex
+    payload={"event_id":event_id,"type":"authorization.decided","user_id":self.owner,
+      "data":{"result":"DECLINED","reason":"checkout_binding_mismatch","rail":"local_payment_rail_simulator",
+        "decision_source":"local_rail","provider":"local_rail","event_id":"provider-event-1",
+        "amount_cents":2999,"currency":"USD","descriptor":"VOLT SUPPLY CO","mcc":"5732", "decided_at":utc_now().isoformat()}}
+    event_token="events-"+uuid4().hex
+    control_token="controls-"+uuid4().hex
+    with patch.dict(os.environ,{"RAIL_EVENT_TOKEN":event_token,"WEBHOOK_INTERNAL_TOKEN":control_token}):
+      self.assertEqual(self.request("POST","/internal/activity",body=payload).status_code,401)
+      self.assertEqual(self.request("POST","/internal/activity",token=control_token,body=payload).status_code,401)
+      self.assertEqual(self.request("POST","/internal/activity",token=event_token,body={**payload,"type":"mandate.confirmed"}).status_code,422)
+      self.assertEqual(self.request("POST","/internal/activity",token=event_token,body={**payload,"user_id":"usr_missing"}).status_code,422)
+      self.assertEqual(self.request("POST","/internal/activity",token=event_token,body={**payload,"auth_user_id":str(self.other_auth_id)}).status_code,422)
+      self.assertEqual(self.request("POST","/internal/activity",token=event_token,body=payload).status_code,201)
+      self.assertEqual(self.request("POST","/internal/activity",token=event_token,body=payload).status_code,409)
+      self.assertEqual(self.request("POST","/internal/activity",token=event_token,body={**payload,"data":{**payload["data"],"result":"APPROVED"}}).status_code,422)
+    with db.get_conn() as conn:
+      self.assertEqual(conn.execute("SELECT count(*) n FROM audit_events WHERE event_id=%s",(event_id,)).fetchone()["n"],1)
+      self.assertIsNone(conn.execute("SELECT id FROM leash_users WHERE id='usr_missing'").fetchone())
+
+  def test_stop_persists_owned_card_pause_and_retries_unknown_without_new_authority(self):
+    card_token="card_"+uuid4().hex
+    foreign="card_"+uuid4().hex
+    with db.get_conn() as conn:
+      conn.execute("UPDATE users SET lithic_card_token=%s WHERE id=%s",(card_token,self.auth_id))
+      conn.execute("UPDATE users SET lithic_card_token=%s WHERE id=%s",(foreign,self.other_auth_id))
+    from unittest.mock import Mock
+    def provider_call(path,**kwargs):
+      self.assertEqual(path,"/internal/lithic/card-state")
+      self.assertEqual(kwargs["json"],{"card_token":card_token,"state":"PAUSED"})
+      with db.get_conn() as conn:
+        operation=conn.execute("SELECT * FROM card_control_operations WHERE user_id=%s",(self.owner,)).fetchone()
+        self.assertIsNotNone(operation) # Intent already durable before provider call.
+      return Mock(is_success=True,json=lambda:{"card_token":card_token,"state":"PAUSED","provider":"lithic_sandbox"})
+    with patch.dict(os.environ,{"WEBHOOK_INTERNAL_TOKEN":"control-"+"a"*32,"WEBHOOK_URL":"http://rail.test"}), patch("workflow_control.stop_rail",return_value={"status":"enforced","unused_grants_revoked":0}), patch("workflow_control.httpx.Client") as client:
+      post=client.return_value.__enter__.return_value.post
+      import httpx
+      post.side_effect=httpx.ReadTimeout("private provider text")
+      first=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
+      self.assertEqual(first.json()["provider_card_controls"],{"status":"pending","total":1,"confirmed":0})
+      self.assertEqual(first.json()["status"],"pending_enforcement")
+      self.assertNotIn("private",first.text)
+      post.side_effect=provider_call
+      second=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
+      self.assertEqual(second.json()["provider_card_controls"],{"status":"enforced","total":1,"confirmed":1})
+      self.assertEqual(second.json()["status"],"stopped")
+      third=self.request("POST","/killswitch",token=self.user_token,body={"on":True})
+      self.assertEqual(third.json()["provider_card_controls"]["confirmed"],1)
+      self.assertEqual(post.call_count,2) # Confirmed control is not repeated.
+    with db.get_conn() as conn:
+      self.assertEqual(conn.execute("SELECT count(*) n FROM card_control_operations WHERE card_token=%s",(card_token,)).fetchone()["n"],1)
+      self.assertIsNone(conn.execute("SELECT id FROM card_control_operations WHERE card_token=%s",(foreign,)).fetchone())
+
   def test_signup_login_identity_and_legacy_me_keep_uuid(self):
     email = uuid4().hex + "@example.com"
     # Identity creation must work without provider configuration or issuance.
@@ -182,7 +236,7 @@ class PostgresAuthorityTests(unittest.TestCase):
     self.assertEqual(stopped.status_code,200,stopped.text)
     self.assertEqual(stopped.json()["status"],"pending_enforcement")
     self.assertFalse(stopped.json()["previous_authorizations_reversed"])
-    self.assertEqual(self.request("GET","/killswitch",token=self.user_token).json(),{"on":True,"rail_enforced":False})
+    self.assertEqual(self.request("GET","/killswitch",token=self.user_token).json(),{"on":True,"rail_enforced":False,"provider_controls_enforced":True})
     self.assertEqual(self.request("GET","/killswitch",token=self.other_user_token).json()["on"],False)
     control=self.request("GET",f'/agent-runs/{trace["run_id"]}/control').json()
     self.assertEqual(control,{"run_id":trace["run_id"],"cancel_requested":True,"authority_current":False})

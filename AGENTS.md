@@ -2,7 +2,7 @@
 
 Read this whole file before changing anything. [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md) defines product/security requirements; this file defines coding rules and path ownership; [Leash-build-plan.md](Leash-build-plan.md) defines each human's and coding agent's tasks, dependencies, handoffs, and completion gates. Keep all three synchronized in any direction/ownership change. Preserve compatible work; inspect files before treating a proposed component as implemented.
 
-**Desired-state baseline:** the October 10 master alignment specification supplied by Rishi supersedes earlier optional recovery, agent-only orchestration, narrow event streaming, and Compose-first assumptions. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) incorporates that direction; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) records implementation evidence at `2e0cbe5`. Requirements are not completion claims. Preserve historical snapshots as historical; use the audit for current status.
+**Desired-state baseline:** the October 10 master alignment specification supplied by Rishi supersedes earlier optional recovery, agent-only orchestration, narrow event streaming, and Compose-first assumptions. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) incorporates that direction; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) preserves the historical `2e0cbe5` audit and current implementation follow-up. Requirements are not completion claims. Preserve historical snapshots as historical; use the audit for current status.
 
 ## What LEASH is
 
@@ -33,17 +33,19 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 
 ## Architecture and implementation reality
 
-**Current audit snapshot (`2e0cbe5`, clean main before documentation edits):** R01 shape/hash/redaction and R02 signed PostgreSQL authority/registration are tested. Owner-scoped card metadata/direct-issuance blocking and both authenticated MCP adapters exist. API root-context build, `/readyz`, and trace PVC configuration are merged. A single shopper `Agent` and in-memory run manager exist; Graph, automatic containment/recovery, trusted merchant, verifier, payments, atomic Valkey rail, Kill Switch and comprehensive provenance/SSE are missing. Signup still issues an OPEN provider card, and the wrapper permits production while labeling sandbox; both conflict with the desired baseline. Public health/readiness return 200, but deployed OpenAPI also exposes activity/logout routes absent from main: their source revision and comprehensive behavior are unverified. See the audit for exact paths, fixes, tests and owners. No deployment, shared database, provider operation or teammate application code is changed by this audit. The following earlier integration paragraph is historical.
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`) and ASA adapter (`a9e8cba`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+
+**Historical integration snapshot (superseded by the current handoff):**
 
 October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's merged two-service MCP implementation. R02 adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron's API build-context/readiness changes are merged; the public readiness endpoint returns 200. No shared database or deployed service was changed.
 
-- **`api/`:** FastAPI with existing JWT signup/login/me, LEASH identity mapping, mandate lifecycle/history and agent-run registration. R02 adds Ed25519 confirmation, scoped operator-provisioned agents, checksummed SQL migrations and transactional audit records. `/health` and `/healthz` are liveness; `/readyz` checks migrations and database availability. Payments and provenance intake remain pending.
-- **`web/`:** Next.js App Router with signup/signin/profile, top nav + account menu, client `AuthProvider` / Bearer `localStorage`, and shadcn UI primitives. Mission Control / SSE / Attack Lab still planned.
-- **`services/agents/`:** FastAPI agents service (shopper/guardian/provenance present in-tree; wire against real api/store as those land).
-- **`services/mcp-leash/`:** Streamable HTTP MCP thin adapter with four tools forwarding to api (`propose_mandate`, `list_mandates`, `request_payment`, `check_status`). In-cluster `:8002`; public via web rewrite `/mcp-leash/*`.
-- **`services/mcp-store/`:** Store MCP with `browse`, `create_checkout`, `complete_checkout`; its own `STORE_MCP_TOKEN` auth and a separate store credential; store-only browsing with server-side page inspection and redacted snapshots. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
-- **`services/webhook/`:** Labeled local payment rail (`POST /local/authorize`) with pure `decide.py` and Valkey-backed grant consume/idempotency. Lithic ASA adapter still pending.
-- **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, valkey, webhook, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `VALKEY_URL` / `WEBHOOK_INTERNAL_TOKEN` / MCP URLs / agent tokens / image registry. Managed Postgres `hackmidwest-db` + in-cluster Valkey exist. Compose and controlled store HTTP remain planned; R02 domain migrations are implemented. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
+- **`api/`:** JWT identity, signed immutable mandates, registered runs; `POST /provenance`; owner `GET /activity` and `/activity/stream`; `POST/GET /killswitch`; agent-owned `/agent-runs/{id}/control`; dedicated rail `POST /internal/activity`. `checkout_verifier.py` is tested pure policy, not authenticated merchant retrieval. `/payments` and purchase persistence/issuance remain absent. `/health[z]` is liveness; `/readyz` checks schema/database.
+- **`web/`:** signup/signin/profile, genuine fetch SSE/stream proxy, human stop control and legacy-only card headroom. Signup never presents spending authority. Mission Control/confirmation/comparison/incidents/Attack Lab remain pending; existing custom JWT is preserved.
+- **`services/agents/`:** single Strands shopper Agent, guardian and durable provenance spool. Real Graph, automatic containment/recovery, durable progress/fencing and cancellation-control polling remain Aditya's work. Configured provider attribution never proves live inference.
+- **`services/mcp-leash/`:** four thin financial tools on internal `:8002/mcp`, forwarding the agent bearer. Payment timeout reports unknown and forbids another purchase until reconciled; durable payment-operation IDs remain pending.
+- **`services/mcp-store/`:** authenticated browse/create/complete tools on internal `:8003/mcp`, distinct store credential, store-only redirects and sanitized evidence. Cameron's canonical merchant target is still absent.
+- **`services/webhook/`:** strict local charge credential; complete frozen grants with checkout binding and <=30-minute lifetime; Valkey atomic consume/cache/event + human stop latch. Separate signed ASA adapter requires HMAC and always fails closed without trusted checkout correlation. Provider pause/close accepts only confirmed card identity/state; simulation HTTP route is unavailable until durable payment operations exist. Rail stream relay writes through API with an event-only credential outside the hot path.
+- **Deploy:** existing LKE topology preserved; explicit Secret-key allowlists, persistent Valkey AOF/PVC, financial NetworkPolicy and root-context API/webhook images. Public MCP proxies default off; only exact `/rail/lithic/asa` is publicly proxied and requires HMAC plus an externally configured HTTPS endpoint. TLS/CNI policy enforcement/image imports/PVC/Secrets/agent binding and actual deployment remain unverified. Shared packaging and optional local Compose remain pending.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -64,7 +66,7 @@ human confirmation -> immutable mandate -> real Strands Graph
 | Web | `web/` (auth UI + nav); Mission Control still planned | Rishi | Auth surfaces now; Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
 | Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
-| Merchant / payment rail | `services/store/` planned; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail; Lithic ASA later; atomic enforcement |
+| Merchant / payment rail | `services/store/` planned; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail/ASA adapter; trusted correlation and live proof pending |
 | Database / Valkey / deployment | `k8s/` (+ valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
 
 ## Repository tree
@@ -86,20 +88,24 @@ hackmidwest-2026/
   mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
     main.py                          [E] health/readiness, auth, cards, activity, mandate/run routes
-    activity.py                      [E] profile activity history + SSE over audit_events
+    activity.py                      [E] history/SSE + dedicated rail ingestion
+    audit_store.py                   [E] commit-ordered append-only events
+    provenance_routes.py             [E] authenticated registered-run evidence
+    checkout_verifier.py             [E] pure deterministic policy; retrieval pending
+    workflow_control.py              [E] durable stop, rail ack and provider-pause intents
     mandate_routes.py                [E] Rishi: scoped R02 REST routes
     mandate_service.py               [E] Rishi: transactional authority lifecycle
     principals.py                    [E] Rishi: human/agent ownership
     signing.py                       [E] Rishi: Ed25519 confirmation
     manage.py                        [E] Rishi: migrations and operator provisioning
-    auth.py                          [E] JWT signup/login/me/balance/logout; Lithic card on signup
+    auth.py                          [E] JWT identity only; legacy balance/logout
     cards.py                         [E] Rishi: owner-only metadata; direct issuance blocked
     db.py                            [E] checksummed PostgreSQL migrations and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
     tests/                           [E] Rishi: R01 and R02 signature/HTTP/PostgreSQL tests
     Dockerfile                       [E] root build; COPY api/*.py, shared, db/migrations
-  db/migrations/                     [E] Rishi: users + R02; Cameron: Lithic cards (0003), activity index (0004)
+  db/migrations/                     [E] 0001–0004 identity/authority/cards/index; 0005 stop; 0006 pause operations
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
@@ -121,13 +127,14 @@ hackmidwest-2026/
       Dockerfile                     [E] amd64; COPY every runtime module when added
     webhook/                         [E] Cameron: local rail + Valkey grant handler
       decide.py                      [E] pure domain payment policy (C03)
-      store.py / handler.py / main.py [E] Valkey consume + /local/authorize
+      store.py / handler.py / main.py [E] atomic local rail + authenticated controls
+      asa.py / activity_notify.py    [E] signed adapter + durable API relay
       tests/                         [E] handler/concurrency tests
       Dockerfile                     [E] amd64; COPY runtime modules
     store/                           [P] Cameron: controlled merchant
       tests/                         [P] catalog/checkout/correlation tests
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
-    src/app/                         [E] home, signup (name/zip), signin, profile (Lithic card credit)
+    src/app/                         [E] home, signup (name/zip), signin, profile (events, stop, legacy headroom)
     src/components/                  [E] site-nav + ui primitives
     src/lib/api.ts                   [E] apiFetch + auth + fetchBalance helpers
     src/lib/auth.tsx                 [E] AuthProvider / Bearer state
@@ -175,11 +182,11 @@ If a task needs an edit in another owner's lane, describe the needed change to t
 
 **Deployment coordination:** Kubernetes is the selected existing runtime. Extend `k8s/` and owner Dockerfiles; verify images, service authentication, TLS, network isolation, PostgreSQL/Valkey and volumes there. Compose is optional local convenience and cannot replace LKE or block acceptance merely by being absent. Source paths/ports in illustrative diagrams do not require renaming the current two MCP services.
 
-**Secret scope:** each pod receives only its required keys through service-specific Secrets or selected `secretKeyRef` entries. JWT/mandate-signing/database/provider authority credentials stay in the trusted backend components that require them, never shopper/guardian or thin MCP pods. Current manifests import the full shared `app-env` into all four Python deployments; Cameron must restrict that configuration. Actual mounted values are unverified and must not be printed during inspection.
+**Secret scope:** each pod receives only its required keys through service-specific Secrets or selected `secretKeyRef` entries. JWT/mandate-signing/database/provider authority credentials stay in the trusted backend components that require them, never shopper/guardian or thin MCP pods. Current manifests select required `app-env` keys explicitly; agent/MCP pods receive no database/JWT/signing/Lithic authority keys. Verify actual rollout and CNI enforcement before claiming deployed isolation. Actual mounted values are unverified and must not be printed during inspection.
 
 **Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
-**Agent interface alignment:** R01 remains the frozen contract baseline. R02 implements mandate ownership, confirmation and `/agent-runs`; API-owned confirmation/identity/version/hash remain forbidden in agent input. Aditya's merged shopper uses `services/mcp-leash/` and `services/mcp-store/`, with no direct Python shopping tools. Store evidence is inspected/redacted/snapshotted server-side and forwarded by hooks. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) distinguishes historical fixture captures from current integration status. Aditya's separate live/scripted agent identities, tokens, mandates and outbox lanes are merged. Cameron's API root build context, readiness and persistent spool configuration are merged. Actual token values, agent bindings and PVC attachment remain unverified; shared installability, protected merchant/rail, payments and provenance intake remain pending. The demo is live-first; no successful live injection is claimed.
+**Agent interface alignment:** R01 remains the frozen contract baseline. R02 implements mandate ownership, confirmation and `/agent-runs`; API-owned confirmation/identity/version/hash remain forbidden in agent input. Aditya's merged shopper uses `services/mcp-leash/` and `services/mcp-store/`, with no direct Python shopping tools. Store evidence is inspected/redacted/snapshotted server-side and forwarded by hooks. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) distinguishes historical fixture captures from current integration status. Aditya's separate live/scripted agent identities, tokens, mandates and outbox lanes are merged. Cameron's API root build context, readiness and persistent spool configuration are merged. Actual token values, agent bindings and PVC attachment remain unverified; shared installability, protected merchant/payment flow, Graph recovery and comprehensive lifecycle emitters remain pending. The demo is live-first; no successful live injection is claimed.
 
 
 Each service owns its Dockerfile. Cameron owns manifests and environment templates; request new variables through Cameron. Follow any nested `AGENTS.md` present in your lane and read the installed Next.js guides before changing web code.
@@ -194,7 +201,7 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Reuse the shared canonical JSON convention: `json.dumps(data, sort_keys=True, separators=(",", ":"))`. Implement agreed helpers once; preserve original instruction and all meaningful constraints in the mandate hash. A hash is not a signature. Preserve planned Ed25519 signing with a server-held demo key; do not claim a device passkey or AP2 compliance.
 - Never persist/log PAN, CVV, auth secrets, or raw sensitive tool arguments. If provider card details are needed, return them once to the authorized caller and retain only token/last four. Credentials belong in server environment/Kubernetes Secrets, never frontend variables or commits.
 - Models use shared `make_model()` with explicit `max_tokens`, text-only Akamai requests and guardian temperature 0. Both matched INFERENCE_* and workshop OPENAI_* environment pairs work. Structured findings/fallback remain advisory; genuine inference smoke evidence is pending.
-- MCP uses the official locked SDK's `MCPServer`, Streamable HTTP and stateless thin adaptation. Aditya owns separate `services/mcp-leash/` and `services/mcp-store/` services, both at `/mcp`, on ports 8002 and 8003. Leash forwards the agent bearer to the API for four tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. Store uses separate `STORE_MCP_TOKEN` authentication and a store-scoped merchant credential for `browse`, `create_checkout`, `complete_checkout`. The shopper loads both MCP clients and operations fail closed when unavailable. Store-only browsing rejects off-store redirects; original HTML stays in Store MCP for inspection/redacted snapshots, returning listing text plus source hashes/evidence. The API independently retrieves canonical checkout facts; Store MCP cannot create payment authority. Cameron owns the underlying merchant and deployment. Current public web rewrites expose both MCP services; reconciling that exposure with the earlier internal-only request remains a team action, not a deployment change in R02.
+- MCP uses the official locked SDK's `MCPServer`, Streamable HTTP and stateless thin adaptation. Aditya owns separate `services/mcp-leash/` and `services/mcp-store/` services, both at `/mcp`, on ports 8002 and 8003. Leash forwards the agent bearer to the API for four tools: `propose_mandate`, `list_mandates`, `request_payment`, `check_status`. Store uses separate `STORE_MCP_TOKEN` authentication and a store-scoped merchant credential for `browse`, `create_checkout`, `complete_checkout`. The shopper loads both MCP clients and operations fail closed when unavailable. Store-only browsing rejects off-store redirects; original HTML stays in Store MCP for inspection/redacted snapshots, returning listing text plus source hashes/evidence. The API independently retrieves canonical checkout facts; Store MCP cannot create payment authority. Cameron owns the underlying merchant and deployment. Public MCP rewrites are disabled unless `ENABLE_PUBLIC_MCP_PROXY=1`; keep agent services private by default. Intentional external clients require an agreed authenticated HTTPS deployment. Only the signed ASA responder has a public rail rewrite; no `/rail/*` wildcard control proxy exists.
 
 - The API alone writes durable application records. Other planned services publish sanitized events for ingestion. Extend planned provenance to actual before/after tool events, trust classifications, checkout evidence, decisions, and security incidents; retain content hashes/source references.
 - Preserve planned kill switch/revocation, receipts, merchant/MCC controls, and once-only card delivery as compatible work. Strengthen old amount-ceiling rules to exact verified totals and currency. Invalidation and authorization consumption must serialize across replicas.
@@ -233,7 +240,7 @@ rail cases: services/webhook/.venv/bin/python -m unittest tests.test_decision_ca
 deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/ (includes Valkey + webhook)
 ```
 
-API has health/readiness, auth (including Lithic signup/balance/logout), `POST /cards` / `GET /cards`, profile activity `GET /activity` + `GET /activity/stream` (SSE over append-only `audit_events`), R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Auth/card/mandate writes emit user-scoped audit rows; the profile page streams them live. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` is deprecated and returns 409 (direct issuance blocked until the verified payment flow); signup still provisions the forever VIRTUAL card. PAN/CVV are never persisted. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
+Signup/login require database/JWT configuration, not Lithic. Signup collects identity fields and never creates a usable card; old optional `spend_limit_cents` input is ignored for authority. `POST /cards` rejects direct issuance; human metadata reads stay owner-scoped. Legacy balances are labeled limit headroom, not funds. The current handoff lists all new endpoint bodies, delivery statuses and distinct credential roles. Kill Switch is a durable stop latch: repeated requests retry pending enforcement, never reactivate old mandates; Graph cancellation remains requested until Aditya cooperatively observes it. Provider PAUSE intent is durable before the call; only observed PAUSED/CLOSED on the correct card is confirmed. Already committed authorization is preserved. Real hosted migrations, provider calls and deployment were not performed here.
 
 Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and verify the integrated Kubernetes runtime. Check Compose only when supplied for local development. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose remains absent; rail decision cases and webhook handler tests exist; deployed E2E tests are gated and skipped until the full stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
@@ -241,7 +248,7 @@ If a contract or external integration remains unclear, identify its owner and un
 
 ## R02 status and deployment handoff
 
-Historical R02 test counts below describe its original handoff. The current audit ran 90 API tests successfully; merged API build-context/readiness, trace volume declarations and mode-separated credentials are no longer pending source changes. Actual cluster configuration/provisioning and payment/Kill Switch/Graph/SSE work remain separate requirements.
+Historical R02 test counts below describe its original handoff. The original documentation audit ran 90 API tests; current results are in the alignment audit. merged API build-context/readiness, trace volume declarations and mode-separated credentials are no longer pending source changes. Actual cluster configuration/provisioning and the remaining integrated payment/Graph/comprehensive-event work are separate requirements.
 
 R02 is implemented and ready for the agreed merge/deployment handoff; frozen R01 files are unchanged. The full
 API suite passes 81 tests including 19 real PostgreSQL integration tests; correctness
@@ -254,7 +261,7 @@ intended human and their respective mode. Exact commands and request bodies are 
 relays those records. R04/R05 and Cameron must implement atomic rail-grant
 invalidation before issuing grants; pending audit delivery is not enforcement.
 
-## Post-merge R02 verification
+## Historical post-merge R02 verification
 
 At `266a805`, both teammate handoffs are merged. The peer capture supplies the
 required mode-specific registration token, and R02 tests cover the current signup
@@ -271,3 +278,9 @@ accounts and provider-call exclusion. The provider wrapper and existing signup/
 balance integration remain; signup's sandbox card is not a verified purchase grant.
 Previously issued provider cards are not revoked by this source change. R03 has
 not been started, and deployment of this patch remains Cameron's task.
+
+## Current alignment handoff
+
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`) and ASA adapter (`a9e8cba`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+
+Use [api/alignment-fixes-handoff.md](api/alignment-fixes-handoff.md) for current callable interfaces, new configuration, tests and dependency order. Earlier R02/card paragraphs are historical; signup issuance has now been removed, deterministic verifier policy has started, and local spending invalidation/SSE are tested. Do not claim Graph cancellation, trusted merchant payments or live sandbox success from this work.

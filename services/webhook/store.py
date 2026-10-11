@@ -13,7 +13,7 @@ from decide import AuthorityState, Decision, GrantSnapshot
 
 GRANT_KEY = "leash:grant:{grant_id}"
 INSTRUMENT_KEY = "leash:instrument:{token}"
-EVENT_KEY = "leash:local:event:{event_id}"
+EVENT_KEY = "leash:{event_scope}:event:{event_id}"
 KILLSWITCH_KEY = "leash:killswitch"  # legacy operator/test global stop
 MANDATE_KEY = "leash:mandate:{mandate_id}"
 USER_KILL_KEY = "leash:killswitch:{user_id}"
@@ -52,7 +52,7 @@ class CachedEvent:
 
 
 class GrantStore(Protocol):
-  def get_event(self, event_id: str) -> CachedEvent | None: ...
+  def get_event(self, event_id: str, *, event_scope: str = "local") -> CachedEvent | None: ...
   def get_grant_by_instrument(self, instrument_token: str) -> GrantSnapshot | None: ...
   def load_state(self, grant: GrantSnapshot | None) -> AuthorityState: ...
   def commit_decision(self, **kwargs) -> tuple[str, Decision]: ...
@@ -74,6 +74,8 @@ class MemoryGrantStore:
 
   def put_grant(self, grant: GrantSnapshot):
     with self._lock:
+      if grant.user_id in self._user_kills:
+        raise ValueError("User spending is stopped")
       old = self._grants.get(grant.grant_id)
       if old is not None or grant.instrument_token in self._instruments:
         if old == grant_to_dict(grant) and old["status"] == "ISSUED":
@@ -131,20 +133,30 @@ class MemoryGrantStore:
     with self._lock:
       return self._state(grant)
 
-  def get_event(self, event_id):
+  def get_event(self, event_id, *, event_scope="local"):
     with self._lock:
-      return self._events.get(event_id)
+      return self._events.get((event_scope, event_id))
 
   def commit_decision(
-    self, *, grant_id, event_id, fingerprint, decision, consume, now=None, grant=None
+    self,
+    *,
+    grant_id,
+    event_id,
+    fingerprint,
+    decision,
+    consume,
+    now=None,
+    grant=None,
+    event_scope="local",
+    event_record=None,
   ):
     with self._lock:
-      cached = self._events.get(event_id)
+      cached = self._events.get((event_scope, event_id))
       if cached:
         return (
           ("duplicate", cached.decision)
           if cached.fingerprint == fingerprint
-          else ("mismatch", Decision("ERROR", "event_payload_mismatch"))
+          else ("mismatch", Decision("ERROR", "event_payload_mismatch", rail=decision.rail))
         )
       if consume:
         raw = self._grants.get(grant_id)
@@ -171,13 +183,18 @@ class MemoryGrantStore:
         elif self._purchases.get((grant.mandate_id, grant.mandate_version), 0) >= 1:
           reason = "purchase_scope_exhausted"
         if reason:
-          decision = Decision("DECLINED", reason)
+          decision = Decision("DECLINED", reason, rail=decision.rail)
         else:
           raw["status"] = "CONSUMED"
           self._purchases[(grant.mandate_id, grant.mandate_version)] = 1
-      self._events[event_id] = CachedEvent(fingerprint, decision)
+      self._events[(event_scope, event_id)] = CachedEvent(fingerprint, decision)
       self.audit_events.append(
-        {"event_id": event_id, "user_id": grant.user_id if grant else "", **decision.as_dict()}
+        {
+          "event_id": event_id,
+          "user_id": grant.user_id if grant else "",
+          **decision.as_dict(),
+          "record_context": event_record,
+        }
       )
       return "ok", decision
 
@@ -210,11 +227,11 @@ if ARGV[3] == '1' then
   elseif redis.call('HGET',KEYS[1],'binding_fingerprint') ~= ARGV[4] then reason='grant_changed'
   elseif tonumber(redis.call('HGET',KEYS[4],'used:'..redis.call('HGET',KEYS[1],'mandate_version')) or '0') >= 1 then reason='purchase_scope_exhausted'
   end
-  if reason then committed='{"result":"DECLINED","reason":"'..reason..'","rail":"local_payment_rail_simulator"}' 
+  if reason then committed='{"result":"DECLINED","reason":"'..reason..'","rail":"'..ARGV[7]..'"}'
   else redis.call('HSET',KEYS[1],'status','CONSUMED'); redis.call('HSET',KEYS[4],'used:'..redis.call('HGET',KEYS[1],'mandate_version'),'1') end
 end
 redis.call('HSET',KEYS[2],'fingerprint',ARGV[1],'decision',committed)
-redis.call('XADD',KEYS[5],'*','type','authorization.decided','event_id',ARGV[5],'user_id',ARGV[6],'decision',committed)
+redis.call('XADD',KEYS[5],'*','type','authorization.decided','event_id',ARGV[5],'user_id',ARGV[6],'decision',committed,'record_context',ARGV[8])
 return {'ok',committed}
 """
 
@@ -317,18 +334,28 @@ class RedisGrantStore:
     raw = self._r.hgetall(MANDATE_KEY.format(mandate_id=grant.mandate_id)) if grant else {}
     return AuthorityState(kill, raw.get("status", "missing"), int(raw.get("version", 0)))
 
-  def get_event(self, event_id):
-    raw = self._r.hgetall(EVENT_KEY.format(event_id=event_id))
+  def get_event(self, event_id, *, event_scope="local"):
+    raw = self._r.hgetall(EVENT_KEY.format(event_id=event_id, event_scope=event_scope))
     return CachedEvent(raw["fingerprint"], decoded(raw["decision"])) if raw else None
 
   def commit_decision(
-    self, *, grant_id, event_id, fingerprint, decision, consume, now=None, grant=None
+    self,
+    *,
+    grant_id,
+    event_id,
+    fingerprint,
+    decision,
+    consume,
+    now=None,
+    grant=None,
+    event_scope="local",
+    event_record=None,
   ):
     try:
       status, payload = self._script(
         keys=[
           GRANT_KEY.format(grant_id=grant_id or "_none"),
-          EVENT_KEY.format(event_id=event_id),
+          EVENT_KEY.format(event_id=event_id, event_scope=event_scope),
           KILLSWITCH_KEY,
           MANDATE_KEY.format(mandate_id=grant.mandate_id if grant else "_none"),
           EVENT_STREAM,
@@ -341,15 +368,17 @@ class RedisGrantStore:
           event_fingerprint(grant_to_dict(grant)) if grant else "",
           event_id,
           grant.user_id if grant else "",
+          decision.rail,
+          json.dumps(event_record or {}),
         ],
       )
       if status in {"ok", "duplicate"}:
         return status, decoded(payload)
       if status == "mismatch":
-        return status, Decision("ERROR", "event_payload_mismatch")
+        return status, Decision("ERROR", "event_payload_mismatch", rail=decision.rail)
     except Exception:
       pass  # Never include provider/Redis exception text in logs or responses.
-    return "store_error", Decision("ERROR", "state_store_unavailable")
+    return "store_error", Decision("ERROR", "state_store_unavailable", rail=decision.rail)
 
   def ping(self):
     try:

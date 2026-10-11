@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, model_validator
 
-from leash_shared.llm import model_id
+from leash_shared.llm import model_id, configured_provider
 from provenance.redact import redact, redact_text
 from provenance.sink import MemorySink, Sink, api_configured, default_sinks
 from service_auth import require_service_token
@@ -59,7 +59,7 @@ def model_identity(req: StartRun) -> tuple[str, str]:
   """What drives this run, for registration and labels: (model, provider)."""
   if req.agent_mode == "scripted":
     return "scripted-shopper", "fixture"
-  return model_id(), "akamai-inference"
+  return model_id(), configured_provider()
 
 
 def register(run_id: str, req: StartRun) -> dict[str, Any] | None:

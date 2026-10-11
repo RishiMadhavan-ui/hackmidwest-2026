@@ -1,5 +1,7 @@
 # LEASH backend and contract handoffs
 
+**Current implementation follow-up:** see [alignment-fixes-handoff.md](alignment-fixes-handoff.md) for identity-only signup, provenance/SSE, strict local rail, durable stop/provider control and remaining merchant/payment/Graph work. Earlier captures/test counts below describe their named revisions, not current deployed behavior.
+
 R01 supplies the frozen shared contracts, hashes and sanitized event envelopes.
 R02 adds PostgreSQL identity/agent bindings, migrations, signed mandate approval,
 immutable history/replacement/revocation and run registration while preserving

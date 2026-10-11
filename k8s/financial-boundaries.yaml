@@ -21,7 +21,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: webhook-api-and-merchant-only
+  name: webhook-trusted-callers
   namespace: hackmidwest
 spec:
   podSelector:
@@ -36,6 +36,10 @@ spec:
         - podSelector:
             matchLabels:
               app: store
+        # Web exposes only /rail/lithic/asa, which requires provider HMAC.
+        - podSelector:
+            matchLabels:
+              app: web
       ports:
         - protocol: TCP
           port: 8000

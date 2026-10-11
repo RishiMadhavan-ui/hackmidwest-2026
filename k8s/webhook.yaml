@@ -19,6 +19,36 @@ spec:
           image: ${WEBHOOK_IMAGE}
           imagePullPolicy: Always
           env:
+            - name: RAIL_EVENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: RAIL_EVENT_TOKEN
+                  optional: true
+            - name: LITHIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LITHIC_API_KEY
+                  optional: true
+            - name: LITHIC_ENVIRONMENT
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LITHIC_ENVIRONMENT
+                  optional: true
+            - name: LITHIC_ASA_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LITHIC_ASA_SECRET
+                  optional: true
+            - name: LITHIC_ASA_RESPONDER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LITHIC_ASA_RESPONDER_URL
+                  optional: true
             - name: WEBHOOK_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:

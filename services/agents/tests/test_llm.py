@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel
 from strands import Agent, tool
 
-from leash_shared.llm import ROLE_SETTINGS, make_model
+from leash_shared.llm import ROLE_SETTINGS, make_model, configured_provider
 
 ALL_ENV = ("INFERENCE_BASE_URL", "INFERENCE_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_KEY")
 
@@ -35,6 +35,15 @@ def test_guardian_is_deterministic(inference_env):
 def test_model_id_comes_from_env(inference_env, monkeypatch):
   monkeypatch.setenv("MODEL_ID", "other-model")
   assert make_model("shopper").get_config()["model_id"] == "other-model"
+
+
+def test_provider_metadata_does_not_claim_akamai_for_other_or_missing_endpoint(clean_env, monkeypatch):
+  assert configured_provider() == "unconfigured"
+  monkeypatch.setenv("OPENAI_BASE_URL", "https://other.invalid/v1")
+  monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+  assert configured_provider() == "configured-openai-compatible"
+  monkeypatch.setenv("OPENAI_BASE_URL", "https://ws.akamai-workshops.com/v1")
+  assert configured_provider() == "akamai-inference"
 
 
 def test_missing_key_fails_without_echoing_secrets(clean_env, monkeypatch):

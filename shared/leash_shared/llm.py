@@ -5,6 +5,7 @@ limits stay consistent. Never build an OpenAIModel anywhere else.
 """
 
 import os
+from urllib.parse import urlsplit
 from typing import Any, Literal
 
 from strands.models.openai import OpenAIModel
@@ -46,6 +47,18 @@ def _endpoint() -> tuple[str, str]:
         raise RuntimeError(f"{key_name} is not set")
       return base_url, api_key
   raise RuntimeError("INFERENCE_BASE_URL is not set")
+
+
+def configured_provider() -> str:
+  """Configuration attribution only; this never claims a successful inference."""
+  try:
+    base_url, _ = _endpoint()
+    host = urlsplit(base_url).hostname
+  except (RuntimeError, ValueError):
+    return "unconfigured"
+  if host == "ws.akamai-workshops.com":
+    return "akamai-inference"
+  return "configured-openai-compatible"
 
 
 def make_model(role: Role) -> OpenAIModel:

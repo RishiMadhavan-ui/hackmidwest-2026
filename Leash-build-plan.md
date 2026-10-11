@@ -2,7 +2,7 @@
 
 Updated October 10, 2026. Execution guide for **Rishi, Cameron, Aditya, and their coding agents**. This replaces the earlier hotel/gift-card implementation plan. It is a plan, not a record of completed work.
 
-**Master alignment revision:** Rishi's October 10 master specification is the desired-state baseline. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) resolves previous assumptions; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) records current evidence at `2e0cbe5`. Real Strands Graph, automatic clean recovery, comprehensive persisted SSE and authenticated human Kill Switch are mandatory MVP work. Kubernetes is the selected existing runtime; Compose is optional local convenience. Preserve task/handoff IDs and frozen R01 contracts. This audit changes documentation only on main, without commit/push.
+**Master alignment revision:** Rishi's October 10 master specification is the desired-state baseline. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) resolves previous assumptions; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) preserves baseline evidence and records the implementation follow-up. Real Strands Graph, automatic clean recovery, comprehensive persisted SSE and authenticated human Kill Switch are mandatory MVP work. Kubernetes is the selected existing runtime; Compose is optional local convenience. Preserve task/handoff IDs and frozen R01 contracts. Rishi subsequently authorized implementation, testing, documentation sync and pushing on main; lane ownership and frozen-contract review remain unchanged.
 
 Read [AGENTS.md](AGENTS.md) for coding rules, the existing/planned repository tree, and path ownership. Read [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md) for product/security requirements and detailed contracts. This file answers **who does what, in which order, what must be handed off, and what proves it works**. A direction/ownership change updates all three documents together. Product requirements come from the spec; path ownership comes from AGENTS; this plan cannot quietly override either.
 
@@ -14,7 +14,9 @@ The proof chain is: **confirmed intent -> actual agent/tool behavior -> independ
 
 ## Current checkout and planned structure
 
-**Current (`2e0cbe5`):** R01 and signed PostgreSQL R02 are merged/tested; both MCP adapters, mode-separated credentials, owner-only card metadata and direct `/cards` blocking exist. API root-context builds, `/readyz` readiness and agents trace PVC configuration are merged. Shopper execution is a single `Agent` with in-memory progress. Graph/recovery, merchant/verifier/payments/Valkey rail, Kill Switch, provenance intake/full SSE and product UI are missing. Signup still issues an OPEN card before verification; provider environment/reconciliation need immediate fixes. Public health/readiness return 200, while activity/logout OpenAPI routes have no source on main: deployment version and comprehensive behavior remain unverified. The next paragraph is an earlier integration snapshot, not current pending-work truth.
+**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`) and ASA adapter (`a9e8cba`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and human stop/provider-pause intents are implemented and locally tested. **Not a complete or deployed MVP:** trusted merchant retrieval/protected charge binding, product payment routes/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+
+**Historical R01 integration snapshot:**
 
 R01 baseline review: incorporated main at `1818a43` includes Cameron's build/LKE/PostgreSQL provisioning and Aditya's `2e6f940` agents/MCP/guardian/provenance/tests. R01 incorporates main with the AGENTS.md conflict resolved, adds `AgentRunRegistration`, and refreshes peer captures; all 52 contract tests pass. API now has JWT signup/login/me and a PostgreSQL users table from Cameron's PR #5; web has signup/signin/profile. R02 now implements mandate/run routes in R02; payments remain pending. [api/agent-interface-handoff.md](api/agent-interface-handoff.md) records exact interfaces, peer-suite results and remaining reconciliation. Remaining interface coordination, installable shared package/API image wiring, application persistence/routes, merchant/rail/Valkey, Compose and live acceptance remain pending. Spec section 21 retains the original inspection snapshot.
 
@@ -24,7 +26,7 @@ No integrations or account credentials are assumed ready. Original and current f
 
 ## Ownership — identical to AGENTS.md
 
-Each person's coding agent edits only that person's paths. Cross-lane work is an interface handoff; the owner makes the edit. Existing ownership is retained. Shared package metadata/marker files are assigned to Cameron so installability has an explicit owner; domain contracts remain Rishi's.
+Each person's coding agent normally edits that person's paths. Rishi explicitly authorized narrow cross-lane integration/security fixes in this follow-up; this does not transfer ownership. Cross-lane work is an interface handoff; the owner makes the edit. Existing ownership is retained. Shared package metadata/marker files are assigned to Cameron so installability has an explicit owner; domain contracts remain Rishi's.
 | Path | Owner |
 |---|---|
 | `infra/`, `k8s/`, `scripts/`, `docker-compose.yml`, `.env.example`, `.github/`, root `pyproject.toml` | Cameron |
@@ -92,6 +94,23 @@ A task report includes: task ID, changed paths, implemented behavior, commands/r
 **Historical pre-merge integrated review:** the `9edadab` baseline includes R01, Cameron's deployment/auth work, and Aditya's merged two-service MCP implementation. R02 supplies signed mandate lifecycle, identity mapping, immutable SQL authority and registered runs. [The handoff](api/r02-handoff.md) records validation and deployment commands. Both MCP services are owned by Aditya, the merchant/deployment by Cameron; shopping tools use Store MCP and the demo is live-first. Latest separate live/scripted credentials on Aditya's branch need to merge, be supplied through Secrets, and be bound by the API operator to the same intended human with distinct mandates. Cameron's API root-context/readiness change and persistent trace volume remain pending. Rishi authorized merging R02 before that deployment follow-up. Payments, verifier, provenance intake, merchant/rail/Valkey and genuine live acceptance remain pending. Historical R01 peer-suite results are retained in the interface handoff; future frozen-contract changes require dedicated coordinated review.
 
 **Rishi agent starting prompt:** “Read AGENTS.md, Leash-build-plan.md and docs/LEASH_SPEC.md. Work as Rishi's coding agent. Inspect current files and Git status, then implement the earliest unfinished R-task with satisfied prerequisites. Stay in the Rishi lane. Lead shared contracts through all-three review; do not treat an agent cart or positive guardian opinion as payment authority. Preserve the current api/ starter and fail closed until independent checkout and correlation are complete. Return task ID, code/tests, handoff and real blockers.”
+
+### Current task status — implementation follow-up
+
+| Task | Current result | Remaining completion gate |
+|---|---|---|
+| R01/R02 | Retained and tested; frozen models/events unchanged | Hosted operator bindings/configuration still unverified |
+| R03 | Tested pure policy enforces all 15 checks | Authenticated independent merchant fetch, persistence/routes and protected checkout freeze |
+| R04/R11 | Product payment/issuance/reconciliation absent; durable idempotent PAUSE intents exist only | Persist payment operation before any issuance/charge; exact trusted binding, provider idempotency and unknown-outcome query |
+| R05 | Human durable stop, revoked SQL authority, cancellation records, atomic local rail latch and actual provider-pause outcome handling tested | Aditya cooperative cancellation, all-phase races, individual replacement/revoke propagation, live provider proof; no resume-old-authority route |
+| R06 | Provenance 201/409/422, ordered owner SSE through Next and durable rail-stream relay tested | Full Graph/inference/verification/recovery/reconciliation emitters, incident/source/history UI and agreed additive contracts |
+| R08–R10 | Identity/profile activity/stop UI build and lint pass | Human purchase confirmation, Mission Control, comparison, incident timeline, receipt and Attack Lab |
+| C03/C04 | Strict local rail, immutable grants, scope cap, concurrency/replay/expiry/stop Lua tested with real Redis | Complete trusted merchant/SQL activation/replacement invalidation protocol, actual Valkey8/PVC restart tests |
+| C05/C09 | Sandbox guard, mandatory signed ASA, safe non-spending card controls retained | ASA checkout correlation is absent: no provider approval claim. Issuance/lifecycle, real enrollment/HMAC/HTTPS and signed live integration proof remain |
+| C06 | Scoped Secret keys, financial NetworkPolicy and Valkey AOF/PVC declarations | Cameron deploys/verifies TLS, images, CNI policy, Secrets and volumes; no rollout performed here |
+| A11/A12/A13 | Still required and unfinished | Real bounded Graph, clean autonomous recovery, control polling/fencing, complete genuine events and live Akamai/injection proof |
+
+See [api/alignment-fixes-handoff.md](api/alignment-fixes-handoff.md) for exact request examples and owner actions. Do not rebuild another copy of the working policy or relax missing evidence to get a demo green.
 
 ## Cameron — trusted merchant, deterministic payment rail and infrastructure
 
@@ -306,7 +325,7 @@ remains required; scripted runs are labeled fixtures or fallback.
 
 ## R02 implementation handoff
 
-Historical original handoff; current source changes and the 90-test audit result are recorded in the audit. Build/readiness/PVC and mode-separated credential configuration are merged. The following original operator instructions remain useful for deployment verification, not work to redo blindly.
+Historical original handoff; current implementation results are recorded in the audit and alignment-fixes handoff. Build/readiness/PVC and mode-separated credential configuration are merged. The following original operator instructions remain useful for deployment verification, not work to redo blindly.
 
 R02 is implemented for the agreed merge/deployment handoff: migrations adopt existing
 UUID auth, LEASH identity/agent ownership, exact signed human confirmation, immutable
@@ -343,3 +362,11 @@ R03 is untouched and R04 must integrate confirmed authority, trusted checkout an
 a valid scoped grant before issuing. Existing signup/balance sandbox behavior is
 preserved and is not a verified purchase grant. Previously issued provider cards
 were not revoked; deployment of the patch remains a separate handoff to Cameron.
+
+## Next work in dependency order
+
+1. **Cameron:** implement authenticated canonical store/checkouts and immutable protected charge binding (C02/H04/H05). Inspect the new credential names and root-context images before deployment.
+2. **Rishi + Cameron:** connect trusted retrieval to the existing pure verifier; persist attempts/verification/payment operations before any side effect (R03/R04/R11), with tested SQL/Valkey ordering and replace/revoke propagation.
+3. **Aditya + Rishi:** agree additive typed Graph/unknown-state/event contracts, short-lived run scopes and cancellation polling (R12/H08). Aditya implements real bounded Graph, clean recovery and cooperative stop (A11–A13).
+4. **Rishi:** build confirmed-intent Mission Control/comparison/incident/history/Attack Lab on actual persisted states (R07–R10).
+5. **Cameron + Aditya + Rishi:** deploy/verify selected rail on existing LKE; run live inference and signature attack→automatic recovery plus S7, restart/outage/replay and <=3-minute rehearsal. Until then, label local tests and ASA limitations accurately.

@@ -1,5 +1,7 @@
 # Rishi / Aditya / Cameron interface alignment
 
+**Current implementation follow-up:** see [alignment-fixes-handoff.md](alignment-fixes-handoff.md) for identity-only signup, provenance/SSE, strict local rail, durable stop/provider control and remaining merchant/payment/Graph work. Earlier captures/test counts below describe their named revisions, not current deployed behavior.
+
 Inspected `origin/main` at `1818a43` and `origin/aditya-mcp` at `2e6f940` on
 October 10. Main contains Cameron's PRs #2/#3/#5 and Aditya's PR #4. Rishi incorporated
 this main, resolving the AGENTS.md conflict while preserving both lanes. The refreshed `aditya-2e6f940-wire.json` capture

@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
+import httpx
 from unittest.mock import patch
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from decide import AuthorizationAttempt, GrantSnapshot  # noqa: E402
 from handler import authorize  # noqa: E402
 from store import EVENT_STREAM, GRANT_KEY, MemoryGrantStore, RedisGrantStore  # noqa: E402
+from activity_notify import ActivityRelay, CURSOR_KEY  # noqa: E402
 
 URL = os.getenv("LEASH_TEST_VALKEY_URL", "")
 
@@ -107,6 +109,36 @@ class AtomicStoreTests(unittest.TestCase):
     with self.assertRaises(ValueError):
       self.store.put_grant(self.grant)
 
+  def test_two_grants_cannot_authorize_two_purchases_for_same_mandate_version(self):
+    self.assertEqual(authorize(self.store, self.attempt).result, "APPROVED")
+    second = replace(self.grant, grant_id="grt_second", instrument_token="ins_second")
+    self.store.put_grant(second)
+    attempt = replace(self.attempt, event_id="evt_second", instrument_token="ins_second")
+    self.assertEqual(authorize(self.store, attempt).reason, "purchase_scope_exhausted")
+    self.assertEqual(authorize(self.store, attempt).reason, "purchase_scope_exhausted")
+
+  def test_asa_legacy_unbound_grant_still_cannot_approve(self):
+    grant = replace(
+      self.grant,
+      checkout_id="",
+      checkout_hash="",
+      merchant_binding_id="",
+      grant_id="grt_legacy",
+      instrument_token="ins_legacy",
+    )
+    self.store.put_grant(grant)
+    attempt = replace(
+      self.attempt,
+      event_id="evt_legacy",
+      instrument_token="ins_legacy",
+      checkout_id="",
+      checkout_hash="",
+      merchant_binding_id="",
+    )
+    result = authorize(self.store, attempt, event_scope="lithic")
+    self.assertEqual(result.reason, "checkout_correlation_unavailable")
+    self.assertEqual(self.store.get_grant(grant.grant_id).status, "ISSUED")
+
   def test_revoked_mandate_cannot_be_reactivated_by_seed(self):
     self.store.set_mandate(self.grant.mandate_id, status="revoked", version=1)
     with self.assertRaises(ValueError):
@@ -116,6 +148,19 @@ class AtomicStoreTests(unittest.TestCase):
     result = authorize(self.store, replace(self.attempt, checkout_id="chk_subscription"))
     self.assertEqual(result.reason, "checkout_binding_mismatch")
     self.assertEqual(self.store.get_grant(self.grant.grant_id).status, "ISSUED")
+
+  def test_decline_evidence_is_redacted_before_rail_stream_persistence(self):
+    import json
+
+    secret = "4242424242424242"
+    self.assertEqual(
+      authorize(self.store, replace(self.attempt, descriptor=secret)).result, "DECLINED"
+    )
+    if isinstance(self.store, RedisGrantStore):
+      raw = self.store._r.xrange(EVENT_STREAM)[0][1]["record_context"]
+    else:
+      raw = json.dumps(self.store.audit_events[-1]["record_context"])
+    self.assertNotIn(secret, raw)
 
   def test_user_stop_does_not_stop_other_owner_or_reverse_authorization(self):
     self.assertEqual(authorize(self.store, self.attempt).result, "APPROVED")
@@ -151,3 +196,29 @@ class RealRedisAtomicTests(AtomicStoreTests):
 
     with patch.object(self.store, "commit_decision", side_effect=expire_first):
       self.assertEqual(authorize(self.store, self.attempt).reason, "grant_expired")
+
+  def test_wrong_stream_type_does_not_consume_or_cache_approval(self):
+    self.store._r.set(EVENT_STREAM, "incorrect-type")
+    self.assertEqual(authorize(self.store, self.attempt).reason, "state_store_unavailable")
+    self.assertEqual(self.store.get_grant(self.grant.grant_id).status, "ISSUED")
+    self.assertIsNone(self.store.get_event(self.attempt.event_id))
+
+  def test_durable_relay_outage_and_crash_replay_deliver_original_once(self):
+    self.assertEqual(authorize(self.store, self.attempt).result, "APPROVED")
+    relay = ActivityRelay(self.store, "http://api.test", "event-only-" + "x" * 32)
+    with patch("activity_notify.httpx.Client") as client:
+      post = client.return_value.__enter__.return_value.post
+      post.return_value = httpx.Response(503)
+      self.assertFalse(relay.deliver_once())
+      self.assertIsNone(self.store._r.get(CURSOR_KEY))
+      post.return_value = httpx.Response(201)
+      self.assertTrue(relay.deliver_once())
+      original = post.call_args.kwargs["json"]
+      self.assertEqual(original["data"]["result"], "APPROVED")
+      self.assertEqual(original["user_id"], self.grant.user_id)
+      self.store._r.delete(CURSOR_KEY)  # Crash after API commit, before cursor ack.
+      post.return_value = httpx.Response(409)
+      self.assertTrue(relay.deliver_once())
+      self.assertEqual(post.call_args.kwargs["json"], original)
+      self.assertFalse(relay.deliver_once())
+    self.assertEqual(self.store._r.xlen(EVENT_STREAM), 1)

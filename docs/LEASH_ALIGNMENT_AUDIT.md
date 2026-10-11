@@ -1,10 +1,180 @@
 # LEASH product, architecture and implementation alignment audit
 
+## Current implementation follow-up on main
+
+The master specification remains the desired-state baseline. This follow-up integrates Cameron's activity/local rail (`674ef75`) and ASA adapter (`a9e8cba`) with authorized implementation fixes (`09ee628` and the integration change containing this report). Main is retained; teammate commits are preserved. No reset/stash/branch switch, shared database mutation, deployment, provider operation or teammate contact occurred. Frozen R01 `models.py` and `events.py` are unchanged. The original documentation-only audit is retained below as history; it is not current implementation status.
+
+**Verdict: materially stronger foundations, still not an aligned or demo-ready complete MVP.** Identity-only signup, sandbox-only provider access, registered provenance, persisted owned SSE/Next proxy, pure semantic policy, atomic strict local rail, durable rail-event delivery and human stop/provider PAUSE intent now work in their tested scopes. Trusted merchant retrieval/protected charge, product payments/issuance/reconciliation, real Strands Graph/clean automatic recovery, cooperative stop, ephemeral scopes and complete UI/events remain missing or partial. A seeded backend fixture grant is not a verified purchase. An ASA adapter/HMAC secret is not a proven Lithic authorization integration.
+
+Rishi's later implementation/testing/main-push authorization supersedes the earlier audit-only scope without transferring lane ownership or waiving contract-only review. [AGENTS](../AGENTS.md), [spec26](LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026), [build plan](../Leash-build-plan.md) and [current callable handoff](../api/alignment-fixes-handoff.md) describe the same scope. IT/IU/PI/M/BC/UV retain the status definitions in the historical audit; evidence is local unless stated otherwise.
+
+## Critical remaining deviations and exact safe fixes
+
+| Severity | Current evidence / risk | Owner and required next fix |
+|---|---|---|
+| **P0 financial chain** | [checkout_verifier.py](../api/checkout_verifier.py) is pure policy; [main.py](../api/main.py) has no product `/payments` or trusted checkout retrieval. `services/store/` remains absent. Caller-supplied policy booleans and valid schemas are not independent evidence. | **Cameron C02/H04/H05:** authenticated canonical source/freeze/bind/protected charge. **Rishi R03/R04/R11:** retrieval/current signature validation, persistent attempts/verification and operation before side effect. No usable grant until all steps succeed. |
+| **P0 Graph/recovery/cancel** | [runs.py:run_shopper](../services/agents/shopper/runs.py) still executes a single Agent, with in-memory progress. [workflow_control.py:run_control](../api/workflow_control.py) exists but workers do not poll. No automatic quarantine/clean recovery, fencing or bounded Graph. | **Aditya A11–A13:** actual SDK Graph, typed backend branches, deterministic exclusions/clean contexts, bounded recovery, cancellation checks and durable lease/fencing with Rishi. No purchase after unknown/hard decline/success. |
+| **P0 cross-store lifecycle** | [mandate_service.py](../api/mandate_service.py) individual replace/revoke does not propagate to Valkey; [store.py](../services/webhook/store.py) enforces only its current authority projection. Global human stop is coordinated, but production grant activation/order is absent. | **Rishi + Cameron:** tested versioned activation/invalidation protocol, durable operation identity, safe issuance and reconciliation. Do not treat pending SQL audit delivery as effective financial revocation. |
+| **P0 ASA correlation** | [asa.py](../services/webhook/asa.py) authenticates origin but gets no trusted exact checkout/SKU association. [handler.py](../services/webhook/handler.py) blocks ASA approval even for a legacy unbound grant. Actual ASA is not purchase-ready. | **Cameron + Rishi:** merchant-enforced checkout/grant/instrument correlation established before charge; valid signed sandbox approval/decline only after that protocol exists. Choose labeled local rail meanwhile; do not copy grant bindings onto an arbitrary provider charge to invent proof. |
+| **P1 credential/session scope** | [principals.py:agent_from_token](../api/principals.py) is static owner/agent/mode, without expiry/run/tool/audience. [auth.tsx](../web/src/lib/auth.tsx) uses localStorage JWT; server token revocation/TLS/provider migration unresolved. Store caller credential is not yet a user/session scope. | **Cameron auth lead + Rishi R12 + Aditya:** preserve UUID identity, agree provider/equivalent, verify backend sessions, ephemeral scoped tools and owned canonical checkout. No competing auth framework introduced here. |
+| **P0 full evidence/product** | [activity.py](../api/activity.py) persists available real events, but no Graph/inference/recovery/reconciliation emitters or incident/payment state exist. Profile feed/stop is not the six required views. | **Aditya A13 + Rishi R06/R07–R10:** agreed additive event contracts, full lifecycle capture, confirmed-intent UI/comparison/incidents/history/Attack Lab. No fabricated animation or paid/settled claim from grant/model output. |
+| **P1 deployed source/boundary** | Public read-only checks: API health/ready200; rail HMAC configured true; `/rail/openapi.json` still public200. Source now narrows rail proxy, blocks `/backend/internal`, restricts pod keys and declares AOF/PVC/NetworkPolicy. These fixes are not deployed proof. | **Cameron C06/C09:** build/root image import checks, deploy reviewed main, verify HTTPS/CNI/key scopes/PVC/AOF restart and source digest. No live key value was read/printed. |
+| **P0 live acceptance** | Six E2E skipped; two live inference tests deselected. No actual merchant purchase, successful live injected attempt, automatic recovery, real provider pause or <=3-minute rehearsal was run. | **All owners / Aditya A07:** complete dependencies then run actual selected-runtime scenarios S1–S7, fault/replay/restart and timed live rehearsal. Clearly label fixtures/local rail and any recording. |
+
+## Current full requirements-to-code matrix
+
+These 100 rows supersede historical H-Q rows for current source status. References F1–F10 identify executed evidence below. An IT entry is limited to the behavior/environment explicitly described, not an inferred full product implementation.
+
+| ID / master section | Requirement | Current source/evidence and implementation status | Owner / priority / next dependency |
+|---|---|---|---|
+| Q01 / 0,21,23 | Inspect current main/worktree/integrations; preserve teammates; documentation audit only | PI: current main integrates 674ef75/a9e8cba and authorized fixes. Deployed API ready200 and rail HMAC configured; public wildcard OpenAPI still reachable F10. Actual rollout revision unknown. | All / P0: reconcile live revision before claims |
+| Q02 / 1–3,16 | FinTech intent→behavior→trusted checkout→deterministic spending product | PI: identity/authority/MCP, pure verifier, strict local rail and persisted evidence exist. Complete merchant→verified payment→Graph/product UI chain absent. | Rishi+Cameron+Aditya / P0 |
+| Q03 / 2,20 | Genuine three-minute sponsor/demo proof | M: no rehearsal or end-to-end result; demo script is a target | Aditya with both / P1: actual stopwatch/logs |
+| Q04 / 6 | Backend-verified human session and stable owner | IT: `auth.py:get_current_user`, `principals.py:leash_user_id`; JWT/UUID owner tests F1; custom auth only | Cameron auth lead + Rishi / P0: provider decision/adapter |
+| Q05 / 6,21 | Preserve agreed auth provider work; no competing framework | PI/UV: existing UUID/JWT preserved; no competing framework. Cameron auth-provider decision and session hardening still needed. | Cameron+Rishi / P1 H03 |
+| Q06 / 6,17 | Secure session transport/storage/revocation and appropriate CSRF | PI: Bearer JWT/localStorage and seven-day default retained. Logout records an event but does not revoke JWT; deployed public HTTP/TLS/session scope remains a gap. | Cameron+Rishi / P1: TLS/session design; compromised-session protection partial |
+| Q07 / 6 | Short-lived user/run/mandate/version/tool/audience agent credentials | PI: `principals.py:agent_from_token/bind_agent` owner/mode enable/rotation F1; no expiry/audience/run/tool claims | Rishi R12+Aditya / P0 |
+| Q08 / 6,11 | Authenticated service/merchant/provider identities | PI: service/MCP auth plus distinct rail control/charge/event credentials and mandatory ASA HMAC implemented F1/F3/F4/F5. Canonical merchant/session auth absent. | Cameron+Aditya+Rishi / P0 |
+| Q09 / 6,18 | Object ownership on all reads and writes, including SSE | PI: owned mandates/cards/runs/provenance/history/SSE/control and internal owner consistency tested F1/F6. Purchase/checkout/incident routes still absent. | Rishi / P0: owner tests per endpoint |
+| Q10 / 4,7 | Only human confirms exact structured authority; no agent privileges | IT: `mandate_routes.py:MandateConfirmation/approve_mandate`, `signing.py`; role/version/hash/signature negatives F1 | Rishi R02 retained; UI confirmation still Q59 |
+| Q11 / 7 | Immutable original instruction/constraints/versions; signed/hash distinction | IT: `models.py:PurchaseMandate/mandate_hash`, `mandate_service.py:version_record`, SQL immutable triggers, Ed25519 F1 | Rishi; no passkey/AP2 claim |
+| Q12 / 7 | Strict cents, UTC, supported currency/quantity/recurrence/attribute validation | IT for strict frozen shapes and pure policy F1; no complete trusted retrieval/purchase path. | Rishi R01 retained; R03 must enforce |
+| Q13 / 7,9 | Under $40 means <4000, full total including charges | PI: pure verifier tests 3999/4000 and item+tax+shipping totals F1. Human semantic parser/confirmation UI and explicit additional fee/discount mapping pending. | Rishi+Cameron / P0: freeze zero fees/discounts for fixture or additive validated mapping |
+| Q14 / 7 | Ambiguity requires human structured clarification | M: no actual interpretation/confirmation purchase UI | Rishi+Aditya / P1; never silently accept model draft |
+| Q15 / 7 | Expiring active authority / replacement / revocation / history | IT for signed immutable SQL lifecycle F1. Kill stops all owned current authority; individual replace/revoke→rail propagation pending before grant issuance. | Rishi; cross-rail invalidation Q38 missing |
+| Q16 / 7,15 | Enforce one successful checkout/quantity; consumed/fulfilled scope | PI: quantity/scope pure checks and atomic one-success-per-mandate-version cap tested F1/F5. Product reservation/fulfillment/operation integration absent. | Rishi+Cameron / P0 R04/C04 |
+| Q17 / 6,18 | Registered live/scripted run owner/mode/version/hash before traces | IT: `mandate_service.py:register_run`, `shopper/registration.py/credentials.py`; F1/F2 | Rishi+Aditya; actual deployed provisioning UV |
+| Q18 / 3,18 | Human can initiate/manage purchase workflow | PI: API proposes only via agent bearer; human confirm/read/replace/revoke exists; web only auth/profile | Rishi / P1: UI uses scoped draft proposal path; no grant from initiation |
+| Q19 / 8 | Separate attackable listings from authenticated canonical merchant | PI: MCP listing fixtures/evidence exist F4; `services/store` absent | Cameron C02 / P0 |
+| Q20 / 8,17 | Good charger and bad subscription same merchant/2999/USD | PI: `tests/decision_cases.yaml` + listing fixtures encode facts; no actual canonical server/charge | Cameron+Aditya / P0; aliases preserved |
+| Q21 / 8,10 | Safe compliant alternative outside quarantined source/SKU | M: no store/recovery exclusion registry | Cameron C02+Aditya A12 / P0 |
+| Q22 / 8,18 | Independent server fetch configured merchant, never agent URL/cart | M: configured authenticated canonical merchant retrieval remains absent. api/checkout_verifier.py is pure policy, never an evidence fetcher. | Rishi R03+Cameron H04 / P0 |
+| Q23 / 8,9 | Trusted SKU/category/attributes/quantity/subscription/recurrence | PI: typed item facts and pure deterministic category/attribute/quantity/recurrence checks tested F1; authenticated merchant facts remain pending. | Rishi R03 / P0; guardian not proof |
+| Q24 / 8,9 | Ownership, checkout revision/hash/expiry/provenance integrity | PI: frozen snapshot hashing/expiry/owner checks and pure verifier F1; protected merchant retrieval/freeze/revision association absent. | Rishi+Cameron / P0 |
+| Q25 / 8,9 | All constraints deterministic, unknown category/evidence fails closed | PI: api/checkout_verifier.py:verify_checkout implements all 15 checks and fail-closed unknowns, tested F1. No API retrieval/verification/payment integration. | Rishi R03 / P0: pure verifier tests |
+| Q26 / 9 | Stable typed reasons/observed checks/evidence, no model override | PI: pure policy returns typed verified/blocked checks/reasons F1; no model override. Persistent attempt/evidence/API orchestration pending. | Rishi R03 / P0 |
+| Q27 / 9 | Merchant/currency/strict total/fee arithmetic/geo/shipping controls | PI: pure merchant/currency/full-total/shipping predicates tested F1; free-text location fails closed, no complete fee/merchant normalization. | Rishi+Cameron / P0 |
+| Q28 / 8,12 | Frozen exact checkout-to-charge correlation prevents equal-price SKU substitution | M: Store MCP `complete_checkout` forwards to absent merchant; no binding enforcement | Cameron C02+Rishi R04 / P0 |
+| Q29 / 12 | Usable instrument only after verified purchase; correct SINGLE_USE lifecycle | PI: signup issuance removed, direct /cards blocked F1. Existing cards are not auto-revoked by source changes; Kill records owned PAUSE outcomes. Verified SINGLE_USE issuance absent. | Rishi+Cameron / P0 |
+| Q30 / 12 | Sandbox-only accurate provider selection; local simulator actual policy | IT for sandbox-only URL guard F1 and actual local policy F5; no live sandbox approval claim. | Cameron C03/C05 / P0 |
+| Q31 / 12 | Short-lived exact scoped one-use grant bound to complete authority/checkout/instrument | PI: complete frozen grant installation, <=1800-second lifetime, immutable bindings and atomic consumption tested F5. Verified production issuer/persistence absent. | Rishi R04+Cameron C04 / P0 |
+| Q32 / 12 | Activation ordering/setup failure unusable | M: protected prepare/bind/activate/rollback protocol still absent. Signup no longer bypasses it by issuing a card. | Rishi+Cameron / P0 |
+| Q33 / 12,15 | Payment operations before side effects; stable provider idempotency | PI only for non-spending PAUSE intent before provider call (0006) F1. Purchase/card-issuance operation ledger/idempotency remain absent; those HTTP side effects disabled. | Rishi R11+Cameron C05 / P0 |
+| Q34 / 12,15 | Unknown outcome reconciles; no new purchase/card on timeout | PI: financial MCP timeouts say unknown/no additional purchase; provider PAUSE intent safely retries same state F1. Payment operation lookup/reconciliation/Graph gate absent. | Rishi+Cameron+Aditya / P0 |
+| Q35 / 12 | Verified/grant/card/pending/authorized/settled meaning separate | PI: `PaymentResponse` documents permission, distinct `payment_result` F1; no durable operations or settlement input | Rishi+Cameron+Aditya / P0: additive mapping |
+| Q36 / 12 | Actual Lithic ASA enrollment/schemas/signatures/live signed authorization | PI/BC: services/webhook/asa.py HMAC/strict normalization/HTTP decline tests F5; deployed health reports key configured F10. Trusted checkout correlation absent so source ASA cannot approve. No enrollment/signed provider round trip exercised. | Cameron C05 / P1; choose actual simulator until proven |
+| Q37 / 12,15 | Pure deterministic ASA/local rail, no LLM/SQL/merchant network | IT for pure decide/atomic local handler with Valkey-only critical I/O F5; relay/provider calls outside authorization path. Complete merchant integration and live ASA approval absent. | Cameron C03/C04 / P0 |
+| Q38 / 12,13,15 | Valkey atomic consume + original decision + event commit; revocation serialization | PI: consume/cache/rail-stream Lua, user-stop serialization and fenced API relay tested with real Redis F5/F6. SQL/Valkey replacement/issuance consistency protocol still missing. | Cameron C04+Rishi R04/R05 / P0 |
+| Q39 / 12,15 | Exact duplicate cached response; distinct parallel requests consume once | IT for local handler: 16 distinct concurrent events consume once; original duplicate preserved, two-grant cardinality tested F5. Not a live provider or merchant race proof. | Cameron C04/C07 / P0 |
+| Q40 / 12,19 | Altered duplicate fingerprint/unsupported request/authentication errors | IT for local altered duplicates/strict HTTP, mandatory ASA auth/typed errors and scope-separated event IDs F5. Unsupported provider request coverage remains bounded. | Cameron C05/C07 / P0 |
+| Q41 / 12,15 | Grant expiry/old version/cardinality/reservation/invalidation across replicas | PI: server-clock expiry/current-version/one-success/user-stop checked atomically F5; immutable replay tombstones retained. SQL activation/replacement propagation and deployment restart proof pending. | Cameron+Rishi / P0 |
+| Q42 / 12 | Once-only authorized card detail delivery; store only token/last4 | PI: direct card routes omit PAN F1; wrapper optional details return, no durable delivery marker/authorization flow | Rishi R04+Cameron C05 / P0 |
+| Q43 / 12,17 | Relevant provider card pause/close/expiry/reconciliation | PI: provider pause/close adapter validates card identity/state; durable owned PAUSE intent/outcomes and timeout retry tested with mocks F1/F5. No live pause, provider expiry or purchase reconciliation proof. | Cameron C09+Rishi R05/R11 / P0 if provider selected |
+| Q44 / 12 | Actual decision source/rail/latency measured, ASA deadline met | PI: local HTTP measures actual decision latency/source; no p50/p95 target or provider deadline performance proof. Relay does not fabricate a latency. | Cameron C09 / P1; no fabricated numbers |
+| Q45 / 10,11 | Real Strands shopper with genuine MCP tool invocation | IT SDK subprocess MCP wiring with substitute model/API/store F2. Genuine Akamai inference remains BC; source now attributes only configured provider. | Aditya A02/A03; no live claim |
+| Q46 / 10 | Real SDK Graph / all required nodes / typed conditional edges | M: single Agent D05; local SDK GraphBuilder introspection T9 confirms capability | Aditya A11 / P0 |
+| Q47 / 10 | Candidate/node/time/cost bounds and truthful terminal/exhaustion | M: threadpool max2 and test polling timeout do not bound workflow | Aditya A11/A12 / P0 |
+| Q48 / 10 | Guardian explains linked genuine evidence without financial authority | IT for advisory evaluator: `guardian/__init__.py:evaluate`, known source filtering, strictness/model fallback F2; integrated incident UI absent | Aditya A05+Rishi R06 / P1 |
+| Q49 / 10 | Source/SKU/checkout quarantine and fresh uncontaminated context | M: no containment controller; manual new-run tests D06 | Aditya A12 / P0 |
+| Q50 / 10 | Autonomous unchanged-mandate recovery without human restart | M: S6 creates new run manually, no Graph D06 | Aditya A11/A12 + backend / P0 |
+| Q51 / 10,12 | Recovery forbidden after hard decline, unknown outcome or authorization | PI: unknown-outcome advice corrected and one-success rail cap exists. Actual recovery/operation controller absent; cannot prove Graph stops financial retries. | Aditya+Rishi+Cameron / P0 |
+| Q52 / 10,15 | Cooperative cancellation/recheck before every side effect | PI: durable cancellation and agent-owned /agent-runs/{id}/control F1. RunManager/Graph does not poll it; cooperative side-effect cancellation missing. | Aditya A12+Rishi R05 / P0 |
+| Q53 / 10,15 | Durable progress/exclusions/leases/fencing, restart safety | PI: SQL run registration plus durable cancellation/pause operations F1. Run progress/exclusions/final output/leases/fencing still process-local or absent. | Rishi R11+Aditya / P0 |
+| Q54 / 11 | Official MCP adapters, four finance + shopping tools; no direct fallback | IT official authenticated thin MCP adapters F2–F4; timeout warning improved. Financial targets and canonical merchant remain unfinished. | Aditya retained; Rishi/Cameron implement targets |
+| Q55 / 11,17 | Store-only browse/off-origin redirects reject; arbitrary internal URL denied | IT: `mcp-store/main.py:resolve_store_target/fetch_store_page`, F4 | Aditya; configured-origin trust/egress still Cameron |
+| Q56 / 11,18 | MCP tool authority derives authenticated run scope; direct bypass equally enforced | PI: distinct local charge/control/publisher credentials and internal web-route block F5/F6. Short-lived run/mandate/tool scope and real protected merchant missing. | Aditya+Rishi+Cameron / P0 |
+| Q57 / 10,14 | Original source hash, redacted snapshots and actual stored hash | IT for local/mock paths: `evidence/snapshots.py`, `hooks.py` F2/F4; real object storage BC | Aditya+Cameron; record real storage availability |
+| Q58 / 5,10 | Genuine Akamai Strands tool-calling, provider fallback truth | BC: configured-provider attribution fixed, matched env/model settings tested F2. Two genuine inference tests deselected; no live Akamai tool-call proof. | Aditya A02 / P0: actual round trip/latency/failure evidence |
+| Q59 / 3,16 | Mission Control/explicit human semantic confirmation/original intent visible | M: home auth card only; no purchase UI; signature API exists Q10 | Rishi R08 / P1 |
+| Q60 / 16 | Live activity/Graph/clean recovery and readable comparison | PI: genuine profile activity/SSE source exists F6/F7; required Graph/recovery/comparison panels absent. | Rishi R08/R09+Aditya events / P1 |
+| Q61 / 16 | Incident timeline/evidence inspection and genuine history/receipts | PI: owned persisted activity history works F1/F6; complete incident/receipt/evidence proof-chain reads and UI absent. | Rishi R06/R09/R10 / P1 |
+| Q62 / 16 | Attack Lab changes listing only, not mandate/outcome | PI: malicious listing fixtures; no merchant toggle/UI | Cameron C02+Aditya A08+Rishi R09 / P0 |
+| Q63 / 13 | Human-only durable idempotent Kill Switch owner endpoint/UI | PI: human-only durable stop endpoint/control and UI compiled; SQL/rail/owned provider-intent tests F1/F5/F6. Actual browser interaction/cooperative Graph stop unverified. | Rishi R05 / P0 |
+| Q64 / 13 | Atomic unused-grant invalidation, stop Graph/recovery; actual effective ack | PI: unused grant stop/revocation and effective rail ack tested F5/F6. Cancellation survives SQL restart, but workers do not cooperate; replace/revoke propagation pending. | Cameron C04+Rishi R05+Aditya A12 / P0 |
+| Q65 / 13 | Provider pause requested/confirmed/failed/unknown, no reversal claim | PI: durable provider intent and actual confirmed/unknown response handling F1/F5; no prior authorization reversal claim. Provider calls mocked; live supported controls BC. | Cameron C09+Rishi / P0 |
+| Q66 / 13,19 | Kill races at every phase/restart/repeated clicks/cross-owner/failure | PI: local read→commit stop/revoke races, owner isolation, repeats, expiry and provider timeout tests F1/F5; all Graph/issuance phases and deployment restart remain untested. | All within lane / P0 S7 |
+| Q67 / 14,15 | Durable append-only state-event coupling and outbox | PI: commit-ordered SQL audit + consume/decision/rail-stream atomic coupling + fenced relay tested F1/F5/F6. Purchase-operation state/events absent. | Rishi R06/R11+Cameron stream / P0 |
+| Q68 / 14,18 | Authenticated provenance intake, sanitization/dedup/recovery | IT for bounded registered-run /provenance sanitization/ownership/duplicate semantics F1 and real disk spool F2; original rejected spool needs operator-controlled reingestion. | Rishi R06+Aditya / P0 |
+| Q69 / 14 | Comprehensive event taxonomy captures real auth/Graph/inference/all financial/recovery events | PI: auth/mandate/tool/source/authorization/stop/provider-control events persisted. Inference/Graph/verification/recovery/reconciliation lifecycle emitters/contracts missing. | Rishi contracts/R06+Aditya A13+Cameron rail / P0 |
+| Q70 / 14 | Product SSE persisted id/event/data, heartbeat/reconnect/replay/resync | IT for persisted owned SQL SSE, heartbeat/after/Last-Event-ID, actual Next streaming and reconnect F1/F6. Full lifecycle coverage Q69 remains partial. | Rishi R06+Cameron integration / P0 |
+| Q71 / 14,15 | Authorized history/cursors/stream ownership, refresh reconstruction | IT for owner history/stream replay F1/F6; complete incident/receipt/source reconstruction still absent. | Rishi / P0 |
+| Q72 / 14,15 | SSE reconnect/browser refresh never starts new Graph or charge | IT: SSE GET/reconnect only reads history and never starts run/charge F1/F6. Distributed worker/payment restart safety remains a separate missing requirement. | Rishi+Aditya / P0 |
+| Q73 / 14 | No secrets/PAN/private prompts/CoT in events, snapshots or logs | PI: frozen redaction and bounded intake tested; unsafe exception-text logs replaced by type-only warnings F1/F2/F3/F4/F5. Full future event/log routes need tests. | All / P0 for financial data; synthetic transport/log tests |
+| Q74 / 14,16 | Actual agent/rail/recording labels; block-before-payment != provider decline | PI: sandbox guard, local/ASA rail namespace and configured model attribution corrected. Actual live/scripted evidence retained; complete UI/provider outcome chain absent. | All / P1 |
+| Q75 / 14 | Source→tool→trusted checkout→decision incident linkage; cautious causality | PI: source/tool hashes and guardian known citations F2/F4; no persisted complete incident | Aditya+Rishi / P1 |
+| Q76 / 15 | PostgreSQL durable domain and recoverable financial records | PI: durable identity/mandate/run/audit/cancellation/provider-PAUSE operation tables F1. Checkout/grant/payment/reconciliation/incident/milestone SQL tables absent. | Rishi R03/R04/R06/R11 / P0 |
+| Q77 / 15 | SQL/Valkey outages fail closed; no stale cached grants | PI: DB/Valkey failure closed, wrong stream type prevents consume, original decision survives delivery outage/replay F1/F5. Issuance/provider crash reconciliation absent. | Rishi+Cameron / P0 |
+| Q78 / 15 | MCP/inference outage bounded fail-closed, no tool bypass | PI: MCP connection errors stop run F2; full Graph budgets/payment ambiguity M | Aditya / P0 |
+| Q79 / 5,21 | Preserve actual LKE topology; no Compose replacement | IT for preserving existing topology; 18 manifest documents parse F9. Source adds scoped keys/financial policies/Valkey PVC; live cluster state UV. | Cameron C06 / P0; no deployment performed |
+| Q80 / 5 | Repository-root API image copies runtime/shared/migrations | IU: root API and webhook images copy runtime/shared/migrations including new modules. Docker daemon unavailable; no actual image import/build executed. | Rishi image + Cameron build / P1: actual image import test |
+| Q81 / 5,15 | Ready database/schema vs health liveness | IT local schema/DB readiness failures F1; public health/ready200 F10. Readiness is not proof of complete payment safety. | Cameron+Rishi; not full security readiness |
+| Q82 / 5,15 | Persistent trace spool survives pod restart | IU: PVC 5Gi RWO /app/trace-spool declared; local restart outbox tests F2; actual mount UV | Cameron / P1: PVC/image rollout proof |
+| Q83 / 6,15 | TLS, service auth, NetworkPolicy, scoped Secrets and safe public boundary | PI: explicit pod Secret allowlists and financial NetworkPolicy added, default-private MCP and exact signed ASA proxy; internal API browser route blocked F6/F7/F9. Actual CNI/TLS/rollout/Secrets UV. | Cameron+endpoint owners / P0 |
+| Q84 / 5,15 | Database/Valkey availability and safe chosen runtime | PI: real disposable PostgreSQL/Redis tests pass; Valkey PVC/AOF declarations parse F9. Actual cluster persistence/restart/availability unknown. | Cameron / P0: read-only resource proof/Valkey setup |
+| Q85 / 5,21 | Shared installability and reproducible imports/builds | PI: namespace marker/source-copy/PYTHONPATH works F1–F4; shared/pyproject.toml absent | Cameron C01; service owners image imports / P1 |
+| Q86 / 18,21 | Frozen contracts, OpenAPI mappings and generated frontend types | PI: R01 accepted/frozen; actual OpenAPI inspected; generated api-types missing; new Graph/unknown/event concepts not yet agreed | Rishi H01/H12 with all three / P0 |
+| Q87 / 18,21 | Handoff callable valid/failure examples + actual tests + limits | PI: callable current handoff api/alignment-fixes-handoff.md includes status bodies/env/tests/limits. Merchant/payment/Graph handoffs still require owners. | All named sender owners / P0 |
+| Q88 / 17 | Core fraud/threat matrix covers prompt/tool poisoning, SKU/recurrence/budget/ownership/replay/kill/ambiguity/recovery | PI: real pure verifier/local rail/stop/trace negatives now tested. Merchant binding, Graph recovery, issuance ambiguity and full E2E remain missing. | Rishi/Cameron/Aditya / P0; Q19–Q78 |
+| Q89 / 17 | Compromised session/stolen data/disputes have bounded partial claims | PI: JWT validation/redaction, no server session revocation/reauth or payment disputes; no broad protection proof | Cameron+Rishi / P1; disclose partial scope |
+| Q90 / 17 | Dishonest merchant/fulfillment/counterfeits/ACH/full chargeback controls outside guarantee | IT as documented scope only: 23.4/26.7 limits retained; no corresponding capability claimed | All; future work, not security coverage |
+| Q91 / 19 | Unit/mock integration/security matrix distinct from live provider/model E2E | IT for transparent evidence: F1–F10 separate unit/mock/local-engine/transport from live proof. Six E2E skipped, two live inference deselected. | All; cannot mark E2E complete |
+| Q92 / 19 | S1 actual legitimate charger authorization/receipt | M: test exists but skipped T8, merchant/payment absent | All / P0 |
+| Q93 / 19 | Combined live S2→S6 attack/block/quarantine/automatic unchanged-authority recovery | M: manual two-run test skipped T8; no Graph/live injection proof | Aditya+Rishi+Cameron / P0 |
+| Q94 / 19 | S3 exact boundary/tax/shipping overspend no instrument | PI: pure verifier tests total/tax/shipping/3999 boundary F1; no full trusted merchant/payment E2E result. | Rishi+Cameron / P0 |
+| Q95 / 19 | S4 incomplete/untrusted/stale evidence no grant | PI: pure verifier fails missing authentication/unknown evidence F1; no runtime authenticated retrieval→no-grant product flow. | Rishi+Cameron / P0 |
+| Q96 / 19 | S5 expiry/replay/parallel attempts/altered duplicates | PI: real Redis local expiry/replay/concurrency/altered payload enforcement F5. Full product E2E scenario is skipped. | Cameron+Rishi+Aditya / P0 |
+| Q97 / 19 | S7 master Kill Switch storyline | PI: actual local API/rail/Next stop+persisted SSE smoke F6; no real Graph cancellation or live provider/full S7 demo. | All / P0 |
+| Q98 / 19 | Faults: direct bypass, provider lost response/DB failure, worker restart, model outage, malformed findings | PI: local atomic late-stop/expiry/wrongtype, duplicate/outage/crash-relay, SQL rollback and provider-PAUSE unknown tests. Payment-provider lost-success/issuance/worker recovery untested. | All / P0 |
+| Q99 / 20 | Safe reset, no grant reuse/history deletion, labeled recorded fallback | PI: live/scripted distinct mandate/token/lane docs/tests; actual reset/rehearsal UV; manual recovery outdated | Aditya+Cameron+Rishi / P1 |
+| Q100 / 22,24,26 | Dependency order, all critical differentiators retained, truthful completion | PI: current docs/100-row matrix reflect tested fixes and preserve every critical requirement. Complete MVP/three-minute rehearsal still not demonstrated. | All; dependency tasks below |
+
+## Current executed tests and verification
+
+| Evidence | Actual result | Scope and limit |
+|---|---|---|
+| F1 API | **107 tests pass**, 23.044s, including **25 real disposable PostgreSQL tests** and the opt-in stack smoke. API/shared correctness Ruff passed. | Signed immutable authority, identity-only signup, provenance/ownership/dedup, replay/control, provider PAUSE intent with mocked HTTP, pure verifier. No merchant/purchase/provider integration. Stack case is included in this total; scope in F6. |
+| F2 Agents | **131 passed, 2 live inference deselected**, 47.15s, uv on PATH; the two subprocess MCP tests also passed separately. | Real SDK MCP clients/servers with substitute API/store/model, advisory guardian/hooks/outbox and truthful configuration attribution. No genuine model inference. |
+| F3 Leash MCP | **33 passed**, 8.18s in this implementation follow-up. | Thin tool/schema/auth/mocked backend and unknown-timeout guidance; no actual product payment target. |
+| F4 Store MCP | **40 passed**, 10.14s in this follow-up. | Origin/redirect/auth/evidence/snapshot and substitute merchant forwarding. No controlled merchant charge. |
+| F5 Rail | **45 tests passed**, 0.946s; 14 run against real isolated Redis, plus HTTP/memory/ASA units. **16 rail YAML cases** pass through one matrix test. | Atomic consume/cache/stream, expiry/late stop/revoke, scope/tamper/replay/concurrency, strict credentials/lifetime/HMAC, persisted event redaction and durable relay outage/crash replay. Redis 6.0.16 test engine, not deployed Valkey8/Lithic. Verifier/merchant/handler/e2e YAML stages are not all executed by that runner. |
+| F6 Stack | **1 passed**, included in F1's 107-test run after the final internal-proxy guard and rewrite-order fix. | Real disposable PostgreSQL + Redis + API uvicorn + rail process + built Next standalone. Seeded backend fixture grant, human stop/real acknowledgment, rail→API delivery, real persisted SSE and browser internal-route rejection. No merchant/model/provider/full purchase demo. |
+| F7 Web | **pnpm lint and pnpm build pass**; final build includes streaming proxy and internal API guard. | TypeScript/ESLint/standalone source build only; no interactive browser test or deployed image proof. Existing .env.local loaded by build, contents not read/printed. |
+| F8 Live E2E | **6 skipped**, 0.12s (`LEASH_E2E=1` not enabled). | Collection only; none of S1–S7/full Graph acceptance claimed. |
+| F9 Static integration | **18 Kubernetes documents parse**, explicit Secret allowlists (no envFrom), real Bash syntax checks pass with LF. Frozen models/events diff empty; runtime files copied by owner Dockerfiles. | No Kubernetes API validation/rollout, Docker image build, Secret value read or CNI/PVC inspection. Financial policies require actual CNI support. |
+| F10 Public read-only | `/backend/health`200, `/backend/readyz`200, `/rail/health`200 with HMAC configured true; `/rail/openapi.json`200 lists both adapters/internal routes. | Reachability/configuration flag only; exact image/source and authorization behavior unknown. No POST/provider/sandbox mutation. Broad deployed proxy is not the new narrow source configuration. |
+
+An early rail test invocation from root failed because the incoming ASA test lacked its import path; corrected and final suite passes. The first relay attempt used Redis6-unsupported exclusive XRANGE IDs; changed to compatible XREAD, then outage/crash replay passes. First earlier Next cold-start smoke exceeded its short timeout; deadline/child cleanup corrected and later smoke passes without leaked child pipes. Passing final checks do not erase these limits or establish live integration.
+
+## Resolved findings and outstanding configuration
+
+- Historical D01/D02: signup card issuance and production/arbitrary-provider endpoint support removed; negative tests pass. Existing sandbox cards were not mass-revoked by this source edit.
+- D03: signup provider side-effect/orphan path removed; durable non-spending PAUSE operations added. General issuance/charge operation identity/reconciliation is still missing.
+- D04/D07/D08: real pure policy/local rail/stop/trace/SSE/relay foundations added; full trusted merchant/payment/Graph/full lifecycle gates remain partial.
+- D10: blind retry guidance removed. D13: exception-text logging narrowed and provider attribution is configuration-based. D14: web effect lint fixed. D15: source Secret allowlists and financial policies added; actual deployment verification pending.
+- R01 frozen contracts unchanged. Graph/reconciliation/new lifecycle concepts require a dedicated additive contract PR/all-three agreement. No ownership change is implied by narrow fixes.
+- Humans must resolve Cameron's auth-provider/equivalent choice and session/TLS plan; merchant trust/taxonomy/session/freeze/binding and fees/discounts mapping; SQL/Valkey activation/revocation/fencing; concrete Graph bounds; actual provider/HTTPS/enrollment and object-storage capability. Mere env-variable names are not proof.
+- Cameron supplies distinct WEBHOOK_INTERNAL_TOKEN, WEBHOOK_CHARGE_TOKEN and RAIL_EVENT_TOKEN, plus required signed ASA settings if that adapter is exposed. Old missing rail event credentials leave a retained stream pending delivery; they do not relax authorization. Actual live/scripted agent bindings/volumes remain unverified.
+
+## Next implementation tasks in dependency order
+
+1. **Cameron C02/H04/H05:** canonical authenticated store, immutable checkout freeze and protected same-price SKU-to-charge binding; safe alternative outside quarantined source.
+2. **Rishi R03/R04/R11 + Cameron C04/C05:** trusted retrieval/current signature checks using existing pure verifier, persisted attempts/verification/operation-before-side-effect, versioned activation/revoke propagation, idempotency, reconciliation and once-only instrument delivery. Keep unknown outcomes unusable for further purchases.
+3. **Rishi R12 + Aditya H08/A11–A13:** additive typed contracts/scopes; actual bounded SDK Graph, source containment/clean autonomous recovery, control polling and durable leases/fencing; comprehensive real lifecycle emitters. Validate actual Akamai tools separately.
+4. **Rishi R07–R10:** human confirmation and six required product views using authoritative persisted financial/Graph state; no hand-authored success or settlement.
+5. **Cameron + all / G3/G4:** reviewed main image rollout on existing LKE with TLS/scoped keys/CNI/PVC/AOF verification; actual selected-rail S1–S7, provider faults/restart/replay, genuine live attack→automatic recovery/stop and <=3-minute rehearsal.
+
+Modified canonical docs: AGENTS current architecture/tree/boundaries, LEASH_SPEC section26.8 and factual identity/runtime mappings, build plan current task status/dependency handoffs, and this current full matrix while retaining the baseline. Added api/alignment-fixes-handoff.md and refreshed webhook README. No task is declared complete from a stub, schema, manifest or skipped test.
+
+## Historical original audit — 2e0cbe5
+
+Everything below describes the original documentation-only request, source revision and results. Later implementation authorization and F/Q current evidence above take precedence. Original Q IDs are prefixed H- below only to distinguish historical table rows; stable current requirement IDs remain Q01–Q100.
+
+
 Audit baseline: October 10, 2026, `main` / `origin/main` at **`2e0cbe571567d3f3cca360d2dd4977776c5d18d1`**. Working tree was clean before documentation edits. Remote refs were fetched twice; no new main/Aditya commits appeared during inspection. No branch switch, reset, stash, commit, push, application-code edit, deployment, provisioning, teammate contact or shared-database write occurred. Tests used mocked services and a disposable localhost PostgreSQL instance, which was stopped afterward.
 
 Rishi's explicit request authorizes this audit and four documentation files only. Both supplied documents were read completely before edits, including re-reading a truncated tool-output segment. Desired product/security direction comes from `LEASH_MASTER_ALIGNMENT_SPEC_2026-10-10.md` (74,216 bytes, SHA-256 `BDD05A0821DC09A5E04E0E3A448F09ACF29FEDB294F2A6618FCB9E9B43EF5B16`); the audit prompt (SHA-256 `A3CA35BDB63FCABBAE03A536FC8E2F6C387E823E249B1A35D8737015437C5FCC`) supplies workflow guidance, subordinate to Rishi's request. Neither document authorizes rewriting teammates' code. The [synchronized specification](LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) incorporates the master decisions without making teammates depend on Rishi's Downloads folder.
 
-## Verdict
+### Verdict
 
 **The foundations are partly aligned; the current application is not an aligned or demo-ready LEASH MVP.** R01 validation/hashing/redaction, R02 signed immutable human authority, registered mode-bound agent identity, actual Strands MCP adapter wiring and LKE build/readiness/PVC configuration are valuable working foundations. The financial enforcement chain and the master's signature differentiators remain missing. Signup/provider behavior introduces specific conflicts even though direct `/cards` issuance is closed.
 
@@ -21,7 +191,7 @@ Status vocabulary used below:
 
 P0 blocks truthful security/demo readiness; P1 requires correction/integration before the relevant claim; P2 is bounded polish/operational improvement. A missing required control is a readiness gap, not evidence an attacker has exploited a deployed endpoint.
 
-## Serious discrepancies and exact safe fixes
+### Serious discrepancies and exact safe fixes
 
 | ID / severity | Evidence and conflicting code path | Risk / master requirement | Owner and minimum safe fix |
 |---|---|---|---|
@@ -41,136 +211,136 @@ P0 blocks truthful security/demo readiness; P1 requires correction/integration b
 | D14 **P1/P2 local readiness** | `pnpm lint` fails [web/src/app/profile/page.tsx:38](../web/src/app/profile/page.tsx), `react-hooks/set-state-in-effect`; tracked deployment scripts are LF but checkout CRLF, direct WSL `bash -n` fails at `need()/get_env()` | Required lint gate currently fails; Windows direct script execution is unreliable. This is not evidence Linux deployed script syntax is broken. | **Rishi:** structure profile fetch/loading state around async lifecycle without synchronous effect resets or lint suppression. **Cameron:** deliberate shell LF attributes/checkout/runbook handling; LF-normalized syntax already passes. |
 | D15 **P0 secret/authority boundary** | [k8s/agents.yaml:33](../k8s/agents.yaml), [mcp-leash.yaml:21](../k8s/mcp-leash.yaml), [mcp-store.yaml:22](../k8s/mcp-store.yaml) and api.yaml all import full `app-env`. [deploy_lke.sh:109](../scripts/deploy_lke.sh) copies root .env excluding image names into that shared Secret. Template includes JWT/signing/Lithic keys and managed DB URL is added by provisioning. | When configured in app-env, financial/session signing and database credentials are inherited by shopper/guardian and thin MCP pods, violating backend-only authority and least privilege. Actual mounted contents/compromise are unverified; no key was read. | **Cameron C06:** split Secrets or explicit required secretKeyRef selection per pod; keep provider/JWT/mandate-signing/database authority out of agent/tool pods. Test rendered environment-key allowlists and preserve needed inference/store/scoped agent/service settings. |
 
-## Requirements-to-code traceability
+### Requirements-to-code traceability
 
 Every row is a requirement or explicit scope/acceptance decision from master sections (MS) 0–26. Evidence references executable paths/functions; absent implementation is stated explicitly. Tests T1–T10 are defined below. An IT row may cover only its named boundary, never the whole financial workflow. Rows marked PI/IU/BC/UV must not be called complete. Proposed fixes/tasks retain current path ownership; shared-contract additions require their own coordinated PR.
 
-### Product, human identity and mandate authority
+#### Product, human identity and mandate authority
 
 | ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
 |---|---|---|---|
-| Q01 / 0,21,23 | Inspect current main/worktree/integrations; preserve teammates; documentation audit only | IT: clean `2e0cbe5`, two fetches, branch inventory/recent merges; only four docs edited; deployed drift D12 | All / P0: reconcile live revision before claims |
-| Q02 / 1–3,16 | FinTech intent→behavior→trusted checkout→deterministic spending product | PI: contracts/authority/MCP exist, financial chain/UI absent (D04) | Rishi+Cameron+Aditya / P0 |
-| Q03 / 2,20 | Genuine three-minute sponsor/demo proof | M: no rehearsal or end-to-end result; demo script is a target | Aditya with both / P1: actual stopwatch/logs |
-| Q04 / 6 | Backend-verified human session and stable owner | IT: `auth.py:get_current_user`, `principals.py:leash_user_id`; JWT/UUID owner tests T1; custom auth only | Cameron auth lead + Rishi / P0: provider decision/adapter |
-| Q05 / 6,21 | Preserve agreed auth provider work; no competing framework | UV: current custom JWT; intended Clerk/Auth.js/equivalent and live activity auth source unknown D12 | Cameron+Rishi / P1 H03 |
-| Q06 / 6,17 | Secure session transport/storage/revocation and appropriate CSRF | PI: Bearer JWT validated, browser localStorage; seven-day default JWT, client-only logout on main; public port80, no cookie/CSRF adapter | Cameron+Rishi / P1: TLS/session design; compromised-session protection partial |
-| Q07 / 6 | Short-lived user/run/mandate/version/tool/audience agent credentials | PI: `principals.py:agent_from_token/bind_agent` owner/mode enable/rotation T1; no expiry/audience/run/tool claims | Rishi R12+Aditya / P0 |
-| Q08 / 6,11 | Authenticated service/merchant/provider identities | PI: `service_auth.py`, Store MCP bearer, financial bearer forwarded T2–T4; merchant token optional, no store/rail/HMAC | Cameron+Aditya+Rishi / P0 |
-| Q09 / 6,18 | Object ownership on all reads and writes, including SSE | PI: mandates/runs registration/cards tested T1; future checkout/payment/incident/SSE absent | Rishi / P0: owner tests per endpoint |
-| Q10 / 4,7 | Only human confirms exact structured authority; no agent privileges | IT: `mandate_routes.py:MandateConfirmation/approve_mandate`, `signing.py`; role/version/hash/signature negatives T1 | Rishi R02 retained; UI confirmation still Q59 |
-| Q11 / 7 | Immutable original instruction/constraints/versions; signed/hash distinction | IT: `models.py:PurchaseMandate/mandate_hash`, `mandate_service.py:version_record`, SQL immutable triggers, Ed25519 T1 | Rishi; no passkey/AP2 claim |
-| Q12 / 7 | Strict cents, UTC, supported currency/quantity/recurrence/attribute validation | IT: shared models validators/hash vectors T1; not live policy execution | Rishi R01 retained; R03 must enforce |
-| Q13 / 7,9 | Under $40 means <4000, full total including charges | PI: `max_cents=3999` fixtures/demo; no parser/confirmation UI/verifier; R01 total sums items+tax+shipping, no separate fees/discounts | Rishi+Cameron / P0: freeze zero fees/discounts for fixture or additive validated mapping |
-| Q14 / 7 | Ambiguity requires human structured clarification | M: no actual interpretation/confirmation purchase UI | Rishi+Aditya / P1; never silently accept model draft |
-| Q15 / 7 | Expiring active authority / replacement / revocation / history | IT: R02 window checks, immutable replacement/draft approval, revoke/idempotent history T1 | Rishi; cross-rail invalidation Q38 missing |
-| Q16 / 7,15 | Enforce one successful checkout/quantity; consumed/fulfilled scope | PI: `maximum_purchases/max_quantity` validated, no actual scope reservation/consumption or fulfilled state | Rishi+Cameron / P0 R04/C04 |
-| Q17 / 6,18 | Registered live/scripted run owner/mode/version/hash before traces | IT: `mandate_service.py:register_run`, `shopper/registration.py/credentials.py`; T1/T2 | Rishi+Aditya; actual deployed provisioning UV |
-| Q18 / 3,18 | Human can initiate/manage purchase workflow | PI: API proposes only via agent bearer; human confirm/read/replace/revoke exists; web only auth/profile | Rishi / P1: UI uses scoped draft proposal path; no grant from initiation |
+| H-Q01 / 0,21,23 | Inspect current main/worktree/integrations; preserve teammates; documentation audit only | IT: clean `2e0cbe5`, two fetches, branch inventory/recent merges; only four docs edited; deployed drift D12 | All / P0: reconcile live revision before claims |
+| H-Q02 / 1–3,16 | FinTech intent→behavior→trusted checkout→deterministic spending product | PI: contracts/authority/MCP exist, financial chain/UI absent (D04) | Rishi+Cameron+Aditya / P0 |
+| H-Q03 / 2,20 | Genuine three-minute sponsor/demo proof | M: no rehearsal or end-to-end result; demo script is a target | Aditya with both / P1: actual stopwatch/logs |
+| H-Q04 / 6 | Backend-verified human session and stable owner | IT: `auth.py:get_current_user`, `principals.py:leash_user_id`; JWT/UUID owner tests T1; custom auth only | Cameron auth lead + Rishi / P0: provider decision/adapter |
+| H-Q05 / 6,21 | Preserve agreed auth provider work; no competing framework | UV: current custom JWT; intended Clerk/Auth.js/equivalent and live activity auth source unknown D12 | Cameron+Rishi / P1 H03 |
+| H-Q06 / 6,17 | Secure session transport/storage/revocation and appropriate CSRF | PI: Bearer JWT validated, browser localStorage; seven-day default JWT, client-only logout on main; public port80, no cookie/CSRF adapter | Cameron+Rishi / P1: TLS/session design; compromised-session protection partial |
+| H-Q07 / 6 | Short-lived user/run/mandate/version/tool/audience agent credentials | PI: `principals.py:agent_from_token/bind_agent` owner/mode enable/rotation T1; no expiry/audience/run/tool claims | Rishi R12+Aditya / P0 |
+| H-Q08 / 6,11 | Authenticated service/merchant/provider identities | PI: `service_auth.py`, Store MCP bearer, financial bearer forwarded T2–T4; merchant token optional, no store/rail/HMAC | Cameron+Aditya+Rishi / P0 |
+| H-Q09 / 6,18 | Object ownership on all reads and writes, including SSE | PI: mandates/runs registration/cards tested T1; future checkout/payment/incident/SSE absent | Rishi / P0: owner tests per endpoint |
+| H-Q10 / 4,7 | Only human confirms exact structured authority; no agent privileges | IT: `mandate_routes.py:MandateConfirmation/approve_mandate`, `signing.py`; role/version/hash/signature negatives T1 | Rishi R02 retained; UI confirmation still Q59 |
+| H-Q11 / 7 | Immutable original instruction/constraints/versions; signed/hash distinction | IT: `models.py:PurchaseMandate/mandate_hash`, `mandate_service.py:version_record`, SQL immutable triggers, Ed25519 T1 | Rishi; no passkey/AP2 claim |
+| H-Q12 / 7 | Strict cents, UTC, supported currency/quantity/recurrence/attribute validation | IT: shared models validators/hash vectors T1; not live policy execution | Rishi R01 retained; R03 must enforce |
+| H-Q13 / 7,9 | Under $40 means <4000, full total including charges | PI: `max_cents=3999` fixtures/demo; no parser/confirmation UI/verifier; R01 total sums items+tax+shipping, no separate fees/discounts | Rishi+Cameron / P0: freeze zero fees/discounts for fixture or additive validated mapping |
+| H-Q14 / 7 | Ambiguity requires human structured clarification | M: no actual interpretation/confirmation purchase UI | Rishi+Aditya / P1; never silently accept model draft |
+| H-Q15 / 7 | Expiring active authority / replacement / revocation / history | IT: R02 window checks, immutable replacement/draft approval, revoke/idempotent history T1 | Rishi; cross-rail invalidation Q38 missing |
+| H-Q16 / 7,15 | Enforce one successful checkout/quantity; consumed/fulfilled scope | PI: `maximum_purchases/max_quantity` validated, no actual scope reservation/consumption or fulfilled state | Rishi+Cameron / P0 R04/C04 |
+| H-Q17 / 6,18 | Registered live/scripted run owner/mode/version/hash before traces | IT: `mandate_service.py:register_run`, `shopper/registration.py/credentials.py`; T1/T2 | Rishi+Aditya; actual deployed provisioning UV |
+| H-Q18 / 3,18 | Human can initiate/manage purchase workflow | PI: API proposes only via agent bearer; human confirm/read/replace/revoke exists; web only auth/profile | Rishi / P1: UI uses scoped draft proposal path; no grant from initiation |
 
-### Trusted merchant, verifier and financial enforcement
-
-| ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
-|---|---|---|---|
-| Q19 / 8 | Separate attackable listings from authenticated canonical merchant | PI: MCP listing fixtures/evidence exist T4; `services/store` absent | Cameron C02 / P0 |
-| Q20 / 8,17 | Good charger and bad subscription same merchant/2999/USD | PI: `tests/decision_cases.yaml` + listing fixtures encode facts; no actual canonical server/charge | Cameron+Aditya / P0; aliases preserved |
-| Q21 / 8,10 | Safe compliant alternative outside quarantined source/SKU | M: no store/recovery exclusion registry | Cameron C02+Aditya A12 / P0 |
-| Q22 / 8,18 | Independent server fetch configured merchant, never agent URL/cart | M: API verifier absent; `CheckoutSource` shape only | Rishi R03+Cameron H04 / P0 |
-| Q23 / 8,9 | Trusted SKU/category/attributes/quantity/subscription/recurrence | PI: `CheckoutItem/CanonicalProduct` strict models T1; guardian advisory checks T2, no authentic verifier | Rishi R03 / P0; guardian not proof |
-| Q24 / 8,9 | Ownership, checkout revision/hash/expiry/provenance integrity | PI: `CheckoutSnapshot` validates shape/hash/expiry T1; no trusted ownership retrieval/freeze | Rishi+Cameron / P0 |
-| Q25 / 8,9 | All constraints deterministic, unknown category/evidence fails closed | M: actual API policy absent; 15 required verification checks are schema gate only | Rishi R03 / P0: pure verifier tests |
-| Q26 / 9 | Stable typed reasons/observed checks/evidence, no model override | PI: shared verification/checks shapes + advisory guardian severity T1/T2; missing backend decision function | Rishi R03 / P0 |
-| Q27 / 9 | Merchant/currency/strict total/fee arithmetic/geo/shipping controls | PI: validated fields/fixtures; no running enforcement or full fee normalization | Rishi+Cameron / P0 |
-| Q28 / 8,12 | Frozen exact checkout-to-charge correlation prevents equal-price SKU substitution | M: Store MCP `complete_checkout` forwards to absent merchant; no binding enforcement | Cameron C02+Rishi R04 / P0 |
-| Q29 / 12 | Usable instrument only after verified purchase; correct SINGLE_USE lifecycle | PI, conflicting: direct `/cards` blocked T1; signup OPEN VIRTUAL/FOREVER still exists D01 | Rishi+Cameron / P0 |
-| Q30 / 12 | Sandbox-only accurate provider selection; local simulator actual policy | PI, conflicting: wrapper can select production/arbitrary origin, hardcoded label D02; no simulator | Cameron C03/C05 / P0 |
-| Q31 / 12 | Short-lived exact scoped one-use grant bound to complete authority/checkout/instrument | PI: `AuthorizationGrant/PreApproval` validation/hash binding T1; no issuance/storage/consume | Rishi R04+Cameron C04 / P0 |
-| Q32 / 12 | Activation ordering/setup failure unusable | M: no prepare/bind/activate state machine; signup skips it | Rishi+Cameron / P0 |
-| Q33 / 12,15 | Payment operations before side effects; stable provider idempotency | M: signup provider calls precede durable provider operation, no keys D03 | Rishi R11+Cameron C05 / P0 |
-| Q34 / 12,15 | Unknown outcome reconciles; no new purchase/card on timeout | M: no reconciling state/query/operation; MCP retry wording D10 | Rishi+Cameron+Aditya / P0 |
-| Q35 / 12 | Verified/grant/card/pending/authorized/settled meaning separate | PI: `PaymentResponse` documents permission, distinct `payment_result` T1; no durable operations or settlement input | Rishi+Cameron+Aditya / P0: additive mapping |
-| Q36 / 12 | Actual Lithic ASA enrollment/schemas/signatures/live signed authorization | M for responder/ASA implementation; BC for actual program/configuration proof. Holder/card wrapper exists; public docs only T10 | Cameron C05 / P1; choose actual simulator until proven |
-| Q37 / 12,15 | Pure deterministic ASA/local rail, no LLM/SQL/merchant network | M: no rail engine/handler; models/fixtures cannot prove hot path | Cameron C03/C04 / P0 |
-| Q38 / 12,13,15 | Valkey atomic consume + original decision + event commit; revocation serialization | M: no Valkey client/scripts/handler/runtime; SQL authority atomicity is different | Cameron C04+Rishi R04/R05 / P0 |
-| Q39 / 12,15 | Exact duplicate cached response; distinct parallel requests consume once | M: fixture expectations exist; no rail code/runner or real concurrent test | Cameron C04/C07 / P0 |
-| Q40 / 12,19 | Altered duplicate fingerprint/unsupported request/authentication errors | M: schemas/fixtures only; provider raw signature/type handling absent | Cameron C05/C07 / P0 |
-| Q41 / 12,15 | Grant expiry/old version/cardinality/reservation/invalidation across replicas | M: no fast-path implementation; R02 versions alone cannot enforce existing cards | Cameron+Rishi / P0 |
-| Q42 / 12 | Once-only authorized card detail delivery; store only token/last4 | PI: direct card routes omit PAN T1; wrapper optional details return, no durable delivery marker/authorization flow | Rishi R04+Cameron C05 / P0 |
-| Q43 / 12,17 | Relevant provider card pause/close/expiry/reconciliation | M: wrapper only create/get/transactions/headroom, no pause adapter | Cameron C09+Rishi R05/R11 / P0 if provider selected |
-| Q44 / 12 | Actual decision source/rail/latency measured, ASA deadline met | M: validated `PaymentDecision.latency_ms` only; no authorization measurement | Cameron C09 / P1; no fabricated numbers |
-
-### Graph, MCP, recovery, investigation and reliability
+#### Trusted merchant, verifier and financial enforcement
 
 | ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
 |---|---|---|---|
-| Q45 / 10,11 | Real Strands shopper with genuine MCP tool invocation | IT for SDK wiring: `runs.py:run_shopper`, two real `MCPClient`s; T2 subprocess MCP/API/store stubs. Live model integration BC | Aditya A02/A03; no live claim |
-| Q46 / 10 | Real SDK Graph / all required nodes / typed conditional edges | M: single Agent D05; local SDK GraphBuilder introspection T9 confirms capability | Aditya A11 / P0 |
-| Q47 / 10 | Candidate/node/time/cost bounds and truthful terminal/exhaustion | M: threadpool max2 and test polling timeout do not bound workflow | Aditya A11/A12 / P0 |
-| Q48 / 10 | Guardian explains linked genuine evidence without financial authority | IT for advisory evaluator: `guardian/__init__.py:evaluate`, known source filtering, strictness/model fallback T2; integrated incident UI absent | Aditya A05+Rishi R06 / P1 |
-| Q49 / 10 | Source/SKU/checkout quarantine and fresh uncontaminated context | M: no containment controller; manual new-run tests D06 | Aditya A12 / P0 |
-| Q50 / 10 | Autonomous unchanged-mandate recovery without human restart | M: S6 creates new run manually, no Graph D06 | Aditya A11/A12 + backend / P0 |
-| Q51 / 10,12 | Recovery forbidden after hard decline, unknown outcome or authorization | M: no typed controller/operation gate; shopper controls whole tool sequence | Aditya+Rishi+Cameron / P0 |
-| Q52 / 10,15 | Cooperative cancellation/recheck before every side effect | M: RunManager has no cancellation; SQL registration checks only at start | Aditya A12+Rishi R05 / P0 |
-| Q53 / 10,15 | Durable progress/exclusions/leases/fencing, restart safety | PI: SQL initial registration persists T1; progress/final output only memory D09 | Rishi R11+Aditya / P0 |
-| Q54 / 11 | Official MCP adapters, four finance + shopping tools; no direct fallback | IT: locked MCP 2.1.1 thin servers, schemas/bearer/clients, T2–T4; target store/API absent | Aditya retained; Rishi/Cameron implement targets |
-| Q55 / 11,17 | Store-only browse/off-origin redirects reject; arbitrary internal URL denied | IT: `mcp-store/main.py:resolve_store_target/fetch_store_page`, T4 | Aditya; configured-origin trust/egress still Cameron |
-| Q56 / 11,18 | MCP tool authority derives authenticated run scope; direct bypass equally enforced | PI: bearer forwarded/global Store MCP auth T3/T4; no run-scoped token or protected merchant/payment code | Aditya+Rishi+Cameron / P0 |
-| Q57 / 10,14 | Original source hash, redacted snapshots and actual stored hash | IT for local/mock paths: `evidence/snapshots.py`, `hooks.py` T2/T4; real object storage BC | Aditya+Cameron; record real storage availability |
-| Q58 / 5,10 | Genuine Akamai Strands tool-calling, provider fallback truth | BC: `llm.py:make_model` matched pairs/max_tokens/temp tests T2, two live tests deselected; provider label hardcoded D13 | Aditya A02 / P0: actual round trip/latency/failure evidence |
+| H-Q19 / 8 | Separate attackable listings from authenticated canonical merchant | PI: MCP listing fixtures/evidence exist T4; `services/store` absent | Cameron C02 / P0 |
+| H-Q20 / 8,17 | Good charger and bad subscription same merchant/2999/USD | PI: `tests/decision_cases.yaml` + listing fixtures encode facts; no actual canonical server/charge | Cameron+Aditya / P0; aliases preserved |
+| H-Q21 / 8,10 | Safe compliant alternative outside quarantined source/SKU | M: no store/recovery exclusion registry | Cameron C02+Aditya A12 / P0 |
+| H-Q22 / 8,18 | Independent server fetch configured merchant, never agent URL/cart | M: API verifier absent; `CheckoutSource` shape only | Rishi R03+Cameron H04 / P0 |
+| H-Q23 / 8,9 | Trusted SKU/category/attributes/quantity/subscription/recurrence | PI: `CheckoutItem/CanonicalProduct` strict models T1; guardian advisory checks T2, no authentic verifier | Rishi R03 / P0; guardian not proof |
+| H-Q24 / 8,9 | Ownership, checkout revision/hash/expiry/provenance integrity | PI: `CheckoutSnapshot` validates shape/hash/expiry T1; no trusted ownership retrieval/freeze | Rishi+Cameron / P0 |
+| H-Q25 / 8,9 | All constraints deterministic, unknown category/evidence fails closed | M: actual API policy absent; 15 required verification checks are schema gate only | Rishi R03 / P0: pure verifier tests |
+| H-Q26 / 9 | Stable typed reasons/observed checks/evidence, no model override | PI: shared verification/checks shapes + advisory guardian severity T1/T2; missing backend decision function | Rishi R03 / P0 |
+| H-Q27 / 9 | Merchant/currency/strict total/fee arithmetic/geo/shipping controls | PI: validated fields/fixtures; no running enforcement or full fee normalization | Rishi+Cameron / P0 |
+| H-Q28 / 8,12 | Frozen exact checkout-to-charge correlation prevents equal-price SKU substitution | M: Store MCP `complete_checkout` forwards to absent merchant; no binding enforcement | Cameron C02+Rishi R04 / P0 |
+| H-Q29 / 12 | Usable instrument only after verified purchase; correct SINGLE_USE lifecycle | PI, conflicting: direct `/cards` blocked T1; signup OPEN VIRTUAL/FOREVER still exists D01 | Rishi+Cameron / P0 |
+| H-Q30 / 12 | Sandbox-only accurate provider selection; local simulator actual policy | PI, conflicting: wrapper can select production/arbitrary origin, hardcoded label D02; no simulator | Cameron C03/C05 / P0 |
+| H-Q31 / 12 | Short-lived exact scoped one-use grant bound to complete authority/checkout/instrument | PI: `AuthorizationGrant/PreApproval` validation/hash binding T1; no issuance/storage/consume | Rishi R04+Cameron C04 / P0 |
+| H-Q32 / 12 | Activation ordering/setup failure unusable | M: no prepare/bind/activate state machine; signup skips it | Rishi+Cameron / P0 |
+| H-Q33 / 12,15 | Payment operations before side effects; stable provider idempotency | M: signup provider calls precede durable provider operation, no keys D03 | Rishi R11+Cameron C05 / P0 |
+| H-Q34 / 12,15 | Unknown outcome reconciles; no new purchase/card on timeout | M: no reconciling state/query/operation; MCP retry wording D10 | Rishi+Cameron+Aditya / P0 |
+| H-Q35 / 12 | Verified/grant/card/pending/authorized/settled meaning separate | PI: `PaymentResponse` documents permission, distinct `payment_result` T1; no durable operations or settlement input | Rishi+Cameron+Aditya / P0: additive mapping |
+| H-Q36 / 12 | Actual Lithic ASA enrollment/schemas/signatures/live signed authorization | M for responder/ASA implementation; BC for actual program/configuration proof. Holder/card wrapper exists; public docs only T10 | Cameron C05 / P1; choose actual simulator until proven |
+| H-Q37 / 12,15 | Pure deterministic ASA/local rail, no LLM/SQL/merchant network | M: no rail engine/handler; models/fixtures cannot prove hot path | Cameron C03/C04 / P0 |
+| H-Q38 / 12,13,15 | Valkey atomic consume + original decision + event commit; revocation serialization | M: no Valkey client/scripts/handler/runtime; SQL authority atomicity is different | Cameron C04+Rishi R04/R05 / P0 |
+| H-Q39 / 12,15 | Exact duplicate cached response; distinct parallel requests consume once | M: fixture expectations exist; no rail code/runner or real concurrent test | Cameron C04/C07 / P0 |
+| H-Q40 / 12,19 | Altered duplicate fingerprint/unsupported request/authentication errors | M: schemas/fixtures only; provider raw signature/type handling absent | Cameron C05/C07 / P0 |
+| H-Q41 / 12,15 | Grant expiry/old version/cardinality/reservation/invalidation across replicas | M: no fast-path implementation; R02 versions alone cannot enforce existing cards | Cameron+Rishi / P0 |
+| H-Q42 / 12 | Once-only authorized card detail delivery; store only token/last4 | PI: direct card routes omit PAN T1; wrapper optional details return, no durable delivery marker/authorization flow | Rishi R04+Cameron C05 / P0 |
+| H-Q43 / 12,17 | Relevant provider card pause/close/expiry/reconciliation | M: wrapper only create/get/transactions/headroom, no pause adapter | Cameron C09+Rishi R05/R11 / P0 if provider selected |
+| H-Q44 / 12 | Actual decision source/rail/latency measured, ASA deadline met | M: validated `PaymentDecision.latency_ms` only; no authorization measurement | Cameron C09 / P1; no fabricated numbers |
 
-### UI, Kill Switch, comprehensive SSE and persistence
-
-| ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
-|---|---|---|---|
-| Q59 / 3,16 | Mission Control/explicit human semantic confirmation/original intent visible | M: home auth card only; no purchase UI; signature API exists Q10 | Rishi R08 / P1 |
-| Q60 / 16 | Live activity/Graph/clean recovery and readable comparison | M: web routes only home/profile/signin/signup, build T6; no flow panels | Rishi R08/R09+Aditya events / P1 |
-| Q61 / 16 | Incident timeline/evidence inspection and genuine history/receipts | M: no read APIs or UI for complete proof chain | Rishi R06/R09/R10 / P1 |
-| Q62 / 16 | Attack Lab changes listing only, not mandate/outcome | PI: malicious listing fixtures; no merchant toggle/UI | Cameron C02+Aditya A08+Rishi R09 / P0 |
-| Q63 / 13 | Human-only durable idempotent Kill Switch owner endpoint/UI | M: per-mandate revoke only D07; no kill route/UI | Rishi R05 / P0 |
-| Q64 / 13 | Atomic unused-grant invalidation, stop Graph/recovery; actual effective ack | M: no grants/atomic state/cancel | Cameron C04+Rishi R05+Aditya A12 / P0 |
-| Q65 / 13 | Provider pause requested/confirmed/failed/unknown, no reversal claim | M: no pause lifecycle; prior authorization not demonstrated | Cameron C09+Rishi / P0 |
-| Q66 / 13,19 | Kill races at every phase/restart/repeated clicks/cross-owner/failure | M: fixture rail race only; no handler/test runner/Graph Kill Switch tests | All within lane / P0 S7 |
-| Q67 / 14,15 | Durable append-only state-event coupling and outbox | IT for mandates/registration: SQL audit_events/triggers/delivery records T1; financial coupling M | Rishi R06/R11+Cameron stream / P0 |
-| Q68 / 14,18 | Authenticated provenance intake, sanitization/dedup/recovery | PI: strict shared input parsing T1 + agents disk outbox T2; no API intake, 404 deadletter D08 | Rishi R06+Aditya / P0 |
-| Q69 / 14 | Comprehensive event taxonomy captures real auth/Graph/inference/all financial/recovery events | PI: mandate/run registration audit + before/after/source hooks only; missing expanded enums/emitters | Rishi contracts/R06+Aditya A13+Cameron rail / P0 |
-| Q70 / 14 | Product SSE persisted id/event/data, heartbeat/reconnect/replay/resync | M on main; deployed activity OpenAPI advertises stream but source/authorized behavior UV (D12) | Rishi R06+Cameron integration / P0 |
-| Q71 / 14,15 | Authorized history/cursors/stream ownership, refresh reconstruction | M on main; public activity endpoints unauth 401 only T10, authorized replay untested | Rishi / P0 |
-| Q72 / 14,15 | SSE reconnect/browser refresh never starts new Graph or charge | M: no product streaming/client lifecycle or backend operation idempotency | Rishi+Aditya / P0 |
-| Q73 / 14 | No secrets/PAN/private prompts/CoT in events, snapshots or logs | PI: model callbacks off/trace shared redaction T1/T2/T4; raw exception logging risk D13 and unbuilt endpoints | All / P0 for financial data; synthetic transport/log tests |
-| Q74 / 14,16 | Actual agent/rail/recording labels; block-before-payment != provider decline | PI: live/scripted labels/tests exist; sandbox metadata can mislabel environment; full UI absent | All / P1 |
-| Q75 / 14 | Source→tool→trusted checkout→decision incident linkage; cautious causality | PI: source/tool hashes and guardian known citations T2/T4; no persisted complete incident | Aditya+Rishi / P1 |
-| Q76 / 15 | PostgreSQL durable domain and recoverable financial records | PI: identities/mandates/runs/audit T1; checkout/grant/operation/card-delivery/incident milestone tables absent | Rishi R03/R04/R06/R11 / P0 |
-| Q77 / 15 | SQL/Valkey outages fail closed; no stale cached grants | PI: R02 DB 503/rollback/readiness T1; Valkey/financial tests M | Rishi+Cameron / P0 |
-| Q78 / 15 | MCP/inference outage bounded fail-closed, no tool bypass | PI: MCP connection errors stop run T2; full Graph budgets/payment ambiguity M | Aditya / P0 |
-
-### Kubernetes, contracts, risk scope and acceptance
+#### Graph, MCP, recovery, investigation and reliability
 
 | ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
 |---|---|---|---|
-| Q79 / 5,21 | Preserve actual LKE topology; no Compose replacement | IT for configuration preservation: six manifest files parse T9; live cluster state UV | Cameron C06 / P0; no deployment performed |
-| Q80 / 5 | Repository-root API image copies runtime/shared/migrations | IU: Dockerfile/source inspected, deploy buildx selects root/api/Dockerfile; Docker daemon unavailable | Rishi image + Cameron build / P1: actual image import test |
-| Q81 / 5,15 | Ready database/schema vs health liveness | IT local readiness negatives T1; YAML readyz/healthz T9; public both200 T10 | Cameron+Rishi; not full security readiness |
-| Q82 / 5,15 | Persistent trace spool survives pod restart | IU: PVC 5Gi RWO /app/trace-spool declared; local restart outbox tests T2; actual mount UV | Cameron / P1: PVC/image rollout proof |
-| Q83 / 6,15 | TLS, service auth, NetworkPolicy, scoped Secrets and safe public boundary | PI, conflicting: all four Python pods import full app-env D15; public HTTP/MCP rewrites; no NetworkPolicy/TLS manifests; actual mounted keys UV | Cameron+endpoint owners / P0 |
-| Q84 / 5,15 | Database/Valkey availability and safe chosen runtime | PI: PostgreSQL local tests/public readiness; Valkey missing; no kubectl current context/kubeconfig | Cameron / P0: read-only resource proof/Valkey setup |
-| Q85 / 5,21 | Shared installability and reproducible imports/builds | PI: namespace marker/source-copy/PYTHONPATH works T1–T4; shared/pyproject.toml absent | Cameron C01; service owners image imports / P1 |
-| Q86 / 18,21 | Frozen contracts, OpenAPI mappings and generated frontend types | PI: R01 accepted/frozen; actual OpenAPI inspected; generated api-types missing; new Graph/unknown/event concepts not yet agreed | Rishi H01/H12 with all three / P0 |
-| Q87 / 18,21 | Handoff callable valid/failure examples + actual tests + limits | PI: R01/R02 handoffs exist; merchant/rail/Graph/SSE handoffs not runnable | All named sender owners / P0 |
-| Q88 / 17 | Core fraud/threat matrix covers prompt/tool poisoning, SKU/recurrence/budget/ownership/replay/kill/ambiguity/recovery | PI: YAML expectations and model/agent units only; D04/D06/D07 missing enforcement; no claim “most fraud” | Rishi/Cameron/Aditya / P0; Q19–Q78 |
-| Q89 / 17 | Compromised session/stolen data/disputes have bounded partial claims | PI: JWT validation/redaction, no server session revocation/reauth or payment disputes; no broad protection proof | Cameron+Rishi / P1; disclose partial scope |
-| Q90 / 17 | Dishonest merchant/fulfillment/counterfeits/ACH/full chargeback controls outside guarantee | IT as documented scope only: 23.4/26.7 limits retained; no corresponding capability claimed | All; future work, not security coverage |
-| Q91 / 19 | Unit/mock integration/security matrix distinct from live provider/model E2E | IT audit labeling: T1–T10 below; rail runner missing, six E2E skipped, two live inference deselected | All; cannot mark E2E complete |
-| Q92 / 19 | S1 actual legitimate charger authorization/receipt | M: test exists but skipped T8, merchant/payment absent | All / P0 |
-| Q93 / 19 | Combined live S2→S6 attack/block/quarantine/automatic unchanged-authority recovery | M: manual two-run test skipped T8; no Graph/live injection proof | Aditya+Rishi+Cameron / P0 |
-| Q94 / 19 | S3 exact boundary/tax/shipping overspend no instrument | M runtime: fixture cases present, E2E skipped | Rishi+Cameron / P0 |
-| Q95 / 19 | S4 incomplete/untrusted/stale evidence no grant | M runtime: strict shapes/fixtures only; E2E skipped | Rishi+Cameron / P0 |
-| Q96 / 19 | S5 expiry/replay/parallel attempts/altered duplicates | M runtime: YAML/one gated negative test; no atomic handler | Cameron+Rishi+Aditya / P0 |
-| Q97 / 19 | S7 master Kill Switch storyline | M: no current E2E Kill Switch test/implementation | All / P0 |
-| Q98 / 19 | Faults: direct bypass, provider lost response/DB failure, worker restart, model outage, malformed findings | PI: R02 rollback/signature/advisory model tests; financial crash/reconciliation/bypass tests absent | All / P0 |
-| Q99 / 20 | Safe reset, no grant reuse/history deletion, labeled recorded fallback | PI: live/scripted distinct mandate/token/lane docs/tests; actual reset/rehearsal UV; manual recovery outdated | Aditya+Cameron+Rishi / P1 |
-| Q100 / 22,24,26 | Dependency order, all critical differentiators retained, truthful completion | PI: synchronized docs now require them, code incomplete; no claim of MVP completion | All; dependency tasks below |
+| H-Q45 / 10,11 | Real Strands shopper with genuine MCP tool invocation | IT for SDK wiring: `runs.py:run_shopper`, two real `MCPClient`s; T2 subprocess MCP/API/store stubs. Live model integration BC | Aditya A02/A03; no live claim |
+| H-Q46 / 10 | Real SDK Graph / all required nodes / typed conditional edges | M: single Agent D05; local SDK GraphBuilder introspection T9 confirms capability | Aditya A11 / P0 |
+| H-Q47 / 10 | Candidate/node/time/cost bounds and truthful terminal/exhaustion | M: threadpool max2 and test polling timeout do not bound workflow | Aditya A11/A12 / P0 |
+| H-Q48 / 10 | Guardian explains linked genuine evidence without financial authority | IT for advisory evaluator: `guardian/__init__.py:evaluate`, known source filtering, strictness/model fallback T2; integrated incident UI absent | Aditya A05+Rishi R06 / P1 |
+| H-Q49 / 10 | Source/SKU/checkout quarantine and fresh uncontaminated context | M: no containment controller; manual new-run tests D06 | Aditya A12 / P0 |
+| H-Q50 / 10 | Autonomous unchanged-mandate recovery without human restart | M: S6 creates new run manually, no Graph D06 | Aditya A11/A12 + backend / P0 |
+| H-Q51 / 10,12 | Recovery forbidden after hard decline, unknown outcome or authorization | M: no typed controller/operation gate; shopper controls whole tool sequence | Aditya+Rishi+Cameron / P0 |
+| H-Q52 / 10,15 | Cooperative cancellation/recheck before every side effect | M: RunManager has no cancellation; SQL registration checks only at start | Aditya A12+Rishi R05 / P0 |
+| H-Q53 / 10,15 | Durable progress/exclusions/leases/fencing, restart safety | PI: SQL initial registration persists T1; progress/final output only memory D09 | Rishi R11+Aditya / P0 |
+| H-Q54 / 11 | Official MCP adapters, four finance + shopping tools; no direct fallback | IT: locked MCP 2.1.1 thin servers, schemas/bearer/clients, T2–T4; target store/API absent | Aditya retained; Rishi/Cameron implement targets |
+| H-Q55 / 11,17 | Store-only browse/off-origin redirects reject; arbitrary internal URL denied | IT: `mcp-store/main.py:resolve_store_target/fetch_store_page`, T4 | Aditya; configured-origin trust/egress still Cameron |
+| H-Q56 / 11,18 | MCP tool authority derives authenticated run scope; direct bypass equally enforced | PI: bearer forwarded/global Store MCP auth T3/T4; no run-scoped token or protected merchant/payment code | Aditya+Rishi+Cameron / P0 |
+| H-Q57 / 10,14 | Original source hash, redacted snapshots and actual stored hash | IT for local/mock paths: `evidence/snapshots.py`, `hooks.py` T2/T4; real object storage BC | Aditya+Cameron; record real storage availability |
+| H-Q58 / 5,10 | Genuine Akamai Strands tool-calling, provider fallback truth | BC: `llm.py:make_model` matched pairs/max_tokens/temp tests T2, two live tests deselected; provider label hardcoded D13 | Aditya A02 / P0: actual round trip/latency/failure evidence |
 
-## Tests, builds and deployed observations
+#### UI, Kill Switch, comprehensive SSE and persistence
+
+| ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
+|---|---|---|---|
+| H-Q59 / 3,16 | Mission Control/explicit human semantic confirmation/original intent visible | M: home auth card only; no purchase UI; signature API exists Q10 | Rishi R08 / P1 |
+| H-Q60 / 16 | Live activity/Graph/clean recovery and readable comparison | M: web routes only home/profile/signin/signup, build T6; no flow panels | Rishi R08/R09+Aditya events / P1 |
+| H-Q61 / 16 | Incident timeline/evidence inspection and genuine history/receipts | M: no read APIs or UI for complete proof chain | Rishi R06/R09/R10 / P1 |
+| H-Q62 / 16 | Attack Lab changes listing only, not mandate/outcome | PI: malicious listing fixtures; no merchant toggle/UI | Cameron C02+Aditya A08+Rishi R09 / P0 |
+| H-Q63 / 13 | Human-only durable idempotent Kill Switch owner endpoint/UI | M: per-mandate revoke only D07; no kill route/UI | Rishi R05 / P0 |
+| H-Q64 / 13 | Atomic unused-grant invalidation, stop Graph/recovery; actual effective ack | M: no grants/atomic state/cancel | Cameron C04+Rishi R05+Aditya A12 / P0 |
+| H-Q65 / 13 | Provider pause requested/confirmed/failed/unknown, no reversal claim | M: no pause lifecycle; prior authorization not demonstrated | Cameron C09+Rishi / P0 |
+| H-Q66 / 13,19 | Kill races at every phase/restart/repeated clicks/cross-owner/failure | M: fixture rail race only; no handler/test runner/Graph Kill Switch tests | All within lane / P0 S7 |
+| H-Q67 / 14,15 | Durable append-only state-event coupling and outbox | IT for mandates/registration: SQL audit_events/triggers/delivery records T1; financial coupling M | Rishi R06/R11+Cameron stream / P0 |
+| H-Q68 / 14,18 | Authenticated provenance intake, sanitization/dedup/recovery | PI: strict shared input parsing T1 + agents disk outbox T2; no API intake, 404 deadletter D08 | Rishi R06+Aditya / P0 |
+| H-Q69 / 14 | Comprehensive event taxonomy captures real auth/Graph/inference/all financial/recovery events | PI: mandate/run registration audit + before/after/source hooks only; missing expanded enums/emitters | Rishi contracts/R06+Aditya A13+Cameron rail / P0 |
+| H-Q70 / 14 | Product SSE persisted id/event/data, heartbeat/reconnect/replay/resync | M on main; deployed activity OpenAPI advertises stream but source/authorized behavior UV (D12) | Rishi R06+Cameron integration / P0 |
+| H-Q71 / 14,15 | Authorized history/cursors/stream ownership, refresh reconstruction | M on main; public activity endpoints unauth 401 only T10, authorized replay untested | Rishi / P0 |
+| H-Q72 / 14,15 | SSE reconnect/browser refresh never starts new Graph or charge | M: no product streaming/client lifecycle or backend operation idempotency | Rishi+Aditya / P0 |
+| H-Q73 / 14 | No secrets/PAN/private prompts/CoT in events, snapshots or logs | PI: model callbacks off/trace shared redaction T1/T2/T4; raw exception logging risk D13 and unbuilt endpoints | All / P0 for financial data; synthetic transport/log tests |
+| H-Q74 / 14,16 | Actual agent/rail/recording labels; block-before-payment != provider decline | PI: live/scripted labels/tests exist; sandbox metadata can mislabel environment; full UI absent | All / P1 |
+| H-Q75 / 14 | Source→tool→trusted checkout→decision incident linkage; cautious causality | PI: source/tool hashes and guardian known citations T2/T4; no persisted complete incident | Aditya+Rishi / P1 |
+| H-Q76 / 15 | PostgreSQL durable domain and recoverable financial records | PI: identities/mandates/runs/audit T1; checkout/grant/operation/card-delivery/incident milestone tables absent | Rishi R03/R04/R06/R11 / P0 |
+| H-Q77 / 15 | SQL/Valkey outages fail closed; no stale cached grants | PI: R02 DB 503/rollback/readiness T1; Valkey/financial tests M | Rishi+Cameron / P0 |
+| H-Q78 / 15 | MCP/inference outage bounded fail-closed, no tool bypass | PI: MCP connection errors stop run T2; full Graph budgets/payment ambiguity M | Aditya / P0 |
+
+#### Kubernetes, contracts, risk scope and acceptance
+
+| ID / MS | Requirement | Status / evidence and limit | Owner / priority / next work |
+|---|---|---|---|
+| H-Q79 / 5,21 | Preserve actual LKE topology; no Compose replacement | IT for configuration preservation: six manifest files parse T9; live cluster state UV | Cameron C06 / P0; no deployment performed |
+| H-Q80 / 5 | Repository-root API image copies runtime/shared/migrations | IU: Dockerfile/source inspected, deploy buildx selects root/api/Dockerfile; Docker daemon unavailable | Rishi image + Cameron build / P1: actual image import test |
+| H-Q81 / 5,15 | Ready database/schema vs health liveness | IT local readiness negatives T1; YAML readyz/healthz T9; public both200 T10 | Cameron+Rishi; not full security readiness |
+| H-Q82 / 5,15 | Persistent trace spool survives pod restart | IU: PVC 5Gi RWO /app/trace-spool declared; local restart outbox tests T2; actual mount UV | Cameron / P1: PVC/image rollout proof |
+| H-Q83 / 6,15 | TLS, service auth, NetworkPolicy, scoped Secrets and safe public boundary | PI, conflicting: all four Python pods import full app-env D15; public HTTP/MCP rewrites; no NetworkPolicy/TLS manifests; actual mounted keys UV | Cameron+endpoint owners / P0 |
+| H-Q84 / 5,15 | Database/Valkey availability and safe chosen runtime | PI: PostgreSQL local tests/public readiness; Valkey missing; no kubectl current context/kubeconfig | Cameron / P0: read-only resource proof/Valkey setup |
+| H-Q85 / 5,21 | Shared installability and reproducible imports/builds | PI: namespace marker/source-copy/PYTHONPATH works T1–T4; shared/pyproject.toml absent | Cameron C01; service owners image imports / P1 |
+| H-Q86 / 18,21 | Frozen contracts, OpenAPI mappings and generated frontend types | PI: R01 accepted/frozen; actual OpenAPI inspected; generated api-types missing; new Graph/unknown/event concepts not yet agreed | Rishi H01/H12 with all three / P0 |
+| H-Q87 / 18,21 | Handoff callable valid/failure examples + actual tests + limits | PI: R01/R02 handoffs exist; merchant/rail/Graph/SSE handoffs not runnable | All named sender owners / P0 |
+| H-Q88 / 17 | Core fraud/threat matrix covers prompt/tool poisoning, SKU/recurrence/budget/ownership/replay/kill/ambiguity/recovery | PI: YAML expectations and model/agent units only; D04/D06/D07 missing enforcement; no claim “most fraud” | Rishi/Cameron/Aditya / P0; Q19–Q78 |
+| H-Q89 / 17 | Compromised session/stolen data/disputes have bounded partial claims | PI: JWT validation/redaction, no server session revocation/reauth or payment disputes; no broad protection proof | Cameron+Rishi / P1; disclose partial scope |
+| H-Q90 / 17 | Dishonest merchant/fulfillment/counterfeits/ACH/full chargeback controls outside guarantee | IT as documented scope only: 23.4/26.7 limits retained; no corresponding capability claimed | All; future work, not security coverage |
+| H-Q91 / 19 | Unit/mock integration/security matrix distinct from live provider/model E2E | IT audit labeling: T1–T10 below; rail runner missing, six E2E skipped, two live inference deselected | All; cannot mark E2E complete |
+| H-Q92 / 19 | S1 actual legitimate charger authorization/receipt | M: test exists but skipped T8, merchant/payment absent | All / P0 |
+| H-Q93 / 19 | Combined live S2→S6 attack/block/quarantine/automatic unchanged-authority recovery | M: manual two-run test skipped T8; no Graph/live injection proof | Aditya+Rishi+Cameron / P0 |
+| H-Q94 / 19 | S3 exact boundary/tax/shipping overspend no instrument | M runtime: fixture cases present, E2E skipped | Rishi+Cameron / P0 |
+| H-Q95 / 19 | S4 incomplete/untrusted/stale evidence no grant | M runtime: strict shapes/fixtures only; E2E skipped | Rishi+Cameron / P0 |
+| H-Q96 / 19 | S5 expiry/replay/parallel attempts/altered duplicates | M runtime: YAML/one gated negative test; no atomic handler | Cameron+Rishi+Aditya / P0 |
+| H-Q97 / 19 | S7 master Kill Switch storyline | M: no current E2E Kill Switch test/implementation | All / P0 |
+| H-Q98 / 19 | Faults: direct bypass, provider lost response/DB failure, worker restart, model outage, malformed findings | PI: R02 rollback/signature/advisory model tests; financial crash/reconciliation/bypass tests absent | All / P0 |
+| H-Q99 / 20 | Safe reset, no grant reuse/history deletion, labeled recorded fallback | PI: live/scripted distinct mandate/token/lane docs/tests; actual reset/rehearsal UV; manual recovery outdated | Aditya+Cameron+Rishi / P1 |
+| H-Q100 / 22,24,26 | Dependency order, all critical differentiators retained, truthful completion | PI: synchronized docs now require them, code incomplete; no claim of MVP completion | All; dependency tasks below |
+
+### Tests, builds and deployed observations
 
 These results were produced during this audit, not copied from historical handoffs. No provider credentials were used, no human session was created/modified, and no shared data was changed. Normal fixture startup/error logs in T1 are deliberate failure-path tests, followed by exit 0 / OK. Disposable PostgreSQL bound localhost:55432, database `leash_test_r02`, per-suite generated schema; tests refuse non-local/non-test database names.
 
@@ -192,7 +362,7 @@ Docker `info` failed because the Docker Desktop Linux engine pipe is absent. No 
 
 Authoritative references: [Python Strands Graph API](https://strandsagents.com/docs/api/python/strands.multiagent.graph/) confirms conditional edges and execution controls; installed version introspection is the compatibility evidence. [Lithic ASA](https://docs.lithic.com/docs/auth-stream-access-asa) confirms sandbox enrollment, request authenticity setup, six-second deadline/recommended three-second response and retries; it does not prove this program is enrolled. A first attempted legacy Graph documentation URL returned 404; the current official API page was used instead.
 
-## Conflicts reconciled and remaining decisions
+### Conflicts reconciled and remaining decisions
 
 | Previous understanding / master concept | Resolution in canonical docs | Implementation or decision still needed |
 |---|---|---|
@@ -212,7 +382,7 @@ Authoritative references: [Python Strands Graph API](https://strandsagents.com/d
 
 Human/configuration decisions still outstanding: selected auth equivalent/provider and stable identity migration; documented external MCP clients if any; concrete candidate/node/time/cost limits; trusted merchant taxonomy/auth/session/freeze protocol and exact fees/discounts treatment; SQL/Valkey activation/invalidation ordering, idempotency scope/retention and worker fencing; simulator vs verified Lithic program/ASA/HMAC/HTTPS; deployed source/image and actual agent bindings/Secrets/PVC; Akamai tool-call/provider evidence; Object Storage availability or durable labeled local evidence. Existing environment names are not capability proof. No missing configuration is permission to relax enforcement.
 
-## Dependency-ordered implementation priorities and human handoffs
+### Dependency-ordered implementation priorities and human handoffs
 
 1. **Rishi + Cameron — close D01–D03/D15 and reconcile live source first.** Rishi owns signup/API operation state; Cameron owns scoped pod Secrets, sandbox-only provider client/idempotency/status and current deployment/auth/activity source. Humans choose auth continuity; agents inspect compatible incoming work before adding another system. Gate all usable instrument setup on verified purchase; retain unknown provider operation correlation.
 2. **All three — small H01/H03–H08 contract handoffs.** Agree typed Graph/backend phases, safe financial operation/status/unknown results, run-scoped credentials, event taxonomy/cursor, canonical store/freeze/binding and atomic invalidation protocol. Preserve existing names; any frozen-file additions use the dedicated contract-only PR. Human reviews decide boundaries; lane agents produce valid/failure examples and tests.
@@ -226,7 +396,7 @@ Human/configuration decisions still outstanding: selected auth equivalent/provid
 
 Tasks can proceed independently within lanes once their listed interfaces are supplied, but no owner should call a dependent task complete from a stub. None of these owner actions was executed as application work in this audit.
 
-## Documentation changes and remaining demo risk
+### Documentation changes and remaining demo risk
 
 Modified [AGENTS.md](../AGENTS.md): added master precedence, current implementation boundary, mandatory Graph/recovery/Kill Switch/SSE/side-effect invariants, Kubernetes/auth coordination and audit-only authorization. Preserved tree, lanes and frozen contracts.
 

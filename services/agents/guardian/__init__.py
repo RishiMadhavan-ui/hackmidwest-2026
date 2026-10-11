@@ -14,7 +14,7 @@ from typing import Any
 
 from guardian.checks import run_checks, suspicious_sources
 from guardian.investigator import ModelRunner, build_prompt, investigate, run_strands
-from leash_shared.llm import model_id
+from leash_shared.llm import model_id, configured_provider
 
 # TODO: switch to the agreed guardian findings model in leash_shared.models.
 Findings = dict[str, Any]
@@ -68,7 +68,7 @@ def evaluate(
       # No model and no deterministic findings: ask a human rather than stay quiet.
       recommendation = "review"
       reasons.append("Investigation model unavailable; a person should review this attempt.")
-    model_meta.update({"provider": "akamai-inference", "model_id": model_id()})
+    model_meta.update({"provider": configured_provider(), "model_id": model_id()})
 
   if not reasons:
     reasons = ["No findings."]

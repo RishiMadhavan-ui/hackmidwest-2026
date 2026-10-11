@@ -19,6 +19,10 @@ services/mcp
 services/mcp-leash
 services/mcp-store
 services/store
+# webhook image builds from repo root (needs services/webhook + shared/).
+services/webhook/**/__pycache__
+services/webhook/.venv
+services/webhook/tests
 tests
 docs
 infra

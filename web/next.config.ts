@@ -4,9 +4,11 @@ import type { NextConfig } from "next";
 //   API_ORIGIN=http://127.0.0.1:8000
 //   MCP_LEASH_ORIGIN=http://127.0.0.1:8002
 //   MCP_STORE_ORIGIN=http://127.0.0.1:8003
+//   RAIL_ORIGIN=http://127.0.0.1:8005
 const apiOrigin = process.env.API_ORIGIN ?? "http://api:8000";
 const mcpLeashOrigin = process.env.MCP_LEASH_ORIGIN ?? "http://mcp-leash:8002";
 const mcpStoreOrigin = process.env.MCP_STORE_ORIGIN ?? "http://mcp-store:8003";
+const railOrigin = process.env.RAIL_ORIGIN ?? "http://webhook:8000";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -21,11 +23,11 @@ const nextConfig: NextConfig = {
     },
   },
   async rewrites() {
-    return [
-      {
-        source: "/backend/:path*",
-        destination: `${apiOrigin}/:path*`,
-      },
+    return {
+      // Filesystem guards (including dynamic /backend/internal/*) must run
+      // before the broad backend adapter.
+      fallback: [{ source: "/backend/:path*", destination: `${apiOrigin}/:path*` }],
+      afterFiles: [
       ...(process.env.ENABLE_PUBLIC_MCP_PROXY === "1" ? [{
         source: "/mcp-leash/:path*",
         destination: `${mcpLeashOrigin}/:path*`,
@@ -34,7 +36,13 @@ const nextConfig: NextConfig = {
         source: "/mcp-store/:path*",
         destination: `${mcpStoreOrigin}/:path*`,
       }] : []),
-    ];
+      {
+        // Only the signed ASA responder is public; control routes stay private.
+        source: "/rail/lithic/asa",
+        destination: `${railOrigin}/lithic/asa`,
+      },
+      ],
+    };
   },
 };
 

@@ -74,6 +74,12 @@ spec:
                   name: app-env
                   key: LITHIC_ENVIRONMENT
                   optional: true
+            - name: RAIL_EVENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: RAIL_EVENT_TOKEN
+                  optional: true
             - name: WEBHOOK_INTERNAL_TOKEN
               valueFrom:
                 secretKeyRef:

@@ -1,5 +1,7 @@
 # R02: persisted purchase authority
 
+**Current implementation follow-up:** see [alignment-fixes-handoff.md](alignment-fixes-handoff.md) for identity-only signup, provenance/SSE, strict local rail, durable stop/provider control and remaining merchant/payment/Graph work. Earlier captures/test counts below describe their named revisions, not current deployed behavior.
+
 R02 implements mandate proposal, exact human confirmation, read/list/history,
 replacement, revocation and agent-run registration. It preserves Cameron's
 UUID-based signup/login/profile API and leaves the frozen R01 contracts unchanged.
