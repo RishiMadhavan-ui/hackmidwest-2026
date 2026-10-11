@@ -1,3 +1,5 @@
+# Build from the repo root so shared/leash_shared and db/migrations are available:
+#   docker build -f api/Dockerfile .
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app

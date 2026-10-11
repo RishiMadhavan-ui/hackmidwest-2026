@@ -69,30 +69,31 @@ hackmidwest-2026/
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
   infra/                             [P] Cameron: Akamai deployment
-  k8s/                               [E] Cameron: current LKE manifests
-  scripts/                           [E] Cameron: build/deploy/PostgreSQL provisioning
+  k8s/                               [E] Cameron: api/web/agents/mcp-leash/mcp-store/service
+  scripts/                           [E] Cameron: deploy_lke.sh + lib.sh / PostgreSQL provisioning
   mise.toml                          [E] Cameron: local tool versions
   api/                               [E] Rishi: current FastAPI backend
-    main.py                          [E] health/readiness, auth and mandate/run routes
+    main.py                          [E] health/readiness, auth, cards, mandate/run routes
     mandate_routes.py                [E] Rishi: scoped R02 REST routes
     mandate_service.py               [E] Rishi: transactional authority lifecycle
     principals.py                    [E] Rishi: human/agent ownership
     signing.py                       [E] Rishi: Ed25519 confirmation
     manage.py                        [E] Rishi: migrations and operator provisioning
-    auth.py                          [E] JWT signup/login/me
+    auth.py                          [E] JWT signup/login/me/balance; Lithic card on signup
+    cards.py                         [E] Cameron: on-demand VIRTUAL/SINGLE_USE (once-only PAN)
     db.py                            [E] checksummed PostgreSQL migrations and connections
     pyproject.toml                   [E] backend dependencies
     README.md                        [E] Rishi: R01 contract handoff/test commands
     tests/                           [E] Rishi: R01 and R02 signature/HTTP/PostgreSQL tests
-    Dockerfile                       [E] Rishi: API/shared/migrations included; root build context required
-  db/migrations/                     [E] Rishi: users and R02 authority/audit schema
+    Dockerfile                       [E] root build; COPY api/*.py, shared, db/migrations
+  db/migrations/                     [E] Rishi: users + R02 authority; Cameron: Lithic cards (0003)
   shared/
     pyproject.toml                   [P] Cameron: shared package installability
     leash_shared/
-      __init__.py                    [P] Cameron: package marker
+      __init__.py                    [E] Cameron: package marker
       models.py                      [E] Rishi: R01 accepted integration baseline
       events.py                      [E] Rishi: R01 sanitized events/publish helper
-      lithic.py                      [P] Cameron: official sandbox client wrapper
+      lithic.py                      [E] Cameron: sandbox holder + virtual card spend-limit
       llm.py                         [E] Aditya: centralized model factory
   services/
     agents/                          [E] Aditya: shopper/guardian/provenance + image
@@ -111,9 +112,9 @@ hackmidwest-2026/
     store/                           [P] Cameron: controlled merchant
       tests/                         [P] catalog/checkout/correlation tests
   web/                               [E] Rishi: Next.js/Tailwind/shadcn
-    src/app/                         [E] home, signup, signin, profile
+    src/app/                         [E] home, signup (name/zip), signin, profile (Lithic card credit)
     src/components/                  [E] site-nav + ui primitives
-    src/lib/api.ts                   [E] apiFetch + auth helpers
+    src/lib/api.ts                   [E] apiFetch + auth + fetchBalance helpers
     src/lib/auth.tsx                 [E] AuthProvider / Bearer state
     src/lib/api-types.ts             [P] generated from agreed OpenAPI
   tests/
@@ -196,7 +197,7 @@ All are MVP requirements, not future roadmap items. Detailed fields, state trans
 Current starter commands (run in the named directory after installing dependencies; API needs env from `.env`, e.g. `set -a && source ../.env && set +a`):
 
 ```text
-api/: uv run uvicorn main:app --reload --port 8000
+api/: PYTHONPATH=../shared uv run uvicorn main:app --reload --port 8000
 services/agents/: uv run uvicorn main:app --reload --port 8001
 services/mcp-leash/: uv run uvicorn main:app --reload --port 8002
 services/mcp-store/: uv run uvicorn main:app --reload --port 8003
@@ -208,7 +209,7 @@ web/: pnpm build
 deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 images + apply k8s/
 ```
 
-API has health/readiness, existing auth, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
+API has health/readiness, auth (including Lithic signup/balance), `POST /cards` / `GET /cards`, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` issues per-purchase `SINGLE_USE` (default) or `VIRTUAL` cards (user JWT, or `AGENTS_SERVICE_TOKEN` / `AGENT_TOKEN_SHOPPER` + `user_id`); PAN/CVV returned once, never persisted. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
 Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 

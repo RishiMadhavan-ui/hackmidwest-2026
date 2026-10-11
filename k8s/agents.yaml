@@ -1,4 +1,16 @@
 # Strands agents service. ClusterIP only — called by api (and tools) inside the cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agents-trace-spool
+  namespace: hackmidwest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,8 +42,13 @@ spec:
               value: http://mcp-leash:8002/mcp
             - name: MCP_STORE_URL
               value: http://mcp-store:8003/mcp
+            - name: TRACE_SPOOL_DIR
+              value: /app/trace-spool
           ports:
             - containerPort: 8000
+          volumeMounts:
+            - name: trace-spool
+              mountPath: /app/trace-spool
           readinessProbe:
             httpGet:
               path: /health
@@ -50,6 +67,10 @@ spec:
               memory: 256Mi
             limits:
               memory: 512Mi
+      volumes:
+        - name: trace-spool
+          persistentVolumeClaim:
+            claimName: agents-trace-spool
 ---
 apiVersion: v1
 kind: Service

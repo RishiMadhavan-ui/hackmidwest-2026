@@ -1,0 +1,28 @@
+# Root build context for api/ and agents/ Dockerfiles (docker build -f … .).
+# web/ and mcp-* images use their own directory as context and ignore this file.
+.git
+.github
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.next
+**/node_modules
+.env
+.env.*
+!.env.example
+hackmidwest-kubeconfig.yaml
+*.md
+web
+services/mcp
+services/mcp-leash
+services/mcp-store
+services/store
+services/webhook
+tests
+docs
+infra
+.idea
+.cursor
+# Note: store/mcp images use their own directory as Docker context (not this file).

@@ -32,8 +32,13 @@ def init_db() -> None:
         raise DatabaseUnavailable("Database migrations are not packaged")
     with get_conn() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(781202602)")
-        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, sha256 TEXT NOT NULL)")
-        applied = {row["name"]: row["sha256"] for row in conn.execute("SELECT name, sha256 FROM schema_migrations").fetchall()}
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, sha256 TEXT NOT NULL)"
+        )
+        applied = {
+            row["name"]: row["sha256"]
+            for row in conn.execute("SELECT name, sha256 FROM schema_migrations").fetchall()
+        }
         for path in sorted(root.glob("*.sql")):
             source = path.read_bytes()
             digest = hashlib.sha256(source).hexdigest()
@@ -42,4 +47,7 @@ def init_db() -> None:
                     raise DatabaseUnavailable("Applied migration checksum changed")
                 continue
             conn.execute(source.decode("utf-8"), prepare=False)
-            conn.execute("INSERT INTO schema_migrations (name, sha256) VALUES (%s, %s)", (path.name, digest))
+            conn.execute(
+                "INSERT INTO schema_migrations (name, sha256) VALUES (%s, %s)",
+                (path.name, digest),
+            )

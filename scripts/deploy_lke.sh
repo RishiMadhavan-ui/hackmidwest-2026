@@ -87,7 +87,8 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   fi
   [[ -x $BUILDX ]] || BUILDX=$(command -v docker-buildx)
   PLATFORM=${PLATFORM:-linux/amd64}
-  "$BUILDX" build --platform "$PLATFORM" -t "$API_IMAGE" --load "$REPO/api"
+  # api image needs shared/leash_shared — build from repo root.
+  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/api/Dockerfile" -t "$API_IMAGE" --load "$REPO"
   docker push "$API_IMAGE"
   "$BUILDX" build --platform "$PLATFORM" -t "$WEB_IMAGE" --build-arg NEXT_PUBLIC_API_URL=/backend --load "$REPO/web"
   docker push "$WEB_IMAGE"
@@ -107,6 +108,14 @@ fi
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 tmp_env=$(mktemp)
 grep -vE '^(IMAGE_REGISTRY|IMAGE_TAG)=' .env | tr -d '\r' > "$tmp_env" || true
+# kubectl --from-env-file rejects duplicate keys (common after merging .env.example blocks).
+dup_keys=$(awk -F= '/^[[:space:]]*#/ || NF < 1 { next } { print $1 }' "$tmp_env" | sort | uniq -d)
+if [[ -n $dup_keys ]]; then
+  echo "Duplicate keys in .env (remove extras before deploy):"
+  echo "$dup_keys"
+  rm -f "$tmp_env"
+  exit 1
+fi
 kubectl -n "$NAMESPACE" create secret generic app-env --from-env-file="$tmp_env" --dry-run=client -o yaml \
   | kubectl apply -f - >/dev/null
 rm -f "$tmp_env"
@@ -161,7 +170,9 @@ fi
 
 # 9. Verify through the public web Service and in-cluster agents.
 healthy() { curl -sf --max-time 5 "http://$nb_ip/backend/health"; }
+ready() { curl -sf --max-time 5 "http://$nb_ip/backend/readyz"; }
 wait_for 600 "http://$nb_ip/backend/health" healthy
+wait_for 600 "http://$nb_ip/backend/readyz (migrations + DB)" ready
 agents_healthy() {
   kubectl -n "$NAMESPACE" run "agents-health-$$" --rm -i --restart=Never --image=curlimages/curl:8.5.0 -- \
     curl -sf --max-time 5 "http://agents:8000/health" >/dev/null
@@ -174,12 +185,13 @@ fi
 
 echo
 healthy | python3 -m json.tool
+ready | python3 -m json.tool
 echo
 echo "App is up on LKE after $(elapsed):"
 echo "  Web:       http://$nb_ip"
-echo "  API:       http://$nb_ip/backend/health"
+echo "  API:       http://$nb_ip/backend/health  (ready: /backend/readyz)"
 echo "  mcp-leash: http://$nb_ip/mcp-leash/mcp  (health: /mcp-leash/health)"
 echo "  mcp-store: http://$nb_ip/mcp-store/mcp  (health: /mcp-store/health)"
-echo "  Agents:    ClusterIP http://agents:8000/health (in-cluster)"
+echo "  Agents:    ClusterIP http://agents:8000/health (in-cluster; PVC agents-trace-spool)"
 echo "  Postgres:  managed $DB_LABEL (DATABASE_URL in .env / app-env Secret)"
 echo "kubectl: export KUBECONFIG=$REPO/$KUBECONFIG_FILE"

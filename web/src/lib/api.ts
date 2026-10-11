@@ -8,12 +8,30 @@ export const TOKEN_STORAGE_KEY = "hmw_access_token";
 export type User = {
   id: string;
   email: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  postal_code?: string | null;
+  lithic_linked?: boolean;
+  lithic_card_last_four?: string | null;
 };
 
 export type TokenResponse = {
   access_token: string;
   token_type: string;
   user: User;
+};
+
+/** Credit-like headroom vs sandbox virtual card spend_limit (not a prepaid ledger). */
+export type Balance = {
+  currency: string;
+  available_cents: number;
+  pending_cents: number;
+  total_cents: number;
+  spent_cents?: number;
+  limit_cents?: number;
+  last_four?: string | null;
+  provider: string;
+  model?: string;
 };
 
 export class ApiError extends Error {
@@ -75,12 +93,22 @@ export async function checkHealth() {
   return apiFetch<{ status: string; service: string }>("/health", {}, null);
 }
 
-export async function signup(email: string, password: string) {
+export type SignupInput = {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  postal_code: string;
+  /** Forever virtual-card spend limit in integer cents. */
+  spend_limit_cents: number;
+};
+
+export async function signup(input: SignupInput) {
   return apiFetch<TokenResponse>(
     "/auth/signup",
     {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(input),
     },
     null,
   );
@@ -99,4 +127,18 @@ export async function login(email: string, password: string) {
 
 export async function me(token?: string | null) {
   return apiFetch<User>("/auth/me", {}, token);
+}
+
+export async function fetchBalance(token?: string | null) {
+  return apiFetch<Balance>("/auth/balance", {}, token);
+}
+
+/** Display-only conversion; money stays integer cents on the wire. */
+export function formatUsdFromCents(cents: number): string {
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(cents);
+  const dollars = Math.floor(abs / 100);
+  const rem = abs % 100;
+  const dollarsFmt = dollars.toLocaleString("en-US");
+  return `${sign}$${dollarsFmt}.${rem.toString().padStart(2, "0")}`;
 }
