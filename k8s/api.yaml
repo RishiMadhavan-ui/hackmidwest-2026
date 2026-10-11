@@ -104,6 +104,12 @@ spec:
                   name: app-env
                   key: STORE_CHARGE_TOKEN
                   optional: true
+            - name: MERCHANT_BACKEND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: MERCHANT_BACKEND_TOKEN
+                  optional: true
             - name: ATTACK_LAB_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -123,6 +129,27 @@ spec:
                 secretKeyRef:
                   name: app-env
                   key: AGENTS_SERVICE_TOKEN
+                  optional: true
+            # Same credentials the agents pod uses to claim launches. Required so
+            # Mission Control drafting/start can bind and refuse orphan UI agents.
+            - name: AGENT_TOKEN_SHOPPER
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: AGENT_TOKEN_SHOPPER
+                  optional: true
+            - name: AGENT_TOKEN_SHOPPER_SCRIPTED
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: AGENT_TOKEN_SHOPPER_SCRIPTED
+                  optional: true
+            # Human launch / Graph lease gate (shopping start + execution claim).
+            - name: LEASH_EXECUTION_ENABLED
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LEASH_EXECUTION_ENABLED
                   optional: true
             - name: API_URL
               value: http://api:8000

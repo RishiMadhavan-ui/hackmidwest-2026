@@ -31,6 +31,11 @@ spec:
                 secretKeyRef:
                   name: app-env
                   key: STORE_CHARGE_TOKEN
+            - name: MERCHANT_BACKEND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: MERCHANT_BACKEND_TOKEN
             - name: ATTACK_LAB_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -43,6 +48,14 @@ spec:
                   name: app-env
                   key: STORE_EVIL_MODE
                   optional: true
+            - name: LEASH_EXECUTION_ENABLED
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: LEASH_EXECUTION_ENABLED
+                  optional: true
+            - name: API_URL
+              value: http://api:8000
             - name: WEBHOOK_URL
               value: http://webhook:8000
             - name: WEBHOOK_CHARGE_TOKEN

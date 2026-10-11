@@ -83,6 +83,9 @@ spec:
                   optional: true
             - name: STORE_URL
               value: http://store:8000
+            # Same as mcp-leash: browse/create must POST /execution/authorize.
+            - name: API_URL
+              value: http://api:8000
           ports:
             - containerPort: 8003
           readinessProbe:
