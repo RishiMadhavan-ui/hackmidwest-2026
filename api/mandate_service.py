@@ -50,8 +50,18 @@ def scope_head(conn, mandate_id: str, principal: Principal, *, lock=False):
     "SELECT * FROM mandate_heads WHERE id = %s AND user_id = %s" + (" FOR UPDATE" if lock else ""),
     (mandate_id, principal.user_id),
   ).fetchone()
-  if row is None or (principal.role == "agent" and row["agent_id"] != principal.agent_id):
+  if row is None:
     raise AuthorityError(404, "Mandate not found")
+  if principal.role == "agent" and row["agent_id"] != principal.agent_id:
+    # Human-confirmed mandates are owned by the user. Any of that human's enabled
+    # shoppers (live or scripted) may execute them so Mission Control can run a
+    # scripted fixture under a mandate drafted for the live UI agent.
+    peer = conn.execute(
+      "SELECT 1 FROM leash_agents WHERE id = %s AND user_id = %s AND enabled",
+      (principal.agent_id, principal.user_id),
+    ).fetchone()
+    if peer is None:
+      raise AuthorityError(404, "Mandate not found")
   return row
 
 
@@ -267,7 +277,12 @@ def list_mandates(conn, principal: Principal, *, status: MandateStatus | None, n
   items = []
   for head in heads:
     if principal.role == "agent" and head["agent_id"] != principal.agent_id:
-      continue
+      peer = conn.execute(
+        "SELECT 1 FROM leash_agents WHERE id = %s AND user_id = %s AND enabled",
+        (principal.agent_id, principal.user_id),
+      ).fetchone()
+      if peer is None:
+        continue
     mandate = version_record(conn, head["id"], head["current_version"], now=now)
     if status is not None and mandate.status != status:
       continue

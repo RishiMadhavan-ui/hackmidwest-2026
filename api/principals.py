@@ -128,3 +128,47 @@ def bind_agent(conn, *, user_id: str, agent_id: str, token: str, modes: tuple[st
     SET token_sha256 = excluded.token_sha256, allowed_modes = excluded.allowed_modes, enabled = true""",
     (agent_id, user_id, token_digest(token), Jsonb(list(dict.fromkeys(modes)))),
   )
+
+
+_CLUSTER_SHOPPER = {
+  "live": ("AGENT_TOKEN_SHOPPER", "agt_shopper"),
+  "scripted": ("AGENT_TOKEN_SHOPPER_SCRIPTED", "agt_shopper_scripted"),
+}
+
+
+def ensure_cluster_shopper(conn, user_id: str, mode: str) -> str:
+  """Return the agents-pod shopper id for this human and mode, binding if free.
+
+  Mission Control drafts often use a live UI agent. Scripted Start shopping still
+  needs the AGENT_TOKEN_SHOPPER_SCRIPTED row so the worker can claim the launch.
+  """
+  if mode not in _CLUSTER_SHOPPER:
+    raise AuthorityError(422, "Shopper mode must be live or scripted")
+  env_name, default_id = _CLUSTER_SHOPPER[mode]
+  token = os.getenv(env_name, "").strip()
+  if len(token) < 32:
+    raise AuthorityError(503, f"Shopping start requires {env_name} on the API")
+  owned = conn.execute(
+    "SELECT id, user_id, enabled, allowed_modes FROM leash_agents WHERE token_sha256 = %s",
+    (token_digest(token),),
+  ).fetchone()
+  if owned is not None:
+    if str(owned["user_id"]) != user_id:
+      raise AuthorityError(
+        409,
+        f"{env_name} is bound to another human; an operator must rebind it",
+      )
+    if not owned["enabled"] or list(owned["allowed_modes"]) != [mode]:
+      bind_agent(
+        conn, user_id=user_id, agent_id=str(owned["id"]), token=token, modes=(mode,),
+      )
+    return str(owned["id"])
+
+  agent_id = default_id
+  taken = conn.execute(
+    "SELECT user_id FROM leash_agents WHERE id = %s", (agent_id,),
+  ).fetchone()
+  if taken is not None and str(taken["user_id"]) != user_id:
+    agent_id = "agt_" + mode + "_" + user_id.removeprefix("usr_")[:16]
+  bind_agent(conn, user_id=user_id, agent_id=agent_id, token=token, modes=(mode,))
+  return agent_id

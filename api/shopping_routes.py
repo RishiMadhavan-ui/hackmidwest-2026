@@ -17,9 +17,9 @@ from activity import emit_activity
 from authority_errors import AuthorityError
 from db import get_conn
 from execution import Launch, launch as create_human_launch
-from leash_shared.models import MandateStatus, PurchaseMandate
+from leash_shared.models import MandateStatus
 from mandate_service import current_mandate, utc_now
-from principals import Principal, require_human, token_digest
+from principals import Principal, ensure_cluster_shopper, require_human
 from workflow_control import lock_user_authority
 
 router = APIRouter(tags=["shopping"])
@@ -93,51 +93,6 @@ def _agents_payload(
   return payload
 
 
-def _cluster_shopper_env(agent_mode: str) -> str:
-  return (
-    "AGENT_TOKEN_SHOPPER"
-    if agent_mode == "live"
-    else "AGENT_TOKEN_SHOPPER_SCRIPTED"
-  )
-
-
-def require_claimable_shopper(
-  conn, mandate: PurchaseMandate, *, agent_mode: str
-) -> None:
-  """Refuse launches the agents pod cannot claim with its mode credential.
-
-  Agents authenticate as the leash_agents row bound to AGENT_TOKEN_SHOPPER
-  (live) or AGENT_TOKEN_SHOPPER_SCRIPTED. Mission Control mandates that use a
-  random UI-only agent produce claim 404 and a stuck queued run.
-  """
-  env_name = _cluster_shopper_env(agent_mode)
-  token = os.getenv(env_name, "").strip()
-  if len(token) < 32:
-    raise AuthorityError(
-      503,
-      f"Shopping start requires {env_name} on the API",
-    )
-  bound = conn.execute(
-    """SELECT id, user_id FROM leash_agents
-       WHERE token_sha256 = %s AND enabled""",
-    (token_digest(token),),
-  ).fetchone()
-  if bound is None:
-    raise AuthorityError(
-      503,
-      f"{env_name} is not bound to an enabled shopper agent",
-    )
-  if (
-    str(bound["user_id"]) != mandate.user_id
-    or str(bound["id"]) != mandate.agent_id
-  ):
-    raise AuthorityError(
-      409,
-      "This mandate's shopper is not bound to the cluster agent credential; "
-      "an operator must bind-agent for this account before Start shopping",
-    )
-
-
 @router.post("/shopping/start")
 def start_shopping(
   body: StartShoppingBody,
@@ -148,6 +103,8 @@ def start_shopping(
   token = _agents_service_token()
   if not agents or len(token) < 32:
     raise AuthorityError(503, "Shopping start is not configured")
+  if body.agent_mode == "live" and body.scenario == "subscription_attack":
+    raise AuthorityError(422, "subscription_attack requires scripted agent_mode")
 
   with get_conn() as conn:
     lock_user_authority(conn, principal.user_id)
@@ -160,20 +117,9 @@ def start_shopping(
       raise AuthorityError(409, "Mandate is outside its validity window")
     if mandate.canonical_payload_hash is None:
       raise AuthorityError(409, "Mandate hash is missing")
-    agent = conn.execute(
-      """SELECT allowed_modes FROM leash_agents
-         WHERE id = %s AND user_id = %s AND enabled""",
-      (mandate.agent_id, principal.user_id),
-    ).fetchone()
-    if not agent or len(agent["allowed_modes"]) != 1:
-      raise AuthorityError(409, "Mandate agent has not been provisioned")
-    shopper_mode = str(agent["allowed_modes"][0])
-    if body.agent_mode != shopper_mode:
-      raise AuthorityError(
-        409,
-        f"This mandate's shopper is provisioned for {shopper_mode} mode only",
-      )
-    require_claimable_shopper(conn, mandate, agent_mode=shopper_mode)
+    # Bind/claim the cluster credential for the requested mode (live or scripted),
+    # even when the mandate was drafted against a different UI agent.
+    ensure_cluster_shopper(conn, principal.user_id, body.agent_mode)
     task = (mandate.description or "").strip() or DEMO_TASK
     start_url = _scenario_fields(body).get("start_url")
 
@@ -185,6 +131,7 @@ def start_shopping(
       canonical_payload_hash=mandate.canonical_payload_hash,
       confirmed=True,
       start_url=start_url,
+      agent_mode=body.agent_mode,
     ),
     principal,
   )
@@ -192,7 +139,7 @@ def start_shopping(
   if body.agent_mode != launched_mode:
     raise AuthorityError(
       409,
-      f"This mandate's shopper is provisioned for {launched_mode} mode only",
+      f"Launch registered as {launched_mode} but {body.agent_mode} was requested",
     )
 
   run_id = str(launched["run_id"])
