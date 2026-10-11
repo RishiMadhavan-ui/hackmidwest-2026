@@ -2,13 +2,7 @@
 
 Owner: Aditya. Port 8001.
 
-**Graph implemented; integration gated.** This branch runs a real bounded Strands
-Graph with investigation and fresh-context recovery. Production launches require
-a backend-verified human launch and execution lease. Current main lacks that
-execution API, so this branch deliberately refuses to start shopping against it.
-See [graph-handoff.md](graph-handoff.md) for proposed interfaces, owner dependencies
-and test evidence. No live recovery, distributed fencing or workflow SSE acceptance
-is claimed.
+**Graph integrated and locally tested.** Actual bounded SDK Graph uses both MCP servers and API-verified human launches/leases/private run credentials. Real HTTP/SQL/Redis acceptance blocks the subscription, quarantines and buys a clean alternative under unchanged authority. Model choices were scripted; live inference/injection/deployment remains a separate gate. See [current handoff](../../api/full-app-handoff.md) and [results](../../docs/FULL_APP_TEST_RESULTS.md).
 
 - `shopper/`: the demo shopper, a real Strands agent that is **gullible on purpose**. Don't add prompt-injection defenses to it; Leash's protection lives in the api, the store, and the rail. All its tools come from two separate MCP services: `services/mcp-store` (`browse`, `create_checkout`, `complete_checkout`) and `services/mcp-leash` (mandates and payments).
 - `provenance/`: before/after tool hooks that emit sanitized trace events, plus a source record for every page the shopper reads, built from the store MCP's evidence (sha256, hidden text, suspicious phrases, redacted snapshot). Raw HTML never enters this service. Events reach the api through a durable outbox.
@@ -26,7 +20,7 @@ PYTHONPATH=../../shared uv run uvicorn main:app --port 8001
 
 In PowerShell, set `$env:PYTHONPATH="../../shared"` first. To keep settings in a file, put them in `services/agents/.env` (gitignored) and use `uv run --env-file .env ...`.
 
-After the execution API is implemented, the CLI additionally takes `--mandate`,
+The legacy operator CLI additionally takes `--mandate`,
 `--run-id` and `--launch-id` from a fresh authenticated human launch, and optional
 `--start-url`. Do not invent identifiers or reuse an old launch after Stop.
 
@@ -44,7 +38,7 @@ docker build -f services/agents/Dockerfile .
 
 `GET /health` and `GET /healthz` are open. Everything else needs `Authorization: Bearer $AGENTS_SERVICE_TOKEN`; with no token configured those routes refuse every call (503). Keep the service off the public ingress too, but that alone isn't authentication.
 
-- `POST /runs` with `{task, mandate_id, run_id, launch_id, start_url?, agent_mode?, sku?, claim_sku?}` queues the supplied run. Missing launch identifiers return 409; accepting the queue is not evidence that the execution backend accepted the launch.
+- `POST /runs` with `{task, mandate_id, run_id, launch_id, start_url?, agent_mode?, sku?, claim_sku?}` queues the supplied run with paired `agent_id`/private `agent_credential` dispatched by API (never browser). Missing launch identifiers return 409; accepting the queue is not evidence that the execution backend accepted the launch.
 - `GET /runs/{run_id}` returns status, whether the run registered with the api, redacted output, and trace events.
 - `POST /guardian/evaluate` with `{mandate, checkout?, proposal?, provenance?, trace?}` returns advisory findings. It can take up to 20 seconds when the model runs, so keep it off the payment's critical path.
 
@@ -55,26 +49,19 @@ docker build -f services/agents/Dockerfile .
 
 The same fixture selector from the CLI: `--scripted-sku SUB-CARE-MO --claim-sku CHG-65W`.
 The Graph records the selected SKU as an agent claim; no claimed SKU substitutes
-for the API's checkout evidence. This fixed-SKU fixture does not select a new
-replacement automatically. Recovery tests supply explicitly separate candidates.
+for the API's checkout evidence. A scripted Lab run supplies `recovery_sku=CHG-65W-SAFE`; model choices remain labeled fixtures while all tools and financial decisions are real.
 
 ## Run registration and trace delivery
 
 The human launch API must register and bind the run to its owner, mandate and
-mode before dispatch. The Graph claims that exact run through the proposed
+mode before dispatch. The Graph claims that exact run through the implemented private
 execution API; it cannot autonomously register a replacement with a static token.
 Production requires `API_URL`. There is no local-only production launch. Legacy
 registration remains only for injected test runners.
 
-Each mode is its own Leash agent with its own mode-bound credential (the api binds a credential to exactly one mode): live runs use `AGENT_TOKEN_SHOPPER` as `agt_shopper`, scripted runs use `AGENT_TOKEN_SHOPPER_SCRIPTED` as `agt_shopper_scripted`. A run's registration, Leash MCP calls, and trace delivery all use its own mode's credential, and its trace events name that agent. There's no fallback: a scripted run without its credential fails before sending anything, and the service refuses to use one token for both modes. Each credential's traces spool in their own folder (`TRACE_SPOOL_DIR/live`, `TRACE_SPOOL_DIR/scripted`).
+Normal human/UI launches supply a private exact-run credential and account-owned agent ID; no global token changes owner. Historical CLI tokens remain mode-separated/bound to their original human. There is no scripted/live credential fallback or permission to execute a scripted run under a live mandate.
 
-Trace events are redacted and fsynced to `TRACE_SPOOL_DIR`. A background worker
-delivers tool/source reports to `POST /provenance` and Graph/inference/investigation/
-recovery reports to the proposed `POST /workflow-events`. The latter endpoint does
-not exist on current main. The outbox retries transient errors, retains permanent
-rejections in `rejected/`, and replays pending files on restart. Backend intake
-must deduplicate by event ID and payload. The process-local `/runs/{id}` view is
-not persisted SSE/history; that integration remains Rishi's owner dependency.
+Trace events are redacted/fsynced to persistent TRACE_SPOOL_DIR. Private UI/Lab workers use the `delegated` lane and AGENTS_SERVICE_TOKEN to `/internal/agent-events`; API validates registered run/agent/mode before durable provenance/workflow intake. This lane can deliver after worker expiry/restarts and cannot approve money. Historical static lanes retain `/provenance`/`/workflow-events`. Transient failures retry; permanent rejected events remain inspectable. `/runs/{id}` convenience registry is bounded/recent; canonical history and SSE live in API PostgreSQL.
 
 ## Environment
 

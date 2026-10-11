@@ -1,55 +1,8 @@
 # AGENTS.md
 
-**October 11 agent branch update (`aditya/strands-graph`, based on `138d636`):**
-the bounded Strands Graph, fresh-context recovery, local cancellation and genuine
-execution-event spooling are implemented with fixture tests. This is not live
-acceptance: human-launch/worker-fencing APIs, MCP scope enforcement, workflow-event
-intake/SSE integration and the contained merchant/payment flow remain dependencies.
-The client fails closed against today's backend. No API/database/web ownership or
-frozen contract changed. See [Graph handoff](services/agents/graph-handoff.md).
+**Current integrated source — October 11, 2026:** the full local-rail shopping path is implemented and tested through an actual Strands SDK Graph, both HTTP MCP servers, authenticated API/merchant boundaries, PostgreSQL and atomic Redis enforcement. Natural-language drafting now generates proposed terms before explicit human confirmation. Each ordinary account gets its own immutable shopper identity; private expiring run credentials preserve other users' bindings. Automatic recovery blocks the subscription, quarantines its source, and verifies a clean charger under the unchanged mandate. Both stop controls, persisted SSE/history, scoped Attack Lab execution and original-outcome readback are wired.
 
-**P0 Attack Lab containment (October 11):** anonymous deployed
-`/store/products/chg-65w?evil=1` served a poisoned listing; `/attack-lab` was 404.
-The source now denies runtime poison selection in both the web route and store,
-ignores legacy `STORE_EVIL_MODE`, and preserves clean browsing/offline fixtures.
-This patch is not a deployed remediation or an implemented operator workflow.
-During integration, Cameron's Mission Control/human-draft merge `e52bbde` was
-preserved; its ordinary-user attack link is replaced with a disabled placeholder.
-The human draft's automatic shared shopper-token binding is separately flagged
-for identity review; it is not approved operator provisioning.
-See [Attack Lab audit](docs/ATTACK_LAB_SECURITY_AUDIT.md) and
-[spec section 29](docs/LEASH_SPEC.md#29-attack-lab-access-control-p0).
-
-**Current protected-charge path (branch work over R03/R11 foundation):** payment
-operations still commit before merchant retrieval with immutable
-human/agent/run/mandate version/hash and stable private references. Verified
-charger checkouts now own/freeze via `STORE_CHARGE_TOKEN`, bind the reserved
-`authorization_event_id`, seed a one-use local-rail grant (`PUT /internal/grants`
-with `run_id`), and finish `prepared → authorized` (migration `0011`).
-`POST /payments` returns instrument/event secrets once; GET never re-discloses.
-Store `complete` charges `POST {WEBHOOK_URL}/local/authorize` with that durable
-event id; unbound remains 403; rail unknown outcomes stay 503 without inventing
-a new event. Run Stop latches Valkey unused grants for that `run_id`
-(`pending_rail_ack`). Subscriptions and fail-closed verification still block.
-Lithic issuance, provider reconciliation workers, real Graph/recovery and full
-product UI remain required. See [R03/R11 handoff](api/r03-r11-handoff.md).
-Frozen shared models/events, historical migrations and LKE topology are preserved.
-
-**Historical containment baseline (`d773079` + fixes committed at `11d6696`):** Cameron's checkout/payment work is
-preserved with security containment. Authenticated configured merchant retrieval,
-strict canonical facts/hash validation and durable blocked payment preflight exist.
-`POST /payments` requires the agent's owned registered uncancelled run, current
-confirmed mandate and account gate; `GET /payments/{id}` is user-and-agent scoped.
-A verified charger returns `blocked` / `financial_authority_unavailable` until
-durable issuance/reconciliation and atomic run financial revocation are complete;
-no grant, legacy account card or simulated charge is activated. Subscription
-preflight still returns its deterministic product reasons. Store listing/start,
-catalog/read and binding primitives remain; unbound completion is 403 and a valid
-bound completion is 503 with no rail call. This is tested containment, not a
-finished purchase flow. Committed migration 0007 is unchanged; unpublished V2
-closure/session migrations are now 0008/0009. See [docs/MAIN_INTEGRATION_HANDOFF.md](docs/MAIN_INTEGRATION_HANDOFF.md)
-for the exact risks, owner fixes and enablement gates. Frozen contracts and LKE
-topology remain intact.
+This is **local implementation evidence, not a deployed or live-model/sandbox completion claim**. The acceptance test scripts model choices while exercising real services and real financial decisions on the Local Payment Rail Simulator. Live Akamai inference/injection, Lithic checkout correlation, TLS/cluster/pod-restart evidence and the timed rehearsal remain explicit gates. Current interfaces/configuration are in [the full-app handoff](api/full-app-handoff.md); results in [the evidence report](docs/FULL_APP_TEST_RESULTS.md); all 147 case assessments in [security coverage](docs/LEASH_SECURITY_COVERAGE.md). Frozen shared models/events and historical migrations 0001–0012 are unchanged; forward migrations 0013–0015 are required.
 
 **V2 precedence:** the post-lesson V2 master is the current desired state. Read
 [spec section 27](docs/LEASH_SPEC.md#27-v2-post-lesson-baseline) and the
@@ -125,20 +78,21 @@ effective stop; a new run ID must not bypass the required fresh human launch.
 
 ## Architecture and implementation reality
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; binding primitives exist, but completion is disabled until durable payment/reconciliation and run financial controls exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and account stop/provider CLOSED intents and partial run Stop are implemented and locally tested. **Not a complete or deployed MVP:** owned durable merchant facts/protected charge binding, spending-enabled payments/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+**Current integrated source — October 11, 2026:** the full local-rail shopping path is implemented and tested through an actual Strands SDK Graph, both HTTP MCP servers, authenticated API/merchant boundaries, PostgreSQL and atomic Redis enforcement. Natural-language drafting now generates proposed terms before explicit human confirmation. Each ordinary account gets its own immutable shopper identity; private expiring run credentials preserve other users' bindings. Automatic recovery blocks the subscription, quarantines its source, and verifies a clean charger under the unchanged mandate. Both stop controls, persisted SSE/history, scoped Attack Lab execution and original-outcome readback are wired.
+
+This is **local implementation evidence, not a deployed or live-model/sandbox completion claim**. The acceptance test scripts model choices while exercising real services and real financial decisions on the Local Payment Rail Simulator. Live Akamai inference/injection, Lithic checkout correlation, TLS/cluster/pod-restart evidence and the timed rehearsal remain explicit gates. Current interfaces/configuration are in [the full-app handoff](api/full-app-handoff.md); results in [the evidence report](docs/FULL_APP_TEST_RESULTS.md); all 147 case assessments in [security coverage](docs/LEASH_SECURITY_COVERAGE.md). Frozen shared models/events and historical migrations 0001–0012 are unchanged; forward migrations 0013–0015 are required.
 
 **Historical integration snapshot (superseded by the current handoff):**
 
 October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's merged two-service MCP implementation. R02 adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron's API build-context/readiness changes are merged; the public readiness endpoint returns 200. No shared database or deployed service was changed.
 
-- **`api/`:** JWT identity, signed immutable mandates, registered runs; `POST /provenance`; owner `GET /activity` and `/activity/stream`; `POST/GET /killswitch`; agent-owned `/agent-runs/{id}/control`; dedicated rail `POST /internal/activity`. `payment_service.py` retrieves configured authenticated merchant facts for preflight and persists blocked attempts. `/payments` requires an owned registered uncancelled run; financial authority remains unavailable. Verified issuance/reconciliation remain absent. `/health[z]` is liveness; `/readyz` checks schema/database.
-- **`web/`:** landing/signup/signin; signed-in Mission Control, mandate review/confirm/replace/revoke with version history, activity timeline, incidents with intent-vs-checkout comparison, payments history, a read-only Attack Lab (clean listing plus recorded sources/outcomes; attack execution disabled) and account page, all reading real API routes and one shared persisted SSE stream. Human Kill Switch and per-run stop use dialogs. Humans can draft mandates at `/mandates/new` (`POST /mandates/draft`); Cameron's `/mission-control` page also runs inside the app shell. No human route starts a shopping run yet. Signup never presents spending authority; existing custom JWT is preserved.
-- **`services/agents/`:** single Strands shopper Agent, guardian and durable provenance spool. Real Graph, automatic containment/recovery, durable progress/fencing and cancellation-control polling remain Aditya's work. Configured provider attribution never proves live inference.
-- **`services/mcp-leash/`:** four thin financial tools on internal `:8002/mcp`, forwarding the agent bearer. Payment timeout reports unknown and forbids another purchase until reconciled; private durable payment-operation IDs now exist; financial activation/reconciliation remain pending.
-- **`services/mcp-store/`:** authenticated browse/create/complete tools on internal `:8003/mcp`, distinct store credential, store-only redirects and sanitized evidence. Cameron's simulated merchant create/read target exists; bind primitives exist; protected durable completion remains unavailable.
-- **`services/webhook/`:** strict local charge credential; complete frozen grants with checkout binding and <=30-minute lifetime; Valkey atomic consume/cache/event + human stop latch. Separate signed ASA adapter requires HMAC and always fails closed without trusted checkout correlation. Provider pause/close accepts only confirmed card identity/state; simulation HTTP route is unavailable until durable payment operations exist. Rail stream relay writes through API with an event-only credential outside the hot path.
-- **`services/store/`:** simulated Volt Supply Co. catalog/listings and process-memory checkout create/read. `STORE_API_TOKEN` is mandatory (>=32 characters); `/readyz` checks configuration. Same-merchant/2999/USD charger and subscription have distinct canonical SKU/category/attributes/recurrence. Unbound completion is 403; valid-bound completion is 503 without rail/provider side effects. Owned sessions, durable freeze/revision and protected charge remain Cameron's C02 work. Public proxy exposes listings only.
-- **Deploy:** existing LKE topology preserved; explicit Secret-key allowlists, persistent Valkey AOF/PVC, financial NetworkPolicy and root-context API/store/webhook images. Public MCP proxies default off; only exact `/rail/lithic/asa` is publicly proxied and requires HMAC plus an externally configured HTTPS endpoint. TLS/CNI policy enforcement/image imports/PVC/Secrets/agent binding and actual deployment remain unverified. Shared packaging and optional local Compose remain pending.
+- **`api/`:** existing JWT/session revocation and stable LEASH identity; signed immutable mandates; natural interpretation; private worker launches/credentials; owned/frozen merchant checkout facts; deterministic verification; durable payment operations and outcome reconciliation; run/account Stop; authenticated evidence intake; owner-scoped history/SSE; isolated operator Lab.
+- **`web/`:** natural instruction → generated editable review → save draft → explicit confirmation; Mission Control live launch and refresh-restored progress; independent intent/checkout evidence; incident/payment history and safe original-outcome readback; separate Run Stop and Emergency Kill Switch; server-authorized operator controls. Full Lab page requires HTTPS/localhost Secure view cookies; the HTTP demo uses backend-verified Bearer controls inside Mission Control.
+- **`services/agents/`:** actual bounded SDK Graph with shopping, independent verification, guardian investigation, quarantine, fresh-context conditional recovery, payment and terminal nodes. Worker checkpoints, lease polling and cooperative SDK cancellation fail closed. A persistent evidence-service lane delivers genuine sanitized registered-run events after worker expiry.
+- **`services/mcp-leash/` and `services/mcp-store/`:** separate authenticated `/mcp` services on 8002/8003. Four financial tools and three shopping tools; no unrestricted direct-tool fallback. Every shopping/payment invocation checks the API-owned audience/action/run scope. Store-only URLs/redirects and server-side evidence inspection remain enforced.
+- **`services/store/`:** simulated immutable canonical catalog, private scoped checkout projection/freeze and protected exact checkout-to-charge association. The injected subscription and valid/clean charger are all VOLT SUPPLY CO / USD / 2999 cents. Public `evil` selectors and unrestricted previews are denied; poison exists only for the enabled operator namespace's scoped run.
+- **`services/webhook/`:** real atomic local rail with expiring execution leases, run/account revocation, original event identity/fingerprint, one-use consumption, quota, audit stream and epoch-loss fencing. Legacy unscoped grant installation returns 410. The signed sandbox ASA adapter fails closed without trusted checkout correlation; no Lithic approval is claimed.
+- **Deploy:** existing Kubernetes topology retained; API root-context image and all module/package COPY paths inspected. Source includes explicit Secret keys, `/readyz` readiness, `/health` liveness, persistent trace spool and Valkey AOF/PVC. Installed images, rollout, TLS, CNI, Secret values and volume/restart behavior remain unverified here. Runtime copies/imports shared sources; installable shared packaging and Compose remain optional follow-up, not a second required deployment.
 
 Preserve the selected stack and planned service responsibilities:
 
@@ -159,7 +113,7 @@ human confirmation -> immutable mandate -> real Strands Graph
 | Web | `web/` (auth UI + Mission Control views) | Rishi | Auth, Mission Control, real activity, comparison, incident timeline, history, Attack Lab |
 | Agents / Leash MCP | `services/agents/`, `services/mcp-leash/` | Aditya | Strands shopper/investigator, protected tools, hooks, Leash MCP adapter |
 | Store MCP | `services/mcp-store/` | Aditya | Agent-facing shopping tools over Cameron's controlled store |
-| Merchant / payment rail | `services/store/` catalog/checkouts; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail/ASA adapter; trusted correlation and live proof pending |
+| Merchant / payment rail | `services/store/` catalog/checkouts; `services/webhook/` local rail + Valkey | Cameron | Canonical catalog/checkout; local rail/ASA adapter; trusted correlation locally tested; live provider proof pending |
 | Database / Valkey / deployment | `k8s/` (+ store/valkey/webhook), `scripts/`, `db/migrations/` | Rishi schema; Cameron infrastructure | PostgreSQL source of truth; Valkey grants/idempotency; Akamai compute |
 
 ## Repository tree
@@ -170,7 +124,7 @@ human confirmation -> immutable mandate -> real Strands Graph
 hackmidwest-2026/
   AGENTS.md                          [E] shared coding rules/ownership
   Leash-build-plan.md                 [E] shared team execution plan
-  README.md                          [P] shared setup/product guide
+  README.md                          [E] shared setup/product guide
   docker-compose.yml                 [P] Cameron: optional local development runtime
   .env.example                       [E] Cameron: configuration names only
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
@@ -245,7 +199,7 @@ hackmidwest-2026/
   docs/
     LEASH_SPEC.md                    [E] shared detailed specification
     LEASH_ALIGNMENT_AUDIT.md         [E] current master requirements/code/test matrix
-    demo-script.md                   [E] Aditya: draft; live attack/port updates pending
+    demo-script.md                   [E] Aditya: current protected demo choreography; live proof pending
 ```
 
 Each new service keeps its own Dockerfile and tests in its owner's directory. The build plan names the exact owner, prerequisites, and evidence for every planned deliverable.
@@ -380,33 +334,10 @@ not been started, and deployment of this patch remains Cameron's task.
 
 ## Current alignment handoff
 
-**V2 implementation update:** [api/v2-stop-handoff.md](api/v2-stop-handoff.md) replaces
-the previous PAUSE-only stop handoff. Human-owned run listing/stop/status, immutable
-idempotent SQL cancellation/event and same-run re-registration denial are present.
-Run financial revocation and Graph acknowledgment are explicitly **pending**:
-frozen grants/cards lack run binding, workers lack cancellation integration, and
-static credentials lack run scope. Do not present this as complete Stop acceptance.
-Emergency stop retains the existing account rail latch and now persists/reconciles
-CLOSED intents via forward migration 0008, preserving historical PAUSED operations.
-Profile exposes both controls with honest partial status. The provider wrapper
-rejects reusable card types/unlimited limits and requires a stable UUID issuance
-key, but no verified issuance/payment ledger or live sandbox proof exists.
-Human logout now durably revokes the presented JWT (hashed only, migration 0009);
-new logins have unique jti values, other sessions/delegations remain intact.
-Logout is not financial Stop. Bearer confirmation ignores ambient cookies.
-The 137 original cases are preserved exactly in
-[docs/LEASH_SECURITY_TEST_CASES.md](docs/LEASH_SECURITY_TEST_CASES.md); evidence,
-source/test functions, owner and completion gaps are indexed separately.
+Use [api/full-app-handoff.md](api/full-app-handoff.md). Earlier R02/V2 paragraphs and test counts above are historical checkpoints, not today's status. User authorization for this completion task permits necessary cross-lane integration on main; it does not permanently reassign ownership or authorize deployed/shared-data changes. Preserve Cameron/Aditya's compatible work. Do not restore idle token rebinding, peer-agent authority, scripted runs under live mandates, public poison selection or the old unscoped payment activation.
 
-Rishi owns R13 stop persistence/UI/payment scope; Cameron owns C11 atomic
-run/account revocation and provider reconciliation; Aditya owns A14 owning-worker
-Graph cancellation/fencing. These extend existing lanes, not transfer ownership.
-Agree additive frozen-contract changes through the existing contract-only PR rule
-before implementing run grant/generation/credential wires. User authorized narrow
-implementation fixes in this session; broader Graph/rail changes remain owner
-handoffs. Docker API COPY api/*.py and all migrations already covers this change;
-no new deployment/environment variable was introduced.
+Private execution-v1 records carry run/worker/generation/audience/action/expiry and checkout-to-original-charge binding outside the unchanged frozen R01 schemas. This is a versioned implementation protocol, not an independently renamed shared contract. Subsequent shared model/event changes still require the established dedicated review.
 
-**Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; binding primitives exist, but completion is disabled until durable payment/reconciliation and run financial controls exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and account stop/provider CLOSED intents and partial run Stop are implemented and locally tested. **Not a complete or deployed MVP:** owned durable merchant facts/protected charge binding, spending-enabled payments/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](api/alignment-fixes-handoff.md) and [audit](docs/LEASH_ALIGNMENT_AUDIT.md).
+R03/R04/R11/R12/R13, A11–A14 and C02/C03/C04/C11 have integrated local evidence. R06/R08/R09/R10 UI and event paths are wired and build; deployed browser, all-phase fault/restart, live injection and provider gates remain. Select work from the current build-plan status and 147-case coverage rather than repeating the historical R03 foundation.
 
-Use [api/alignment-fixes-handoff.md](api/alignment-fixes-handoff.md) for current callable interfaces, new configuration, tests and dependency order. Earlier R02/card paragraphs are historical; signup issuance has now been removed, deterministic verifier policy has started, and local spending invalidation/SSE are tested. Do not claim Graph cancellation, trusted merchant payments or live sandbox success from this work.
+Attack Lab is disabled by default. Enable only with a real human JWT, explicit stable `usr_<32 hex>` operator allowlist and isolated namespace. Fixed 3999-cent/no-recurring mandates require explicit confirmation, run ≤120 seconds with ≤3 candidates, one active namespace scenario and five successful mutations/minute; payloads ≤64 KiB. Cleanup disables/revokes/stops only demo scope and preserves history and unknown financial outcomes. Arbitrary tamper/replay/webhook/provider commands remain denied. Configuration alone is not acceptance evidence.

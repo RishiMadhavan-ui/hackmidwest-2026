@@ -1,0 +1,8 @@
+PASS: isolated Next sign-in HTML served
+PASS: actual Next backend proxy verifies human and generates3999-cent proposal
+Traceback (most recent call last):
+PASS: new test account saves draft without global shopper-token rebind
+PASS: ordinary test account denied operator authority through real proxy
+PASS: web adapter refuses internal merchant bypass
+  File "<stdin>", line 21, in <module>
+AssertionError

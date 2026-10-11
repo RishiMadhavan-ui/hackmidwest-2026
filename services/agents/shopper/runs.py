@@ -40,7 +40,8 @@ def new_run_id() -> str:
 
 
 class StartRun(BaseModel):
-  task: str
+  model_config = {"extra":"forbid"}
+  task: str = Field(min_length=1,max_length=4000)
   mandate_id: str | None = None
   start_url: str | None = None
   # "live" runs the real model. "scripted" is a labeled fixture: the shopper's
@@ -216,6 +217,12 @@ class RunManager:
     with self._lock:
       if run_id in self.runs:
         raise HTTPException(status_code=409, detail="run already submitted to this worker")
+      if sum(item["status"] in {"queued","running"} for item in self.runs.values()) >= 16:
+        raise HTTPException(status_code=429,detail="Worker queue is full; inspect or stop the existing launch")
+      finished = [key for key,item in self.runs.items() if item["status"] not in {"queued","running"}]
+      for key in finished[:-100]:
+        self.runs.pop(key,None)
+        self._traces.pop(key,None)
       self.runs[run_id] = record
       self._traces[run_id] = trace
     self._pool.submit(self._execute, run_id, req, trace)
@@ -254,10 +261,11 @@ class RunManager:
       record["finished_at"] = _now()
 
   def get(self, run_id: str) -> dict[str, Any] | None:
-    record = self.runs.get(run_id)
-    if record is None:
-      return None
-    return redact({**record, "events": list(self._traces[run_id].events)})
+    with self._lock:
+      record = self.runs.get(run_id)
+      if record is None:
+        return None
+      return redact({**record, "events": list(self._traces[run_id].events)})
 
 
 router = APIRouter(dependencies=[Depends(require_service_token)])

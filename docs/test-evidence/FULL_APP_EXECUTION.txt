@@ -1,0 +1,14 @@
+test_audiences_cross_owner_and_missing_scope_never_create_financial_authority (test_execution_security.ExecutionSecurityTests.test_audiences_cross_owner_and_missing_scope_never_create_financial_authority) ... ok
+test_authenticated_natural_interpretation_preserves_existing_identity (test_execution_security.ExecutionSecurityTests.test_authenticated_natural_interpretation_preserves_existing_identity) ... ok
+test_background_expiry_revokes_before_absent_event_is_cancelled (test_execution_security.ExecutionSecurityTests.test_background_expiry_revokes_before_absent_event_is_cancelled) ... ok
+test_expired_unclaimed_launch_becomes_terminal_without_graph_ack (test_execution_security.ExecutionSecurityTests.test_expired_unclaimed_launch_becomes_terminal_without_graph_ack) ... ok
+test_expiring_worker_is_run_bound_and_cannot_confirm_or_register_authority (test_execution_security.ExecutionSecurityTests.test_expiring_worker_is_run_bound_and_cannot_confirm_or_register_authority) ... ok
+test_new_humans_draft_without_rebinding_the_cluster_token (test_execution_security.ExecutionSecurityTests.test_new_humans_draft_without_rebinding_the_cluster_token) ... ok
+test_owner_reconciles_original_event_and_never_submits_a_charge (test_execution_security.ExecutionSecurityTests.test_owner_reconciles_original_event_and_never_submits_a_charge) ... ok
+test_same_merchant_amount_subscription_blocks_then_clean_checkout_gets_scoped_grant (test_execution_security.ExecutionSecurityTests.test_same_merchant_amount_subscription_blocks_then_clean_checkout_gets_scoped_grant) ... ok
+test_stop_ack_persists_and_other_users_cannot_stop_or_read_execution (test_execution_security.ExecutionSecurityTests.test_stop_ack_persists_and_other_users_cannot_stop_or_read_execution) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 7.350s
+
+OK

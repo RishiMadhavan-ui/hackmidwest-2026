@@ -14,7 +14,7 @@ from purchase_execution import reconcile
 logger = logging.getLogger("uvicorn.error")
 
 
-def reconcile_run(run_id):
+def reconcile_run(run_id, stop_event=None):
   with get_conn() as conn:
     run, lease = locked(conn, run_id, current=False)
     inactive = lease["deadline"] <= utc_now() or (
@@ -23,6 +23,15 @@ def reconcile_run(run_id):
       locked(conn, run_id)
     except AuthorityError:
       inactive = True
+    if inactive and lease["state"] != "terminal":
+      # Terminal means this delegation has ended, not that the remote Graph
+      # acknowledged cancellation. Preserve that independent acknowledgement.
+      conn.execute("""UPDATE run_executions SET state='terminal',
+        progress=progress || '{"node":"terminal","outcome":"authority_ended"}'::jsonb
+        WHERE run_id=%s AND state<>'terminal'""", (run_id,))
+      from execution import event
+      event(conn,run,"authority_ended",graph_acknowledged=bool(lease["graph_ack_at"]))
+      conn.commit()
     if inactive and not lease["rail_stopped_at"]:
       # Commit cancellation before network I/O. All new tools fail closed even
       # while the rail's independent revocation acknowledgement is pending.
@@ -38,6 +47,8 @@ def reconcile_run(run_id):
       event(conn,run,"rail_stopped",reason="authority_expired_or_stopped",graph_acknowledged=bool(lease["graph_ack_at"]))
     operations = conn.execute("SELECT * FROM payment_operations WHERE run_id=%s AND state IN ('prepared','activating','ready','authorizing','reconciling') ORDER BY id FOR UPDATE",(run_id,)).fetchall()
     for op in operations:
+      if stop_event is not None and stop_event.is_set():
+        break
       if op["state"] == "prepared":
         if inactive:
           finish(conn,op,"cancelled","authority_expired_before_activation")
@@ -45,7 +56,7 @@ def reconcile_run(run_id):
         reconcile(conn,op)
 
 
-def tick():
+def tick(stop_event=None):
   # No provider mutation occurs here. An epoch change remains unresolved rather
   # than inferring that a missing cache means an earlier charge never happened.
   with get_conn() as conn:
@@ -53,12 +64,16 @@ def tick():
       WHERE (e.rail_stopped_at IS NULL AND (e.deadline<=now()
         OR e.lease_until<=now() OR e.state='terminal'
         OR EXISTS (SELECT 1 FROM run_cancellations c WHERE c.run_id=e.run_id)))
+      OR (e.state<>'terminal' AND (e.deadline<=now() OR e.lease_until<=now()
+        OR EXISTS (SELECT 1 FROM run_cancellations c WHERE c.run_id=e.run_id)))
       OR EXISTS (SELECT 1 FROM payment_operations p WHERE p.run_id=e.run_id
         AND p.state IN ('activating','ready','authorizing','reconciling'))
       ORDER BY e.deadline LIMIT 20""").fetchall()
   for row in rows:
+    if stop_event is not None and stop_event.is_set():
+      break
     try:
-      reconcile_run(row["run_id"])
+      reconcile_run(row["run_id"], stop_event)
     except Exception as error:
       logger.warning("Outcome readback pending (%s)",type(error).__name__)
 
@@ -74,7 +89,7 @@ class Reconciler:
   def run(self):
     while not self.stop_event.wait(5):
       try:
-        tick()
+        tick(self.stop_event)
       except Exception as error:
         logger.warning("Outcome readback unavailable (%s)",type(error).__name__)
 

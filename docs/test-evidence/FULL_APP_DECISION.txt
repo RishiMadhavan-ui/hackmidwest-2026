@@ -1,0 +1,6 @@
+test_all_rail_cases (test_decision_cases.RailDecisionCases.test_all_rail_cases) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.092s
+
+OK

@@ -1,0 +1,7 @@
+PASS: isolated Next sign-in HTML served
+PASS: actual Next backend proxy verifies human and generates3999-cent proposal
+PASS: new test account saves proposed draft without global shopper-token rebind
+PASS: ordinary test account denied operator authority through real proxy
+PASS: web adapter refuses internal merchant bypass
+PASS: client-authenticated draft route shell served; hydration interaction not tested
+HTTP/proxy smoke only; interactive browser attachment unavailable

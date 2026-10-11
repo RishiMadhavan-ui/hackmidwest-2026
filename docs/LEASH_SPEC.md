@@ -1,48 +1,8 @@
 # LEASH — Product and MVP Implementation Specification
 
-**October 11 agent branch status (`aditya/strands-graph`, base `138d636`):**
-the actual bounded Strands Graph, isolated recovery context, local cancellation
-and execution-event outbox have fixture coverage. Durable worker/financial
-fencing, human launch, workflow intake/SSE and live payment recovery remain open
-acceptance gates. The new client refuses an unfenced launch against current main.
-Requirements, ownership and frozen schemas are unchanged; proposed integration
-details are in the [Graph handoff](../services/agents/graph-handoff.md).
+**Current integrated source — October 11, 2026:** the full local-rail shopping path is implemented and tested through an actual Strands SDK Graph, both HTTP MCP servers, authenticated API/merchant boundaries, PostgreSQL and atomic Redis enforcement. Natural-language drafting now generates proposed terms before explicit human confirmation. Each ordinary account gets its own immutable shopper identity; private expiring run credentials preserve other users' bindings. Automatic recovery blocks the subscription, quarantines its source, and verifies a clean charger under the unchanged mandate. Both stop controls, persisted SSE/history, scoped Attack Lab execution and original-outcome readback are wired.
 
-**Current R03/R11 foundation (over `11d6696`, on main):** payment operations
-now commit before merchant retrieval, with immutable human/agent/run/mandate
-version/hash and stable private grant/instrument/issuance/authorization references.
-Identical retries retain one operation; changed claims conflict; unresolved
-operations block replacement purchases across mandate versions. Full canonical
-observations, source hash, normalized snapshot/hash and verification are persisted
-atomically with the blocked result/events. Stop, replacement, revocation and
-expiry cancel prepared work; unknown outcomes remain reconciling and cannot be
-cleared by a retry or Stop. No financial write is enabled.
-
-Current store responses lack verified checkout owner/session, revision, expiry
-and freeze. A service credential authenticates transport only. Evidence is
-explicitly observed_unverified; the verifier receives checkout_authenticated=False.
-A charger returns blocked with checkout_source_unavailable_or_wrong_owner plus
-financial_authority_unavailable; subscription failures remain explicit. Reserved
-UUIDs are not issued cards or usable grants. R03/R11 are **partially implemented**;
-merchant proof, financial activation/reconciliation workers, atomic run revocation,
-real Graph/recovery and the complete product UI remain required. See [R03/R11 handoff](../api/r03-r11-handoff.md).
-Frozen shared models/events, historical migrations, team lanes and LKE are preserved.
-
-**Historical containment baseline (`d773079` + fixes committed at `11d6696`):** Cameron's checkout/payment work is
-preserved with security containment. Authenticated configured merchant retrieval,
-strict canonical facts/hash validation and durable blocked payment preflight exist.
-`POST /payments` requires the agent's owned registered uncancelled run, current
-confirmed mandate and account gate; `GET /payments/{id}` is user-and-agent scoped.
-A verified charger returns `blocked` / `financial_authority_unavailable` until
-durable issuance/reconciliation and atomic run financial revocation are complete;
-no grant, legacy account card or simulated charge is activated. Subscription
-preflight still returns its deterministic product reasons. Store listing/start,
-catalog/read and binding primitives remain; unbound completion is 403 and a valid
-bound completion is 503 with no rail call. This is tested containment, not a
-finished purchase flow. Committed migration 0007 is unchanged; unpublished V2
-closure/session migrations are now 0008/0009. See [MAIN_INTEGRATION_HANDOFF.md](MAIN_INTEGRATION_HANDOFF.md)
-for the exact risks, owner fixes and enablement gates. Frozen contracts and LKE
-topology remain intact.
+This is **local implementation evidence, not a deployed or live-model/sandbox completion claim**. The acceptance test scripts model choices while exercising real services and real financial decisions on the Local Payment Rail Simulator. Live Akamai inference/injection, Lithic checkout correlation, TLS/cluster/pod-restart evidence and the timed rehearsal remain explicit gates. Current interfaces/configuration are in [the full-app handoff](../api/full-app-handoff.md); results in [the evidence report](FULL_APP_TEST_RESULTS.md); all 147 case assessments in [security coverage](LEASH_SECURITY_COVERAGE.md). Frozen shared models/events and historical migrations 0001–0012 are unchanged; forward migrations 0013–0015 are required.
 
 Adopted October 10, 2026 from the team's **Product Evolution & MVP Architecture Directive**. This is the authoritative product direction; [AGENTS.md](../AGENTS.md) defines coding rules/path ownership; the synchronized [Leash-build-plan.md](../Leash-build-plan.md) assigns human and coding-agent tasks, dependencies, handoffs, execution gates, and readiness evidence. Conflicting flows/timing/fallbacks from the earlier hotel/gift-card plan are superseded. Compatible stack, ownership, and service boundaries are preserved. Keep these three documents synchronized when direction or ownership changes.
 
@@ -1636,7 +1596,7 @@ Revised three-minute path: 0:00–0:20 problem; 0:20–0:40 explicit confirmatio
 
 Completion requires all previous applicable controls plus actual bounded Graph, automatic recovery, comprehensive persisted SSE, human Kill Switch, scoped identity/service auth, durable payment operations/reconciliation, atomic correlation/rail tests, Kubernetes integration, genuine live attack/inference evidence and <=3-minute rehearsal. No current passing suite proves these missing capabilities. Dependency-ordered owners/tasks, blockers and the actual audit results are in [LEASH_ALIGNMENT_AUDIT.md](LEASH_ALIGNMENT_AUDIT.md).
 
-### 26.8 Current implementation boundary and safety handoff
+### 26.8 Historical implementation boundary and safety handoff
 
 **Current implementation follow-up:** integrates Cameron's activity/local-rail changes (`674ef75`), ASA adapter (`a9e8cba`) and simulated merchant (`cb9263a`) with Rishi's authorized fixes. Signup creates identity only; provider access is sandbox-only. The merchant now serves canonical catalog/checkouts and poisoned listings, with mandatory service auth; binding primitives exist, but completion is disabled until durable payment/reconciliation and run financial controls exist. Registered agent provenance, persisted owner-scoped history/SSE through Next, deterministic checkout policy, strict local rail with atomic one-use consumption/event caching, durable rail-event delivery and account stop/provider CLOSED intents and partial run Stop are implemented and locally tested. **Not a complete or deployed MVP:** owned durable merchant facts/protected charge binding, spending-enabled payments/issuance/reconciliation, real Strands Graph/automatic recovery/cooperative stop, short-lived run scopes and full workflow/UI remain unfinished. Frozen R01 models/events and ownership are unchanged. See [the current handoff](../api/alignment-fixes-handoff.md) and [audit](LEASH_ALIGNMENT_AUDIT.md).
 
@@ -1770,16 +1730,7 @@ Secret allowlists, provider keys out of shopper/MCP/frontend, persistent spool/
 Valkey and tested network/TLS/readiness. Validate actual images, CNI, PVC mounts,
 Secrets/provisioning and running pods; source YAML is not deployment evidence.
 
-Current V2 fixes: owned human run stop/list/status, immutable SQL stop/event and
-same-stopped-ID registration gate; forward CLOSED migration and confirmed-closure
-reconciliation; SINGLE_USE-only provider transport with explicit positive limit
-and caller UUID key; separate profile controls; additional deterministic negative
-tests. **Partial, not complete:** no run financial barrier/card binding, real
-Graph cancellation, scoped launch token, complete payments/issuance ledger,
-trusted owned merchant charge or live sandbox proof. Run stop returns pending
-run binding; account financially_stopped excludes Graph acknowledgment. Shared
-frozen models/events are unchanged. Safe additive H14 contract work, owner tasks
-R13/C11/A14 and full P0 acceptance are in the build plan and audit.
+Current implementation status is specified in section 30 and the linked evidence/coverage. Earlier V2-only partial Stop/Graph/worker statements are historical. Private execution-v1 binds the frozen authority to actual run/checkout/charge scope without modifying R01 contracts. Missing provider/cluster evidence is not waived.
 
 Human JWT logout now commits hashed session revocation and its audit event
 together (migration 0009). Further requests using that JWT are denied; fresh
@@ -1787,41 +1738,13 @@ logins have unique jti values, while other sessions and confirmed delegations
 remain intact. Logout is not financial Stop and does not undo an in-flight
 operation that already passed authentication. Ambient cookies cannot authorize
 confirmation in the selected Bearer stack; revisit CSRF handling if cookie auth
-is introduced. Ephemeral agent run/audience scopes remain R12 work.
+is introduced. Ephemeral run/audience scopes are implemented by R12; hosted validation remains a completion gate.
 
-## 28. R03/R11 durable preflight foundation and enablement gates
+## 28. Durable preflight foundation and financial activation
 
-The current implementation is detailed in [the API handoff](../api/r03-r11-handoff.md).
-Persist the operation identity and audit event before external work; persist
-verified evidence before any external financial write. Natural retry scope binds
-human/agent/run/mandate version/checkout and hashes the entire agent request.
-Exact retries use the original IDs/outcome; changed content conflicts. An unresolved
-operation bars a different checkout/run under the same mandate, including newer
-versions. Stable instrument/issuance/authorization references are reservations,
-not provider-issued instruments or financial authority.
+The R03/R11 ledger commits immutable operation identity before merchant or rail I/O. Agent claims are comparison data; a configured authenticated merchant supplies owned/frozen canonical facts and revision/hash/expiry. Durable verification precedes scoped grant activation. SQL locks are released for retrieval then current human/account/run/mandate authority is rechecked under consistent locks. Identical retries retain original identity/outcome; changed payloads conflict. Stop/replacement/revoke/expiry invalidate new authority, and unknown outcomes block replacement purchases across versions.
 
-Canonical observations are append-only and carry their source hash, full itemized
-facts, normalized snapshot/hash, owner/run/mandate version/hash and truthful trust
-assessment. The current configured service bearer proves transport only; synthetic
-normalization user/session/revision/expiry cannot stand in for merchant ownership,
-revision, expiry or frozen charge facts. Therefore checkout_authenticated remains
-false and all preflights stay blocked. No positive model/human review can bypass it.
-
-Release SQL locks during merchant retrieval, then reacquire user -> mandate ->
-operation locks and recheck run/account Stop, version/hash, signed confirmation
-and expiry before advancing. Cancel prepared operations in the same transaction
-as run Stop/account Kill/replacement/revoke. Unknown financial outcomes must stay
-reconciling across controls and mandate versions and bar replacement purchases.
-Cancellation is not proof that an earlier provider authorization was reversed.
-
-Current private states are prepared/blocked/cancelled/reconciling only. Any future
-financial activate/authorized/settled transitions, workers, leases, side-effect
-outbox, provider read-back and atomic SQL/Valkey barrier require forward migrations,
-owner protocol agreement and crash/race/replay evidence. H14 frozen-contract review
-is still required. Keep dormant issuance/grant/bind/charge paths disabled until
-C02 ownership/freeze, R03 proof, R04/R11 execution/correlation and C11/R13 run barrier
-are implemented together. Actual Strands Graph remains Aditya's required work.
-
+The current local-rail implementation progresses prepared → activating → ready → authorizing → authorized or reconciling/cancelled/blocked. A grant is permission, authorization is not settlement. Atomic rail installation and charge consumption validate the current worker generation/lease, rail epoch, mandate scope, immutable checkout and original authorization event. Ambiguous responses only trigger original-event readback; they never issue another charge or recover to a different product. A changed rail epoch remains unresolved instead of treating missing cache as evidence that no charge occurred. See section 30 and [current handoff](../api/full-app-handoff.md).
 
 ## 29. Attack Lab access control (P0)
 
@@ -1842,8 +1765,7 @@ not relax any V2 financial, Stop, Graph, SSE or sandbox requirement.
    log enable/disable and reject new execution while disabled. Disable must
    cancel active scenarios and request scoped financial revocation through the
    existing Stop machinery; report pending outcomes honestly. A role alone or
-   `NEXT_PUBLIC_*` flag is insufficient. No runtime re-enable exists in current
-   containment source; `ATTACK_LAB_ENABLED` is a proposed server contract only.
+   `NEXT_PUBLIC_*` flag is insufficient. `ATTACK_LAB_ENABLED=1` and a verified allowlisted operator are both required; defaults and invalid configuration deny execution.
 3. **Isolation:** derive operator/scenario namespace from verified identity,
    never arbitrary body IDs. Use separate demo principals, mandates, runs,
    merchant fixture records, grants and instruments. Immutable human intent
@@ -1885,3 +1807,46 @@ The later `e52bbde` Mission Control merge is preserved with a disabled Lab
 placeholder; ordinary client sign-in is not operator access. Its human draft
 endpoint is separate from Lab authority. Automatic shared shopper-token binding
 requires identity review before agent/payment activation; see the focused audit.
+
+
+## 30. Current integrated execution protocol and acceptance boundary
+
+This section supersedes implementation-status claims in earlier historical snapshots; normative V2/Attack Lab requirements remain in force.
+
+```text
+Human JWT → natural-language proposed terms → explicit signed confirmation → immutable mandate
+  → durable human launch/private run credential → exclusive leased Strands Graph
+  → Store MCP browse/create (untrusted listing) → authenticated owned frozen checkout
+  → deterministic API verifier → scoped one-use grant → protected merchant complete
+  → atomic local rail authorization → original outcome readback → persisted audit/SSE
+Rejected safe-to-recover candidate → advisory guardian → quarantine → fresh shopper context
+Run Stop / account Kill → SQL cancellation → independent atomic rail barrier → Graph checkpoint acknowledgment
+```
+
+### 30.1 Human interaction and identity
+
+`POST /mandates/interpret` returns a proposal, preserved original instruction, disclosed defaults and interpretation source. The narrow charger fallback enforces one item/one purchase/one hour, USD integer cents and no recurring charges; “under $40” yields 3999 cents. Broader instructions require configured shared inference or clarification and fail closed; unsupported semantics never silently expand authority. Humans can edit proposed terms, save and explicitly confirm the exact version/hash; editing an existing draft requires save before confirmation. Interpretation cannot activate authority.
+
+Human draft provisioning chooses an owned live agent or creates a private account agent. No login/draft moves a global token or changes historical agent owner. Confirmed mandates remain assigned to the original agent/mode. Ordinary `/shopping/start` accepts live clean shopping only; adversarial/scripted operations require the operator Lab. Browser receives stable durable run IDs/status and no worker/launch/scope secret. Dispatch timeout becomes `dispatch_unverified`, inspectable/stoppable under the original identity.
+
+### 30.2 Private execution-v1 and genuine tools
+
+The API registers the human-owned launch and stores hashes of temporary worker credentials. One worker claims the run; 10-second renewable leases are bounded by a 180-second backend deadline, SDK Graph 150-second total/45-second nodes/20 node executions, three candidates, 18 model calls/60,000 estimated input tokens and 30 MCP calls. Lab SDK total is 120 seconds. Opaque per-audience/action scopes bind exact run/worker/generation and expire on authority loss. Late/stale claims, heartbeats and tools fail closed; stopped runs cannot silently resume or obtain a new registration. The process registry holds at most 16 pending/running jobs and retains only recent completed convenience records; durable history remains in PostgreSQL.
+
+Strands invokes both actual MCP transports. Backend `/execution/authorize` validates each tool action; protected API/merchant/rail check independently. Verification retrieves authenticated merchant facts, not model text. Guardian recommendation is advisory and consumes the actual verified snapshot separately from untrusted sources. Recovery uses a fresh shopper context with sanitized reasons/exclusions, never the poisoned transcript. Only a deterministic pre-payment candidate denial can recover. Unknown payment state, authorization, hard failure, Stop, expiry and missing/inconsistent authority terminate recovery.
+
+### 30.3 Financial state, stops and readback
+
+The controlled merchant binds exact checkout/projection hash/mandate/run to the original authorization event. Atomic rail consumes one expiring scoped grant, caches the original decision/fingerprint and commits audit together. A separate concurrent event cannot spend the same grant. Duplicate original delivery returns the original response even after Stop; changed payload cannot reuse its event ID. Unscoped `PUT /internal/grants` is disabled (410). Unscoped legacy payment requests are observation-only blocked and cannot install a grant or charge.
+
+Run Stop fences only its run. Account Kill fences all that human's workflows. Both commit SQL intent before a separate rail cutover and report actual rail versus Graph/provider acknowledgments. Financial revocation can be enforced while Graph cancellation is pending. Worker lease expiry independently stops future tool/charge authority. Provider closure failure cannot turn into a success or reverse committed authorization. Background expiry/control repair only revokes or reads the original cached event. Owner `POST /purchase-attempts/{id}/reconcile` performs readback, never another purchase. Ambiguous epoch/history loss stays reconciling.
+
+### 30.4 Genuine evidence and operator Lab
+
+Service-authenticated `/internal/agent-events` stores sanitized actual registered-run workflow/provenance events even after temporary worker expiry. Persistent spool retries safe outage statuses and deduplicates event IDs; this service credential cannot approve money. SQL audit is append-only; owner SSE history uses monotonic sequence/Last-Event-ID, current-session checks and disconnect handling. Refresh/restoring run state never launches a new run. Purchase projections require actual committed rail outcome to say authorized and never infer settlement from a grant or model text.
+
+Operator Lab verifies real human JWT/current session and exact stable-ID allowlist, server flag and owned namespace. It allocates separate `usr_lab_...` identities, fixed scoped local-rail mandates and run projections; explicit confirmation is required. Arbitrary rail/card/user/budget/provider inputs are rejected. A session-held namespace lock spans approval/launch/mapping so concurrent execution cannot create a second active scenario. Cleanup/disable revoke only unused demo scope and preserve unknown outcomes, authorized history and sanitized evidence mirrored to the operator's activity. Public poison selectors and unrestricted previews remain closed. HTTP hackathon access uses backend-authorized Bearer Mission Control controls; Secure view-cookie Lab page requires HTTPS or localhost.
+
+### 30.5 What is proven and what is not
+
+The full local HTTP acceptance used real SDK Graph, both MCP servers, actual API/merchant/rail processes, PostgreSQL and Redis. It blocked same-merchant/USD/2999 subscription, quarantined, recovered cleanly and committed exactly one authorization with unchanged mandate hash; it verified isolation, persisted SSE replay and queued Run Stop. **Only model choices were scripted.** This is not proof that a real Akamai model followed the injection. Lithic approvals remain disabled until trusted checkout correlation and real sandbox configuration are proven. Running image/TLS/Secret/PVC/CNI and restart/rolling-deploy behavior require actual deployment checks. [147-case coverage](LEASH_SECURITY_COVERAGE.md) preserves these distinctions; [test results](FULL_APP_TEST_RESULTS.md) links actual output. Do not claim all cases passed or a deployed complete demo from local component evidence.

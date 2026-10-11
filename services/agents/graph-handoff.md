@@ -1,5 +1,10 @@
 # Strands Graph implementation and integration handoff
 
+**Current integration:** the proposed private execution protocol is now implemented and locally exercised through real API/MCP/merchant/rail/SQL/Redis boundaries. Temporary workers use hash-only exact-run credentials; durable evidence uses a separate service-only lane after worker expiry. [Current handoff](../../api/full-app-handoff.md), [results](../../docs/FULL_APP_TEST_RESULTS.md) and [coverage](../../docs/LEASH_SECURITY_COVERAGE.md) supersede dependency claims below. Live Akamai/injection and deployed restart/provider proof remain unverified.
+
+## Historical branch handoff
+
+
 October 11, branch `aditya/strands-graph`, based on main `138d636`.
 Owner: Aditya. **Agent implementation with fixture validation; not live acceptance.**
 No deployment, shared database change, frozen contract change, or API/web edit

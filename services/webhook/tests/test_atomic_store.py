@@ -55,6 +55,28 @@ class AtomicStoreTests(unittest.TestCase):
     with self.assertRaises(ValueError):
       self.store.lease_run(grant.run_id,grant.user_id,1,grant.rail_epoch,datetime.now(timezone.utc)+timedelta(seconds=10))
 
+  def test_run_stop_wins_between_policy_read_and_atomic_consumption(self):
+    grant, attempt = self.scoped()
+    commit = self.store.commit_decision
+    def stop_first(**kwargs):
+      self.store.stop_execution_run(grant.run_id, grant.user_id)
+      return commit(**kwargs)
+    with patch.object(self.store, "commit_decision", side_effect=stop_first):
+      result = authorize(self.store, attempt)
+    self.assertEqual(result.result, "DECLINED")
+    self.assertEqual(authorize(self.store, attempt), result)
+    self.assertEqual(self.store.get_grant(grant.grant_id).status, "REVOKED")
+
+  def test_account_stop_fences_a_leased_worker_and_preserves_prior_decision(self):
+    grant, attempt = self.scoped()
+    first = authorize(self.store, attempt)
+    self.assertEqual(first.result, "APPROVED")
+    self.store.stop_user(grant.user_id)
+    self.assertEqual(authorize(self.store, attempt), first)
+    with self.assertRaises(ValueError):
+      self.store.lease_run(grant.run_id, grant.user_id, 1, grant.rail_epoch,
+                           datetime.now(timezone.utc)+timedelta(seconds=10))
+
   def test_rail_epoch_loss_cannot_recreate_prior_execution_authority(self):
     grant,attempt = self.scoped()
     if isinstance(self.store,MemoryGrantStore):

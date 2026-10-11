@@ -201,3 +201,19 @@ class ExecutionSecurityTests(unittest.TestCase):
     with db.get_conn() as conn:
       self.assertEqual(conn.execute("SELECT state FROM payment_operations WHERE id=%s",(payment["id"],)).fetchone()["state"],"cancelled")
       self.assertIsNotNone(conn.execute("SELECT rail_stopped_at FROM run_executions WHERE run_id=%s",(run["run_id"],)).fetchone()["rail_stopped_at"])
+
+  def test_expired_unclaimed_launch_becomes_terminal_without_graph_ack(self):
+    from reconciliation import reconcile_run
+    mandate = self.active()
+    launched = self.request("POST", "/agent-runs/launch", token=self.user_token,
+      body={"mandate_id":mandate["id"],**self.binding(mandate),"confirmed":True})
+    self.assertEqual(launched.status_code,201,launched.text)
+    run_id = launched.json()["run_id"]
+    with db.get_conn() as conn:
+      conn.execute("UPDATE run_executions SET deadline=now()-interval '1 second' WHERE run_id=%s",(run_id,))
+    with patch("reconciliation.rail",return_value={"run_id":run_id,"user_id":self.owner,"financial_revocation":"enforced"}):
+      reconcile_run(run_id)
+    status = self.request("GET",f'/agent-runs/{run_id}/execution',token=self.user_token).json()
+    self.assertEqual(status["state"],"terminal")
+    self.assertFalse(status["graph_acknowledged"])
+    self.assertTrue(status["rail_stopped"])

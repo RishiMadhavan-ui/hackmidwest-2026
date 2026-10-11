@@ -1,9 +1,9 @@
 """Volt Supply Co. — simulated merchant with owned, frozen checkouts.
 
-Canonical catalog + checkout truth for LEASH. Runtime attack listing selection
-is disabled pending operator authorization; offline poisoned fixtures remain.
+Canonical catalog + checkout truth for LEASH. Runtime poison requires an enabled
+isolated operator run scope; public poison selectors and previews stay closed.
 Create/read use STORE_API_TOKEN. Own/freeze/bind/complete require a distinct
-STORE_CHARGE_TOKEN. Completion stays closed until durable payment reconciliation.
+STORE_CHARGE_TOKEN. Scoped completion uses durable API state and the local rail.
 """
 
 from __future__ import annotations
@@ -374,22 +374,10 @@ def attack_lab_product_page(
   request: Request,
   authorization: Annotated[str | None, Header()] = None,
 ) -> HTMLResponse:
-  """Poisoned listing for the API operator path only — not public ?evil=1."""
+  """Retired unrestricted preview path; no credential may re-enable it."""
   # Legacy preview credentials cannot execute attacks. Only a currently scoped
   # isolated operator scenario can select poison through the regular listing.
   raise HTTPException(403, "Use an isolated run-scoped Attack Lab listing")
-  selectors = request.query_params.getlist("evil")
-  if not selectors or any(value.lower() not in {"1", "true", "yes", "on"} for value in selectors):
-    raise HTTPException(status_code=403, detail="Attack Lab product preview requires evil=1")
-  pid = resolve_product_id(product_id)
-  if not pid:
-    raise HTTPException(status_code=404, detail="Unknown product")
-  html = render_product_page(pid, evil=True)
-  return HTMLResponse(
-    content=html,
-    status_code=200,
-    headers={"Cache-Control": "no-store", "X-Leash-Attack-Lab": "1"},
-  )
 
 
 @app.post("/products/{product_id}/checkout", response_class=HTMLResponse)

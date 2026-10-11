@@ -1,0 +1,6 @@
+test_lab_001_003_004_built_web_and_direct_store_deny_attack_selection (__main__.AttackLabHttpTests.test_lab_001_003_004_built_web_and_direct_store_deny_attack_selection) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.678s
+
+OK

@@ -1,0 +1,52 @@
+
+> web@0.1.0 build C:\hackmidwest-2026\web
+> next build
+
+▲ Next.js 16.4.0 (Turbopack)
+- Environments: .env.local
+✓ Running next.config.ts took 99ms
+- Cache Components enabled
+- Partial Prefetching enabled
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.8s
+  Running TypeScript ...
+  Finished TypeScript in 23.9s ...
+  Collecting page data using 11 workers ...
+  Generating static pages using 11 workers (0/19) ...
+  Generating static pages using 11 workers (4/19) 
+  Generating static pages using 11 workers (9/19) 
+  Generating static pages using 11 workers (14/19) 
+✓ Generating static pages using 11 workers (19/19) in 2.2s
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /activity
+├ ○ /attack-lab
+├ ƒ /attack-lab/operator-view
+├ ƒ /attack-lab/session
+├ ƒ /backend/activity/stream
+├ ƒ /backend/internal/[[...path]]
+├ ○ /incidents
+├ ○ /mandates
+├   /mandates/[id]
+│ └ ◐ /mandates/[id]
+├ ○ /mandates/new
+├ ○ /mission-control
+├ ○ /overview
+├ ○ /payments
+├ ○ /profile
+├ ○ /signin
+├ ○ /signup
+├ ƒ /store/products/[productId]
+└ ƒ /store/products/[productId]/checkout
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)             prerendered as static content
+◐  (Partial Prerender)  prerendered as static HTML with dynamic server-streamed content
+ƒ  (Dynamic)            server-rendered on demand
+

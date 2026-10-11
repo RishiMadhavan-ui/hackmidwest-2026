@@ -4,7 +4,7 @@
 original-decision caching and event append. It requires the distinct merchant
 `WEBHOOK_CHARGE_TOKEN` and exact checkout/hash/binding fields. It never creates
 independent authority. Complete frozen grants are installed privately by the API
-with `WEBHOOK_INTERNAL_TOKEN`; descriptor/amount-only examples are obsolete.
+with WEBHOOK_INTERNAL_TOKEN through /internal/execution/grants after the API commits verified owned scope. Old PUT/internal/grants returns410; descriptor/amount-only examples are obsolete. Execution lease/epoch/original authorization-event binding is mandatory.
 
 `POST /lithic/asa` requires configured valid HMAC (no unsigned bootstrap mode).
 It validates explicit USD/integer amounts and provider identity. **Purchase
@@ -31,7 +31,7 @@ Human stop calls private `/internal/killswitch` with `{user_id,on:true}`. It
 atomically latches that owner and revokes unused grants while preserving original
 committed authorizations. Card-state control allows PAUSED/CLOSED only, validates
 actual provider card identity/state and reports unknown failures. The API records
-owned PAUSE intent before calling it; no transaction reversal is claimed.
+owned CLOSED intent before calling it; no transaction reversal is claimed.
 
 ## Audit delivery
 
@@ -51,13 +51,12 @@ TLS/routing rollout is Cameron's task. Enrollment requires an exact configured
 HTTPS `LITHIC_ASA_RESPONDER_URL`, API control bearer and sandbox credentials.
 Retrieve the program HMAC secret separately and keep it in the rail Secret.
 Never print it. Provider enrollment outcome may be unknown: inspect before retry.
-HTTP `/internal/lithic/simulate` returns 503 until durable payment-operation
-identity/reconciliation exists; the sandbox wrapper is retained for that handoff.
+HTTP `/internal/lithic/simulate` returns 503 because arbitrary provider simulation is not an authorized purchase operation; the sandbox wrapper is retained for that handoff.
 No provider enrollment, simulation or card pause was run by these tests.
 
 ## Interfaces, tests and owner handoffs
 
-See [the current handoff](../../api/alignment-fixes-handoff.md) for complete
+See [the current handoff](../../api/full-app-handoff.md) for complete
 request fields, credential receivers, HTTP semantics and outstanding merchant /
 API / Graph responsibilities. Do not seed arbitrary fixture grants as production
 verification or copy grant bindings into an uncorrelated provider request.
@@ -68,8 +67,10 @@ uv run python -m unittest discover -s tests -v
 LEASH_TEST_VALKEY_URL=redis://127.0.0.1:56379/15 uv run python -m unittest discover -s tests -v
 ```
 
-The 45-test suite passed with the isolated real Redis engine. Without its gate,
+The 57-test suite passed with the isolated real Redis engine. Without its gate,
 real Redis tests skip. ASA signatures/card controls are local unit/HTTP mocks;
 actual Valkey8 restart durability and live sandbox integration are still unverified.
 The root YAML runner executes 16 pure rail-stage cases only; it is not full merchant
 or Graph E2E evidence.
+
+Private `/internal/execution/lease`, `/internal/execution/grants`, `/internal/execution/stop` and original-event readback validate generation/rail epoch. Run Stop/account Kill serialize with atomic consumption; original identical delivery after Stop retains the prior response. State loss rejects old execution instead of rehydrating spending blindly. Actual local Redis tests include stop-between-read-and-commit, lease expiry/reissue refusal, one-success quota and epoch loss; current cloud Valkey8/PVC/HMAC/latency remains unverified.

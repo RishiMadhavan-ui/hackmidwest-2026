@@ -1,0 +1,6 @@
+test_signature_attack_recovers_and_authorizes_through_real_mcp_and_rail (test_graph_stack.GraphStackTests.test_signature_attack_recovers_and_authorizes_through_real_mcp_and_rail) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 39.509s
+
+OK

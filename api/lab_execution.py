@@ -6,7 +6,7 @@ from typing import Literal
 import httpx
 from pydantic import Field, StrictBool, StrictInt
 
-from attack_lab import Operator, EmptyRequest, owned, budget, server_enabled, record, router
+from attack_lab import Operator, EmptyRequest, owned, budget, server_enabled, record, router, outstanding_runs
 from authority_errors import AuthorityError
 from db import get_conn
 from execution import Launch, launch, worker_credential
@@ -163,7 +163,7 @@ def cleanup(namespace_id: str, body: EmptyRequest, principal: Operator):
     for mandate in mandates:
       if mandate.status in {MandateStatus.ACTIVE, MandateStatus.PROPOSED}:
         revoke(conn, mandate.id, demo, version=mandate.version, content_hash=mandate.canonical_payload_hash, now=utc_now())
-    runs = conn.execute("SELECT run_id FROM attack_lab_runs WHERE namespace_id=%s", (namespace_id,)).fetchall()
+    runs = outstanding_runs(conn, namespace_id)
   outcomes = [stop_run(item["run_id"], demo) for item in runs]
   with get_conn() as conn:
     conn.execute("SELECT id FROM leash_users WHERE id=%s FOR UPDATE", (demo.user_id,))

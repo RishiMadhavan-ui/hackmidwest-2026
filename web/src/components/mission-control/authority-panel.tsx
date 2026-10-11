@@ -10,7 +10,6 @@ import {
   formatUsdFromCents,
 } from "@/lib/api";
 import {
-  DEMO_CHARGER_PROPOSAL,
   approveMandate,
   centsToDollarsInput,
   dollarsToCents,

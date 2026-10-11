@@ -203,6 +203,8 @@ async def stream_activity(
         list_activity, user_id, after_sequence=cursor, limit=MAX_LIMIT
       )
       for item in batch:
+        if await request.is_disconnected():
+          return
         cursor = item.sequence
         payload = item.model_dump(mode="json")
         yield f"id: {cursor}\nevent: activity\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"

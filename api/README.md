@@ -1,6 +1,10 @@
 # LEASH backend and contract handoffs
 
-**Current implementation follow-up:** see [alignment-fixes-handoff.md](alignment-fixes-handoff.md) for identity-only signup, provenance/SSE, strict local rail, durable stop/provider control and remaining merchant/payment/Graph work. Earlier captures/test counts below describe their named revisions, not current deployed behavior.
+**Current:** [full-app-handoff.md](full-app-handoff.md) describes private Graph launches, natural-language drafting, trusted/scoped local-rail execution, two stops, operator isolation and reconciliation. [Actual results](../docs/FULL_APP_TEST_RESULTS.md) and [147-case coverage](../docs/LEASH_SECURITY_COVERAGE.md) separate local/fixture/live/provider claims.
+
+## Historical R01/R02 handoff notes
+
+The named revisions/counts below are historical and do not override the current handoff.
 
 R01 supplies the frozen shared contracts, hashes and sanitized event envelopes.
 R02 adds PostgreSQL identity/agent bindings, migrations, signed mandate approval,

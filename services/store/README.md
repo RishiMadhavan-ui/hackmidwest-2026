@@ -1,62 +1,19 @@
 # Volt Supply Co. — simulated merchant
 
-The canonical catalog and checkout records are separate from attackable listing
-HTML. CHG-65W (`chg-65w`) is a USB-C 65W laptop charger; SUB-CARE-MO (`voltcare`)
-is a monthly subscription. Both use VOLT SUPPLY CO, MCC 5732, 2999 cents and USD.
-The evil toggle changes listing text only, including JSON-LD and an HTML comment.
+Owner Cameron. Canonical catalog is separate from untrusted listing HTML. CHG-65W/chg-65w, clean CHG-65W-SAFE/chg-65w-clean and SUB-CARE-MO/voltcare share VOLT SUPPLY CO/MCC5732/USD2999cents. Only subscription recurrence/product category differs. Public `evil` selection and legacy unrestricted preview return403; STORE_EVIL_MODE cannot enable them. Enabled allowlisted Lab runs receive scoped injected listing through regular Store MCP browsing.
 
-**Payment completion is disabled and returns 503** until durable payment
-reconciliation exists. Create/read use `STORE_API_TOKEN`. Own/freeze/bind/complete
-require a distinct `STORE_CHARGE_TOKEN` (backend only — never MCP). Checkouts carry
-owner/session, revision, 30-minute expiry and freeze so LEASH can prove the verified
-SKU is what bind/charge will use. No provider credential belongs in this pod.
+With LEASH_EXECUTION_ENABLED1, create/freeze/projection/completion delegate to private API-owned PostgreSQL records through execution_bridge.py and distinct MERCHANT_BACKEND_TOKEN. Checkout owner/run/generation/revision/hash/expiry are derived from a validated scope; they cannot be replaced by model facts. API independently retrieves the configured authenticated projection. Protected complete uses current mcp-store scope + STORE_CHARGE_TOKEN and only the original stable exact checkout/payment/authorization event; unknown results stay reconciling, never retry with another event. Actual local SDK Graph/MCP/API/SQL/Redis acceptance is in [test results](../../docs/FULL_APP_TEST_RESULTS.md).
 
-## Runtime and routes
+| Route | Boundary |
+|---|---|
+| `/health`, `/healthz` | Liveness and truthful selected persistence/completion mode |
+| `/readyz` | Requires configured distinct store API/charge credentials; runtime connections still fail closed |
+| `/catalog`, `/products/{id}` | Clean catalog/listing; poison only via enabled isolated run scope; public selectors denied |
+| `POST /api/checkouts` | STORE_API_TOKEN and current scope; immutable canonical catalog, no caller SKU/price authority override |
+| `GET /api/checkouts/{id}` | Scoped execution mode requires distinct backend merchant reader; fixed projection from API SQL |
+| `POST /api/checkouts/{id}/complete` | STORE_CHARGE_TOKEN plus exact current execution scope; original durable payment/charge association |
+| Legacy own/freeze/bind | Authenticated compatibility primitives; cannot substitute for current API scope/projection/rail grant |
 
-Private service: `http://store:8000` on LKE; local port 8004. The web server exposes
-only `GET /store/products/{id}` and reads `STORE_ORIGIN` at runtime. Checkouts have
-no public browser proxy. Relative product links work through either origin.
+Legacy disabled-execution adapter has process-memory checkouts and is not the selected durable path. No provider credentials belong in this pod. Use API_URL, LEASH_EXECUTION_ENABLED1, STORE_API_TOKEN/STORE_CHARGE_TOKEN/MERCHANT_BACKEND_TOKEN, WEBHOOK_URL/WEBHOOK_CHARGE_TOKEN server-side; each secret distinct≥32chars. Private LKE store:8000; local port8004. Web only proxies safe product listing GET, no public checkout mutation.
 
-| Method | Route | Current behavior |
-|---|---|---|
-| GET | `/health[z]` | Liveness; reports process-memory checkout persistence and unavailable completion |
-| GET | `/readyz` | 503 unless distinct `STORE_API_TOKEN` and `STORE_CHARGE_TOKEN` (≥32 chars each) |
-| GET | `/products/{id}` | Public HTML listing; attack selectors return 403 (execution disabled) |
-| POST | `/api/checkouts` | `STORE_API_TOKEN`; catalog-backed create (unowned until `/own`) |
-| GET | `/api/checkouts/{id}` | `STORE_API_TOKEN`; canonical record including trust fields |
-| POST | `/api/checkouts/{id}/own` | `STORE_CHARGE_TOKEN`; bind user/session once |
-| POST | `/api/checkouts/{id}/freeze` | `STORE_CHARGE_TOKEN`; lock facts_hash after verify |
-| POST | `/api/checkouts/{id}/bind` | `STORE_CHARGE_TOKEN`; requires owned+frozen; hash must match |
-| POST | `/api/checkouts/{id}/complete` | `STORE_CHARGE_TOKEN`; 503 until durable reconciliation |
-
-Missing/short/identical credentials fail closed; wrong bearer returns 401.
-Conflicting SKU/product aliases and invalid quantities return 422. Validation
-errors use a plain `detail` string without echoing card input.
-
-Checkout create/read returns legacy `line_items` plus canonical SKU, category,
-subscription, billing interval and product attributes. `rail` is null because
-there is no executed payment rail. These records are **process memory** and are
-not complete frozen `CheckoutSnapshot` evidence: user/session ownership,
-revision/hash/expiry, durable freeze and protected grant/instrument binding are
-still required before API verification and purchase authorization.
-
-## Local commands
-
-```text
-services/store/: uv sync --frozen
-services/store/: uv run uvicorn main:app --reload --port 8004
-services/store/: uv run pytest -q
-```
-
-Provide `STORE_API_TOKEN` in the server environment (at least 32 random characters,
-distinct from `STORE_MCP_TOKEN`). `STORE_EVIL_MODE=0` is the clean default. The
-manifest allows only those two keys and uses `/readyz` readiness with `/healthz`
-liveness. Source changes were tested locally; no deployment was performed here.
-
-The 15-test suite passes: catalog identity/same-price recurrence, poison toggle,
-mandatory authentication/readiness, conflicting aliases/strict quantities,
-sensitive validation and blocked provider completion. Provider calls are mocked
-only to assert they never run. Full purchase/replay/concurrency/restart acceptance
-still needs Cameron C02 and Rishi R03/R04/R11. See
-[the integration handoff](../../api/alignment-fixes-handoff.md) and
-[the complete audit](../../docs/LEASH_ALIGNMENT_AUDIT.md).
+From this directory: `uv sync --frozen`, `uv run uvicorn main:app --port 8004`, `uv run pytest -q`. Current27tests+12subtests pass; actual full-chain acceptance separate. No deployed service/shared DB/provider was mutated. [Current handoff](../../api/full-app-handoff.md) documents rollout/migrations/trust limits; [coverage](../../docs/LEASH_SECURITY_COVERAGE.md) lists unexecuted substitution/restart/provider cases.

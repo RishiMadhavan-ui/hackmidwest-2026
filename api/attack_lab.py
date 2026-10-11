@@ -150,6 +150,20 @@ def projection(row):
           "revision": row["revision"], "rail": row["rail"]} if row else None
 
 
+def outstanding_runs(conn, namespace_id):
+  """Cleanup revisits live or unacknowledged scopes, retaining completed history.
+
+  One active scenario is allowed per namespace. Bound each cleanup batch; the
+  disabled namespace and independent expiry fence any remaining stale scopes.
+  """
+  return conn.execute("""SELECT l.run_id FROM attack_lab_runs l
+    JOIN run_executions e USING(run_id) WHERE l.namespace_id=%s
+    AND (e.state<>'terminal' OR e.rail_stopped_at IS NULL
+      OR EXISTS (SELECT 1 FROM payment_operations p WHERE p.run_id=l.run_id
+        AND p.state IN ('activating','ready','authorizing','reconciling')))
+    ORDER BY l.created_at DESC LIMIT 20""", (namespace_id,)).fetchall()
+
+
 def access_state(conn, principal):
   row = conn.execute("SELECT * FROM attack_lab_namespaces WHERE operator_user_id=%s",
                      (principal.user_id,)).fetchone()
@@ -203,7 +217,7 @@ def control(namespace_id: str, body: ControlRequest, principal: Operator):
         "execution_available": access_state(conn, principal)["execution_available"],
         "cancellation": "not_requested" if body.enabled else "requested"}, now=utc_now())
     result = access_state(conn, principal)
-    runs = conn.execute("SELECT run_id FROM attack_lab_runs WHERE namespace_id=%s", (namespace_id,)).fetchall() if not body.enabled else []
+    runs = outstanding_runs(conn, namespace_id) if not body.enabled else []
     demo = Principal("human", row["demo_user_id"])
   if runs:
     from workflow_control import stop_run
