@@ -2,9 +2,11 @@
 
 Adopted October 10, 2026 from the team's **Product Evolution & MVP Architecture Directive**. This is the authoritative product direction; [AGENTS.md](../AGENTS.md) defines coding rules/path ownership; the synchronized [Leash-build-plan.md](../Leash-build-plan.md) assigns human and coding-agent tasks, dependencies, handoffs, execution gates, and readiness evidence. Conflicting flows/timing/fallbacks from the earlier hotel/gift-card plan are superseded. Compatible stack, ownership, and service boundaries are preserved. Keep these three documents synchronized when direction or ownership changes.
 
-**Status: requirements and implementation plan, not a claim of completed functionality.** Sections 1–20 retain the adopted directive. Section 21 records the inspected repository; sections 22–25 adapt the directive to existing decisions, define enforcement boundaries, and identify work and dependencies. Suggested paths, endpoints, schemas, and integration behaviors below are targets until implemented and verified. No application code is changed by this documentation task.
+**Status: requirements and implementation plan, not a claim of completed functionality.** Sections 1–20 preserve the earlier directive; section 21 is its historical inspection. Sections 22–25 preserve useful contracts and handoffs. **Section 26 incorporates Rishi's October 10 master alignment specification and takes precedence where earlier sections permit manual/optional recovery, omit Graph/Kill Switch/full SSE, or require Compose.** The [alignment audit](LEASH_ALIGNMENT_AUDIT.md) is the current requirements-to-code record at `2e0cbe5`; historical suite counts and snapshots below are not current completion claims. Application code and frozen contracts are unchanged by this audit.
 
 The product's central proof is a $29.99 charger succeeding and an unrelated $29.99 subscription at the same merchant being blocked despite passing ordinary merchant/amount controls. Protection comes from human-confirmed intent, trusted itemized checkout facts, and deterministic enforcement. It must still work when the shopper is fully convinced by the malicious listing.
+
+The revised proof also requires a **real Strands Graph to recover automatically** from the rejected pre-payment candidate under unchanged authority, comprehensive persisted/replayable SSE, and a functional authenticated human Kill Switch. Kubernetes is the selected runtime. Cameron coordinates auth-provider selection with Rishi's backend verification and existing stable identity mapping; no competing auth system is authorized.
 
 ## 1. Updated Product Identity
 
@@ -748,16 +750,16 @@ Never approve based solely on the shopping agent's confidence.
 
 Expected: BLOCKED.
 
-### Scenario 6 — Authorized Purchase After an Attack
+### Scenario 6 — Autonomous Authorized Purchase After an Attack
 
 - The malicious purchase fails.
 - The user retains the original mandate.
-- The agent finds a compliant product or the user selects one.
+- Strands Graph investigates, quarantines the suspicious source/SKU, and starts a fresh shopper context to find a compliant alternative without requiring the human to restart the task.
 - That purchase completes normally after verification.
 
-Expected: APPROVED.
+Expected: real labeled authorization under the unchanged mandate, with the blocked incident retained. S6 is the recovery half of the master specification's attack-and-recovery storyline; add S7 for the master Kill Switch storyline. Manual restart remains a separately labeled regression/fallback, not autonomous-recovery acceptance.
 
-This scenario demonstrates that LEASH is not merely an aggressive blocker. It enables legitimate autonomous commerce while enforcing boundaries.
+This scenario demonstrates legitimate autonomous commerce while enforcing boundaries. No recovery purchase is permitted after an authorization or while a provider outcome remains ambiguous.
 
 ---
 
@@ -1149,6 +1151,8 @@ The principal demonstration should show a semantic purchase violation that canno
 
 ## 19. Definition of MVP Complete
 
+The nineteen earlier checklist items remain necessary. Section 26 additionally requires actual bounded Strands Graph, automatic clean recovery, full persisted/replayable SSE, human Kill Switch, scoped runtime identity, durable financial operation/reconciliation state and Kubernetes integration. These are mandatory completion gates, not stretch work. The audit reports each separately.
+
 The LEASH MVP is complete when the following are true:
 
 - [ ] A user can create and confirm a purchase mandate.
@@ -1378,9 +1382,11 @@ These schemas validate shape and content consistency, not human identity, crypto
 
 ## 24. Team handoffs and unresolved dependencies
 
+This section preserves the original handoff structure; current statuses are in the audit. API Dockerfile/root-context builds, R02 migrations/auth/signing and mode-separated credentials, readiness and trace PVC declarations are merged. Kubernetes replaces the old Compose deployment gate. Add R11/R12/A11–A13 and S7 as specified in the current build plan; Cameron leads auth-provider coordination with Rishi's adapter. Do not treat the earlier pending list below as a fresh source inspection.
+
 Section 15 assigns role responsibilities; `AGENTS.md` controls path edits. Rishi owns current `api/`, product backend and persistence; Cameron owns trusted merchant, payment rail and infrastructure; Aditya owns agents/tools/MCP/provenance and adversarial fixtures. All three agree shared contracts before freezing.
 
-The synchronized [build plan](../Leash-build-plan.md) expands this handoff summary into R01–R10, C01–C10, and A01–A10 assignments, separate human/coding-agent responsibilities, H01–H13 contracts, and G0–G5 gates. Its owner table matches `AGENTS.md`. Planned shared package metadata and the package marker have an explicit Cameron owner; Rishi retains frozen domain/event contracts. The first gate jointly agrees interfaces before dependent implementations. Service owners retain their own Dockerfiles, dependencies, and tests.
+The synchronized [build plan](../Leash-build-plan.md) expands this handoff summary into R01–R12, C01–C10, and A01–A13 assignments, separate human/coding-agent responsibilities, H01–H13 contracts, and G0–G5 gates. Its owner table matches `AGENTS.md`. Planned shared package metadata and the package marker have an explicit Cameron owner; Rishi retains frozen domain/event contracts. The first gate jointly agrees interfaces before dependent implementations. Service owners retain their own Dockerfiles, dependencies, and tests.
 
 | Owner / reviewers | Concrete deliverable | Required interface or evidence |
 |---|---|---|
@@ -1423,7 +1429,7 @@ Section 19's nineteen completion criteria remain unchecked in this checkout. Dep
 
 Retain every test category in section 13. Add regressions for changed payload under duplicate identity, cross-session checkout IDs, exact amount/currency, immutable checkout revisions, direct protected-tool invocation, guardian override attempts, authority scope/cardinality, revocation races and ingestion recovery. Instrument tests to prove authorization invokes no inference. Manipulated-output fixtures test enforcement independently of model randomness; separately show actual Strands manipulation live and label fixture-driven runs accurately.
 
-Before completion: run service/security/end-to-end tests; boot Compose when available; smoke-test the deployed Akamai backend/selected rail; measure decision latency; verify actual sanitized Strands traces, legitimate approval, semantic block and recovery; refresh the UI; rehearse within three minutes; visibly reset isolated fixtures; prepare a labeled prerecorded outage fallback. Provider failures cannot produce success banners or paid audit records.
+Before completion: run service/security/end-to-end tests; verify the integrated Kubernetes runtime and optionally local Compose; smoke-test the deployed Akamai backend/selected rail; measure decision latency; verify actual sanitized Strands traces, legitimate approval, semantic block and recovery; refresh the UI; rehearse within three minutes; visibly reset isolated fixtures; prepare a labeled prerecorded outage fallback. Provider failures cannot produce success banners or paid audit records.
 
 Documentation validation for this update: diff/whitespace, local Markdown links, balanced fences, preservation of all twenty directive sections and nineteen completion criteria, ownership/current-versus-planned consistency, and explicit dependencies. Service/security tests and Compose boot remain pending because their implementations/configurations are absent.
 
@@ -1462,6 +1468,8 @@ audit delivery cannot substitute for it. Earlier inspection sections are histori
 
 ## Post-merge integration check — `266a805`
 
+Historical check; see section 26 and the alignment audit for the expanded desired state and current evidence.
+
 R02 and both teammate handoffs are merged: separate live/scripted credentials,
 mandates and trace lanes, API root-context build, `/readyz` readiness and persistent
 trace-spool configuration. The public API health/readiness endpoints return 200.
@@ -1477,3 +1485,106 @@ R03 is untouched and R04 must integrate confirmed authority, trusted checkout an
 a valid scoped grant before issuing. Existing signup/balance sandbox behavior is
 preserved and is not a verified purchase grant. Previously issued provider cards
 were not revoked; deployment of the patch remains a separate handoff to Cameron.
+
+## 26. Master alignment baseline — October 10, 2026
+
+This section adopts the full desired direction of `LEASH_MASTER_ALIGNMENT_SPEC_2026-10-10.md` supplied by Rishi, including its sections 0–26. The master document's suggested names, IDs, paths and wire examples are illustrative; preserve compatible frozen R01 names and actual services. Its product/security decisions are mandatory. The separate audit prompt defines this documentation-only audit workflow; it does not authorize application edits, contract renames, branch switches, commits, deployments or shared-database changes. The [audit matrix](LEASH_ALIGNMENT_AUDIT.md#requirements-to-code-traceability) covers every requirement group, including adversarial acceptance tests, and records unresolved mappings.
+
+### 26.1 Preserved decisions and corrected assumptions
+
+- Retain Next.js/TypeScript/Tailwind/shadcn, FastAPI/Pydantic, Strands, Akamai inference/compute, PostgreSQL durable state and Valkey atomic fast path. Keep `api/`, both MCP services at `/mcp` on 8002/8003, mode-separated live/scripted identities and existing deployment wiring.
+- Kubernetes/LKE is the existing selected deployment. Compose is optional local development convenience. Do not replace Kubernetes to match an old plan or claim cluster state from a YAML file.
+- Cameron leads auth-provider coordination (Clerk, Auth.js or agreed equivalent). Rishi owns API/schema/web edits and integrates a backend-verified stable-user adapter. The current custom UUID/JWT implementation remains until a deliberate migration is agreed; no new competing login system. Cookies require appropriate CSRF protection; bearer tokens require secure storage/transport and backend validation. Anonymous UI state is never authority.
+- Preserve the R01 contract freeze and dedicated contract-only PR/all-three agreement for changes. `description` is original instruction; `max_cents=3999` expresses strict “under $40”; existing `checkout_id`, `_cents`, hashes, nullable guardian metadata and lower-case MCP statuses stay compatible. New Graph/reconciliation/event concepts require an explicit additive mapping/version, not independently invented wire models.
+- Existing fixture SKUs `CHG-65W` and `SUB-CARE-MO` remain valid aliases for the master's example product IDs. Both total 2999 cents at the same stable merchant and USD currency; recurrence/category distinguish them. Add an independently trusted compliant alternative accessible outside the quarantined source. Listing content alone changes with Attack Lab.
+- Preserve the controlled-merchant guarantee and limitations in 23.4. ASA metadata does not prove SKU identity. No live funds, AP2/passkey compliance, settlement, general merchant fraud detection or fulfilled-goods guarantee is claimed.
+
+### 26.2 Authoritative Graph and autonomous recovery
+
+Use the actual installed Python Strands `GraphBuilder`/`Graph` API. A single Agent, ordinary Python retry loop, hand-drawn graph or hook-only branching does not meet this requirement. The audit inspected Strands 1.59.0: conditional edges, node-execution ceilings and wall-clock limits are available. Validate concrete adapters against that locked SDK. Deterministic custom nodes must use supported executor interfaces, not assumed arbitrary callable signatures. [Official Python Graph API](https://strandsagents.com/docs/api/python/strands.multiagent.graph/).
+
+```mermaid
+flowchart TD
+  S[Load confirmed mandate and current scope] --> SH[Shopper: model and authenticated MCP]
+  SH --> V[API independent checkout verification]
+  V -->|verified and current| P[Backend payment orchestration]
+  V -->|rejected before payment| G[Guardian investigation]
+  G --> Q[Deterministic containment and recovery eligibility]
+  Q -->|safe and within limits| SH
+  Q -->|unsafe or exhausted| T[Stop with actual reason]
+  P -->|authorization approved| A[Authorized: stop purchasing]
+  P -->|explicit hard decline| T
+  P -->|outcome unknown| R[Reconciling: no new purchase]
+  K[Human Kill Switch] --> X[Durable cancellation and atomic revocation]
+  X --> T
+```
+
+Required nodes: authority/context loader, shopper, trusted verification, guardian, deterministic containment/recovery controller, payment orchestrator and accurate terminal recorder. Shopper and guardian remain genuine Strands agents. All agent business tools use authenticated MCP; deterministic backend verification/rail operations remain outside LLM authority. No direct Python shopping/payment fallback. MCP failure pauses/fails agent operations closed.
+
+Edges read validated backend state, never prose saying “approved.” A model cannot create grants, select trusted merchant URLs, relax constraints or activate the Kill Switch. The shopper remains intentionally susceptible for the live attack; sensitive tools/API/merchant/rail enforce controls independently of hooks and Graph.
+
+Recovery requires all of: rejected candidate before financial side effects; unchanged confirmed mandate/version/hash; unused successful-purchase scope; no unknown/authorized operation; no cancellation/expiry/revocation; candidate/source exclusions; attempts/time budget available. Persist exclusions by source ID/hash, SKU and checkout. Create a fresh shopper context with the original mandate and sanitized reason codes; raw hostile listing text, prior contaminated transcript and raw guardian evidence do not enter recovery context. SDK reset-on-revisit alone is insufficient if upstream node output reinserts hostile text.
+
+Bound candidate count, total Graph node executions, per-node timeout, total wall-clock deadline and inference cost. Owners must freeze concrete constants through H05/H06 before claiming readiness; the master's three-candidate example is not a tested setting. Check bounds and cancellation at every edge and side-effect boundary. Exhaustion/no qualifying alternative stops with a truthful reason. Guardian unavailability never grants permission; record unavailable investigation and apply deterministic recovery eligibility.
+
+Graph memory is execution progress only. PostgreSQL stores run/attempt state, operation IDs, resumable milestones, exclusions and cancellation; robust leases/fencing prevent stale/concurrent workers from creating grants/cards/charges. Durable registered-run identity alone does not supply these controls. Resume from actual financial state after a pod restart; do not replay payment nodes because a model conversation was lost.
+
+### 26.3 Financial lifecycle, correlation and ambiguity
+
+Before an external write, persist a user/run/mandate/checkout-bound payment operation with stable idempotency key. Independently retrieve/freeze authenticated merchant facts, run every deterministic check, reserve successful-purchase scope, prepare grant/instrument/merchant correlation, then activate spending only when setup succeeds. Failed or uncertain setup must not leave usable authority. No OPEN/unrestricted card on signup or human login. Any pre-created instrument must be unusable until verified setup and must have reconciled lifecycle; prefer verified-purchase sandbox SINGLE_USE where supported.
+
+Grant binding includes owner, run/attempt association, mandate version/hash, checkout revision/hash, exact merchant/amount/currency, instrument, authenticated merchant binding and bounded expiry. The protected merchant charge loads that binding server-side and enforces the same immutable checkout; caller-supplied payment IDs, hashes and card numbers never establish it. Re-fetch/reverify material changes. Atomic issuance/reservation, consume-and-cache-and-event commit, invalidation and idempotency follow 23.5; process-local locks are insufficient.
+
+Typed lifecycle concepts are distinct: `VERIFIED`, active grant, card issued, authorization pending, `AUTHORIZED`, explicit decline, `RECONCILING`, and provider-supported clearing/settlement/reversal/refund/expiry. These concepts require coordinated mapping to frozen enums; do not rename `approved` or treat that MCP permission result as settlement. Keep proposed checkout, verification, grant and real authorization references separate. Unknown HTTP/provider outcome forbids new purchase/card issuance and enters reconciliation using original operation identity. Poll/reconcile; never advise blind retry. Explicit hard provider decline stops autonomous purchasing under the current attempt. Successful authorization stops the one-success workflow. Duplicate authenticated delivery returns its original committed result; altered duplicate identity is an integrity error.
+
+Use one pure deterministic rail engine/atomic protocol with separate local and Lithic adapters. The local simulator must run real policy and state transitions, authenticated and accurately labeled. Lithic is conditional on sandbox account/enrollment, configured per-program HMAC, HTTPS responder, current schemas and actual signed approve/decline evidence. For this MVP, reject production/unknown environment rather than silently labeling it sandbox. Do not send credentials to arbitrary configured origins. Lithic ASA performs no LLM/SQL/merchant/provider network calls: Valkey only in its critical path. Validate request type/raw signature/expiry/current revocation, commit before responding and measure real latency. [Lithic ASA documentation](https://docs.lithic.com/docs/auth-stream-access-asa) documents a six-second deadline, recommends three seconds and describes sandbox enrollment/HMAC configuration; it does not establish team readiness.
+
+### 26.4 Mandatory human Kill Switch
+
+An authenticated human can stop their own workflow and unused spending authority. The endpoint verifies owner/session, persists the cancellation/revocation intent, coordinates atomic fast-path invalidation with Cameron, prevents new candidates/grants/charges, and requests worker cancellation. Agents/service tokens cannot exercise human authority. Provider pause/close runs outside ASA through Cameron's adapter and records request/confirmed/failed/unknown outcomes separately.
+
+PostgreSQL and Valkey are not one automatic transaction: Rishi and Cameron must agree a tested fail-closed ordering/version protocol. Do not acknowledge `effective` while an old unused grant remains consumable; incomplete synchronization must block new approvals. Durable cancellation survives restart. Approval/invalidation serialize across replicas: if invalidation wins, no new approval; if authorization commits first, preserve it and stop later spending. Repeated clicks return the same operation/outcome. Already authorized/settled payments are not reversed by the Kill Switch. Unknown payments remain reconciling.
+
+Mandatory race tests: before shopping, during browsing, between verification/issuance, after instrument issuance before authorization, concurrent with authorization, after authorization, rapid duplicate clicks, cross-user/agent invocation, restart/replay, Valkey outage and provider pause failure. UI shows requested versus effective, cancellation and actual provider status without overstating instantaneous network effects.
+
+### 26.5 Comprehensive persisted SSE and evidence
+
+Persist sanitized state/event coupling before acknowledgment. API is the durable application writer; authenticated services publish claims/evidence for ingestion. Keep original event IDs (`evt_...`) distinct from ordered replay cursors (SQL sequence or agreed equivalent). R01's `AuditEvent` has `type`, `at`, `user_id`, optional `run_id` and `data`; do not replace it with the master's illustrative integer event ID/uppercase JSON. Agree additive schema version, source/attempt/correlation/evidence metadata and new enums through the dedicated contract process. Source claims never become trusted canonical checkout because they were ingested.
+
+| Required lifecycle | Existing compatible event concepts | Additional capture required |
+|---|---|---|
+| Authentication/mandates | `mandate.proposed/approved/updated/revoked/expired` | Verified session lifecycle where appropriate, confirmation requested, durable expiry transition |
+| Run/Graph | `agent.run_started/completed/failed`, `agent.step` | Graph start, node start/end, edge, cancellation, reconciling, attempt IDs |
+| Model | Metadata exists in model/guardian records | Actual inference start/end/error, provider/model and latency; no private reasoning |
+| MCP/browsing | `agent.tool.before/after`, `provenance.source/recorded` | Failed tool status, search/listing/checkout milestones, source ID/hash/trust |
+| Verification | `checkout.verified/blocked/requires_review` | Trusted fetch, verification start, stable reasons and evidence refs |
+| Investigation/containment | `guardian.verdict`, `security.incident_recorded` | Investigation start/end, quarantine/exclusion, evidence correlation |
+| Recovery | No dedicated frozen events | Eligibility/start/restart/exhaustion, clean-context and budget metadata |
+| Grant/card/rail | `grant.*`, `card.issued`, `authorization.decided`, `payment.*` | Setup, actual received authorization, outcome ambiguity/reconciliation/resolution, real supported clearing |
+| Kill Switch | `killswitch.changed` | Requested, durable revocation, atomic invalidation, agent cancellation, provider pause request/result, effective status |
+
+SSE emits persisted `id:`/`event:`/`data:`, heartbeats and authorized catch-up using `Last-Event-ID` or explicit cursor. All read/history/incident/receipt/source routes enforce stable owner/run access; cursors cannot expose another user. SSE disconnect/reconnect never starts/restarts Graph or payment. Define expired-cursor resync and dedup behavior, browser auth compatible with fetch streaming or secure cookie session, and reverse-proxy buffering/timeouts/TLS. Do not put bearer secrets in URLs. Model/tool/event streams from SDK/MCP are not product SSE.
+
+Persist original source hashes and redacted stored-byte hashes separately, with actual snapshot status. No PAN/CVV, auth headers, signing keys, raw sensitive arguments, full private prompts or chain-of-thought in logs/storage/SSE. Link mandate, run/attempt, listing, actual tool call, canonical checkout/checks, grant, authorization and incident. Correlation evidence is not blanket proof of causation. UI reads authoritative financial state, not the model's final prose or a frontend animation.
+
+### 26.6 Identity, runtime and shared-contract handoffs
+
+Human identity adapter verifies the selected provider/session server-side and maps immutable provider subject to existing LEASH owner; migration must preserve mandates/history. Agent credentials are short-lived and bound to user, run, mandate version, permitted tools, audience/issuer and expiry. Bootstrap operator provisioning can remain separate; no user ID supplied in tool arguments creates access. Internal private networking plus service auth is required for API/agents/MCP/store/rail. Cameron owns TLS/NetworkPolicy/Secrets; Aditya and Rishi enforce scope in their endpoints.
+
+Inspect actual Kubernetes service DNS, ports/images, API repository-root builds, readiness/liveness, trace volumes, database/Valkey and rollout version. Do not duplicate already merged build/readiness/PVC work. Public MCP rewrites currently conflict with the earlier internal-only requirement: default desired boundary is internal authenticated agent services; any deliberate external client exposure needs documented authenticated HTTPS scope and team decision, not an audit-time deploy change. Deployed activity/logout routes absent from main require source/image reconciliation before integration claims.
+
+Select only needed Secret keys per service. Current API/agents/Leash MCP/Store MCP deployments all use unrestricted `envFrom: app-env`, populated from the root `.env` by the deployment script. If configured there, backend JWT/signing/database/Lithic credentials reach agent/tool pods; namespace-private networking does not repair this authority leak. Cameron must use service-specific Secrets or explicit key references. Agents need inference and scoped tool/service credentials; thin MCP adapters do not need database, human-token-signing or unrestricted provider keys. Verify access without reading/printing secret values.
+
+Preserve build-plan H01–H13 IDs. Master's H01→plan H01; H02→H02/H11; H03→H03; H04→H04/H05; H05→H07/H08 plus Graph handoff; H06→H06; H07→H11; H08→H12/R05; H09→H09/H10/H13; H10→H13/G3/G4. Cameron leads auth choice in H03; Rishi owns identity verification implementation. Names differing does not justify breaking tools/routes/contracts. Shared installability remains separate from source-copy/PYTHONPATH wiring that currently passes tests.
+
+### 26.7 Coverage, completion and demo
+
+Core defenses: prompt injection/instruction laundering; same-price SKU/recurrence substitution; quantity/merchant/currency/fee/strict-budget violations; missing/stale/untrusted evidence; ownership/version tampering; replay/concurrency; cancellation/revocation races; ambiguous provider outcomes; credential/evidence leakage; forged success; unsafe recovery and lost events. Supported provider request types, signatures, failures, false-positive/no-attack runs and genuine inference/tool execution require tests. Third-party merchant compromise, actual delivery/counterfeits, stolen consumer cards, ACH, chargebacks and broad fraud analytics remain outside demonstrated guarantees.
+
+Retain original S1–S6 IDs, make S2→S6 an **automatic single-Graph recovery** acceptance, and add S7 Kill Switch. The master's six storylines map to plan S1, combined S2/S6, S3, S4, S5 and S7. Mandatory S5 tests include distinct concurrent events, matching duplicate replay and altered duplicate payload. Add tax/shipping/4000-cent boundaries, product attributes, foreign checkout, freeze mutation, direct protected-charge bypass, failed provider issuance, unknown outcome/reconciliation, browser/worker restart and all Kill Switch races. Unit/mock/gated/live evidence must be reported separately.
+
+The six existing product views remain mandatory: Mission Control, actual activity, comparison, incident timeline, history and Attack Lab; add real Graph/recovery visualization and prominent Kill Switch. Original instruction stays visible. Live/simulated/scripted/recorded rail and agent labels are explicit; blocked-before-payment is not a Lithic decline; authorized is not settled. Recovery and incident survive refresh; errors/empty/loading states are real backend states.
+
+Revised three-minute path: 0:00–0:20 problem; 0:20–0:40 explicit confirmation; 0:40–1:15 genuine poisoned listing/MCP attempt; 1:15–1:45 independent block and evidence; 1:45–2:20 automatic Graph containment/clean recovery and valid authorization; 2:20–2:40 Kill Switch on fresh unspent authority (or a rehearsed recorded evidence panel clearly labeled, without claiming live cancellation); 2:40–3:00 sponsor/rail truth and persistent history. Kill Switch functionality/tests remain mandatory even if the timed presenter uses the replay/duplicate extension allowed by the master. `docs/demo-script.md:144` currently uses manual restart; Aditya must update it and its tests. Do not erase incidents or secretly reuse consumed grants during resets.
+
+Completion requires all previous applicable controls plus actual bounded Graph, automatic recovery, comprehensive persisted SSE, human Kill Switch, scoped identity/service auth, durable payment operations/reconciliation, atomic correlation/rail tests, Kubernetes integration, genuine live attack/inference evidence and <=3-minute rehearsal. No current passing suite proves these missing capabilities. Dependency-ordered owners/tasks, blockers and the actual audit results are in [LEASH_ALIGNMENT_AUDIT.md](LEASH_ALIGNMENT_AUDIT.md).

@@ -2,13 +2,15 @@
 
 Read this whole file before changing anything. [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md) defines product/security requirements; this file defines coding rules and path ownership; [Leash-build-plan.md](Leash-build-plan.md) defines each human's and coding agent's tasks, dependencies, handoffs, and completion gates. Keep all three synchronized in any direction/ownership change. Preserve compatible work; inspect files before treating a proposed component as implemented.
 
+**Desired-state baseline:** the October 10 master alignment specification supplied by Rishi supersedes earlier optional recovery, agent-only orchestration, narrow event streaming, and Compose-first assumptions. [Spec section 26](docs/LEASH_SPEC.md#26-master-alignment-baseline--october-10-2026) incorporates that direction; [the alignment audit](docs/LEASH_ALIGNMENT_AUDIT.md) records implementation evidence at `2e0cbe5`. Requirements are not completion claims. Preserve historical snapshots as historical; use the audit for current status.
+
 ## What LEASH is
 
 **The firewall between what you tell your AI to buy and what it actually tries to purchase.**
 
 LEASH is an intent-aware financial authorization layer. It separates the human's confirmed intent, the shopping agent's attempted behavior, and independently verified merchant checkout facts. A purchase can satisfy merchant and budget controls while violating the user's instructions.
 
-The signature demo: the user confirms “Buy a USB-C laptop charger for under $40. No subscriptions.” A trusted $29.99 charger checkout succeeds. An adversarial listing manipulates a real Strands shopper into attempting an unrelated $29.99 subscription at the **same merchant, amount, and currency**. Independent checkout verification and deterministic enforcement block it and preserve evidence. A later compliant purchase can still succeed under the unchanged mandate. This must be real backend behavior within three minutes.
+The signature demo: the user confirms “Buy a USB-C laptop charger for under $40. No subscriptions.” An adversarial listing manipulates a real Strands shopper into attempting an unrelated $29.99 subscription at the **same merchant, amount, and USD currency** as the valid charger. Independent checkout verification rejects it before payment. A real **Strands Graph** investigates, quarantines the suspicious source/candidate, and automatically finds a compliant alternative under the unchanged mandate. That charger receives a real labeled authorization. Show genuine persisted SSE and demonstrate human Kill Switch behavior on fresh unspent authority. This must be real backend behavior within three minutes; “under $40” means at most 3999 cents including required charges.
 
 Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team target: submit Sunday October 11 at 7:30 AM Central ahead of the planned 8:00 AM deadline.
 
@@ -24,8 +26,14 @@ Built for Hack Midwest 2026 (FinTech, AWS Strands Agents, and Akamai). Team targ
 8. **State the actual rail.** Label “Lithic sandbox”, “Local Payment Rail Simulator”, and “simulated merchant”; label recordings/replays. Live customer funds are out of scope.
 9. **The audit UI reflects genuine persisted backend events.** Append-only history, real tool traces, evidence-linked incidents, provider, decision source, and latency must survive refresh. A grant or agent claim is not a paid transaction; authorization is not settlement.
 10. **Block the same-merchant/same-amount attack even when the shopper believes it is valid.** Merchant/MCC/amount controls alone cannot prove SKU identity. Document the trusted merchant and checkout-to-payment correlation assumptions and limitations.
+11. **Use real Strands Graph with bounded safe recovery.** SDK nodes/conditional edges coordinate shopper, independent verification, guardian, deterministic containment, payment and terminal state. Read typed backend decisions. Fresh recovery context contains the unchanged mandate, sanitized reasons and exclusions, never raw hostile instructions. Recheck scope/revocation at every side effect; no recovery purchase while a payment outcome is unknown or after one successful authorization.
+12. **Kill Switch is mandatory and human-only.** Persist cancellation/revocation, atomically invalidate unused spending authority in the rail state, stop Graph recovery and record provider pause outcomes separately. Serialize revocation with authorization across replicas. An acknowledged request is not proof of effective revocation, and committed authorizations are not reversed by cancellation.
+13. **Persist and stream the whole meaningful workflow.** Capture auth/mandate, inference, Graph, MCP, browsing, verification, guardian, recovery, grant/card, authorization/reconciliation and revocation events. Authorized SSE replay never starts a new run. Exclude secrets, PAN/CVV, raw private prompts and chain-of-thought.
+14. **Make external side effects recoverable.** Persist payment-operation identity before issuance/charge; use stable idempotency, run leases/fencing and reconciliation. Timeout is unknown outcome, not permission to issue a new card or buy an alternative. Login/signup is not spending authority; no usable card before verified purchase setup.
 
 ## Architecture and implementation reality
+
+**Current audit snapshot (`2e0cbe5`, clean main before documentation edits):** R01 shape/hash/redaction and R02 signed PostgreSQL authority/registration are tested. Owner-scoped card metadata/direct-issuance blocking and both authenticated MCP adapters exist. API root-context build, `/readyz`, and trace PVC configuration are merged. A single shopper `Agent` and in-memory run manager exist; Graph, automatic containment/recovery, trusted merchant, verifier, payments, atomic Valkey rail, Kill Switch and comprehensive provenance/SSE are missing. Signup still issues an OPEN provider card, and the wrapper permits production while labeling sandbox; both conflict with the desired baseline. Public health/readiness return 200, but deployed OpenAPI also exposes activity/logout routes absent from main: their source revision and comprehensive behavior are unverified. See the audit for exact paths, fixes, tests and owners. No deployment, shared database, provider operation or teammate application code is changed by this audit. The following earlier integration paragraph is historical.
 
 October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/build/PostgreSQL and auth work, and Aditya's merged two-service MCP implementation. R02 adds PostgreSQL migrations, LEASH identity mapping, scoped agent provisioning, signed human mandate approval, immutable replacement/revocation/history and registered runs; see [api/r02-handoff.md](api/r02-handoff.md). The web has signup/signin/profile; purchase UI remains pending. Payments, independent verification, merchant/rail/Valkey, provenance intake, live acceptance, shared installability and Compose remain pending. Cameron's API build-context/readiness changes are merged; the public readiness endpoint returns 200. No shared database or deployed service was changed.
 
@@ -39,11 +47,14 @@ October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/bu
 Preserve the selected stack and planned service responsibilities:
 
 ```text
-human confirmation -> immutable mandate -> Strands shopper (untrusted evidence)
-  -> API retrieves trusted merchant checkout -> deterministic verifier
-  -> scoped one-use grant -> deterministic rail adapter -> approve/decline
-  -> append-only persisted audit -> REST/SSE UI
-                         guardian investigation -> evidence-linked findings
+human confirmation -> immutable mandate -> real Strands Graph
+  shopper via MCP -> independent API verifier -> verified -> payment node
+    rejected before payment -> guardian -> quarantine + eligibility
+      -> fresh shopper context under unchanged mandate, bounded retries
+  payment node -> scoped one-use grant + protected merchant binding
+    -> deterministic rail -> authorized / declined / reconciling
+  human Kill Switch -> durable cancellation + atomic unused-grant invalidation
+  persisted sanitized events across every stage -> authorized REST/SSE replay
 ```
 
 | Component | Inspected or planned path | Owner | Responsibility |
@@ -64,7 +75,7 @@ hackmidwest-2026/
   AGENTS.md                          [E] shared coding rules/ownership
   Leash-build-plan.md                 [E] shared team execution plan
   README.md                          [P] shared setup/product guide
-  docker-compose.yml                 [P] Cameron: integrated local runtime
+  docker-compose.yml                 [P] Cameron: optional local development runtime
   .env.example                       [E] Cameron: configuration names only
   pyproject.toml                     [P] Cameron: workspace/ruff configuration
   .github/                           [P] Cameron: CI/build/deployment
@@ -123,6 +134,7 @@ hackmidwest-2026/
     e2e/                             [E] Aditya: six gated scenario tests, not yet live proof
   docs/
     LEASH_SPEC.md                    [E] shared detailed specification
+    LEASH_ALIGNMENT_AUDIT.md         [E] current master requirements/code/test matrix
     demo-script.md                   [E] Aditya: draft; live attack/port updates pending
 ```
 
@@ -153,7 +165,13 @@ Preserve the existing ownership lanes. The updated spec's finance role coordinat
 | `tests/decision_cases.yaml`, `tests/e2e/`, `docs/demo-script.md` | Aditya |
 | `AGENTS.md`, `Leash-build-plan.md`, `README.md`, `docs/LEASH_SPEC.md` | Everyone, through small documentation PRs |
 
-If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. The present documentation update authorizes only the shared direction files. Do not implement new services as part of documentation alignment.
+If a task needs an edit in another owner's lane, describe the needed change to the human or in the PR and let the owner implement it. This alignment audit authorizes only this file, `Leash-build-plan.md`, `docs/LEASH_SPEC.md` and `docs/LEASH_ALIGNMENT_AUDIT.md`. Do not rewrite application code as part of the audit. Rishi's current instruction is to remain on `main` without committing or pushing; it takes precedence over default branch/PR conventions for this task.
+
+**Auth coordination:** Cameron leads selection/integration of Clerk, Auth.js or the agreed equivalent; Rishi retains `api/`, `db/`, `web/` path ownership and implements the backend verifier/stable identity adapter and UI wiring through a documented handoff. Current custom UUID/JWT auth is preserved until a migration is agreed. Do not install a competing framework. Existing static user/agent/mode binding is a foundation, not the desired short-lived run/mandate/version/tool/audience scope.
+
+**Deployment coordination:** Kubernetes is the selected existing runtime. Extend `k8s/` and owner Dockerfiles; verify images, service authentication, TLS, network isolation, PostgreSQL/Valkey and volumes there. Compose is optional local convenience and cannot replace LKE or block acceptance merely by being absent. Source paths/ports in illustrative diagrams do not require renaming the current two MCP services.
+
+**Secret scope:** each pod receives only its required keys through service-specific Secrets or selected `secretKeyRef` entries. JWT/mandate-signing/database/provider authority credentials stay in the trusted backend components that require them, never shopper/guardian or thin MCP pods. Current manifests import the full shared `app-env` into all four Python deployments; Cameron must restrict that configuration. Actual mounted values are unverified and must not be printed during inspection.
 
 **Contracts:** Rishi authorized the initial R01 `models.py` and `events.py` as the accepted integration baseline, with validation/hash/event tests in `api/tests/`. No separate all-three approval is claimed. Subsequent contract changes require a dedicated PR touching only those contracts and agreement from all three people. Prefer additive optional fields over renames/removals. The detailed spec and [R01 handoff](api/README.md) map old field names to new concepts; do not independently redefine schemas in each service.
 
@@ -179,6 +197,8 @@ Each service owns its Dockerfile. Cameron owns manifests and environment templat
 - Use `<name>/<topic>` branches for the team. Review shared contracts early, integrate continuously, and pull main before a new implementation task when safe. Keep work scoped; never discard another developer's changes.
 
 ## MVP acceptance criteria
+
+The master revision adds mandatory real Strands Graph, bounded automatic clean recovery, full persisted SSE, human Kill Switch and durable side-effect reconciliation to every applicable criterion below. Kubernetes is the selected runtime. Original S1–S6 IDs remain; automatic S2→S6 and added S7 Kill Switch map to the master's six storylines. See spec26 and the audit for exact gates/status; no missing control is waived by these earlier summaries.
 
 All are MVP requirements, not future roadmap items. Detailed fields, state transitions, API responsibilities, tests, conflicts, and handoffs are in [docs/LEASH_SPEC.md](docs/LEASH_SPEC.md).
 
@@ -209,11 +229,13 @@ deploy (Cameron): SKIP_DB=1 bash scripts/deploy_lke.sh   # rebuild/push amd64 im
 
 API has health/readiness, auth (including Lithic signup/balance), `POST /cards` / `GET /cards`, R02 mandate propose/read/list/approve/replace/revoke/history, `/identity`, and `/agent-runs`; agents/MCP expose `/health` and their implemented routes. Signup collects email/password/first/last/postal_code and `spend_limit_cents` ($10–$100,000; form defaults to $500), provisions a Lithic sandbox account holder (`KYC_EXEMPT` + placeholder PII) and an OPEN `VIRTUAL` card with that forever `spend_limit`, and fails closed on Lithic errors. Financial-account balances are not used; `GET /auth/balance` is credit-like headroom (limit − pending − settled). `POST /cards` is deprecated and cannot issue: agents/service tokens get 403; authenticated humans get 409 until the verified payment flow exists. `GET /cards` and `GET /cards/{card_token}` require a human account JWT and return only that owner's metadata. Caller-selected users cannot override the owner; no PAN/CVV are returned. The Lithic wrapper remains server-side for future verified payment issuance. Agents use local port 8001 but LKE Service/container port 8000; Leash MCP uses 8002 and Store MCP 8003, each at `/mcp`. Agents use `MCP_LEASH_URL` and `MCP_STORE_URL`; public web rewrites are `/mcp-leash/*` and `/mcp-store/*`. On LKE, external MCP clients use `http://<NB>/mcp-leash/mcp` and `http://<NB>/mcp-store/mcp` (Bearer required). Requires `LITHIC_API_KEY` (optional `LITHIC_ENVIRONMENT=sandbox`) in `.env` / app-env. Inspect generated OpenAPI before claiming an endpoint exists. Generate web types from agreed API OpenAPI once available; do not hand-edit generated types.
 
-Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and confirm Compose boot once supplied. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
+Before completing implementation, run the affected service's tests, the security decision matrix and end-to-end scenarios, and verify the integrated Kubernetes runtime. Check Compose only when supplied for local development. R01 contract tests: from `api/`, `uv run python -m unittest discover -s tests -v` (Python 3.12+, Pydantic v2; Windows peers may use `api/.venv/Scripts/python.exe`). Agents/mcp-leash/mcp-store have locked pytest suites; exclude live inference unless deliberately configured. Compose and the rail decision runner are absent; deployed E2E tests are gated and skipped until the actual stack is ready. Report failures/skips and distinguish stub wiring from enforcement. Documentation needs diff/whitespace, link and consistency checks.
 
 If a contract or external integration remains unclear, identify its owner and unresolved dependency instead of guessing.
 
 ## R02 status and deployment handoff
+
+Historical R02 test counts below describe its original handoff. The current audit ran 90 API tests successfully; merged API build-context/readiness, trace volume declarations and mode-separated credentials are no longer pending source changes. Actual cluster configuration/provisioning and payment/Kill Switch/Graph/SSE work remain separate requirements.
 
 R02 is implemented and ready for the agreed merge/deployment handoff; frozen R01 files are unchanged. The full
 API suite passes 81 tests including 19 real PostgreSQL integration tests; correctness
