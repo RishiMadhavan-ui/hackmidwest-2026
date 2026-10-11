@@ -1,4 +1,4 @@
-"""Store service tests — catalog truth, evil toggle, no PAN logging."""
+"""Store service tests — catalog truth, attack containment, no PAN logging."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from main import app, reset_checkouts
+from pages import render_product_page
 
 
 class StoreTests(unittest.TestCase):
@@ -47,13 +48,38 @@ class StoreTests(unittest.TestCase):
     self.assertRegex(r.text, r"ckt_[0-9a-f]{16}")
     self.assertIn("chg-65w", r.text)
 
-  def test_charger_page_evil_query_injects_json_ld(self) -> None:
-    with patch.dict("os.environ", {"STORE_EVIL_MODE": "0"}, clear=False):
-      r = self.client.get("/products/chg-65w?evil=1")
-    self.assertEqual(r.status_code, 200)
-    self.assertIn("application/ld+json", r.text)
-    self.assertIn("voltcare", r.text)
-    self.assertIn("fulfillmentNote", r.text)
+  def test_lab_001_003_unauthenticated_direct_attack_selection_denied(self) -> None:
+    with TestClient(app) as visitor:
+      for selector in ("1", "true", "yes", "on", "", "0&evil=1", "1&evil=0"):
+        with self.subTest(selector=selector):
+          r = visitor.get(f"/products/chg-65w?evil={selector}")
+          self.assertEqual(r.status_code, 403)
+          self.assertEqual(r.json()["detail"], "Attack Lab execution is disabled")
+
+  def test_lab_002_store_service_credential_is_not_operator_authority(self) -> None:
+    r = self.client.get("/products/chg-65w?evil=1")
+    self.assertEqual(r.status_code, 403)
+
+  def test_lab_004_environment_flags_cannot_enable_runtime_attack(self) -> None:
+    with patch.dict("os.environ", {
+      "STORE_EVIL_MODE": "1", "ATTACK_LAB_ENABLED": "1", "NEXT_PUBLIC_ATTACK_LAB": "1",
+    }, clear=False), TestClient(app) as visitor:
+      self.assertEqual(visitor.get("/products/chg-65w?evil=1").status_code, 403)
+      for suffix in ("", "?evil=0", "?evil=false", "?evil=off", "?evil=no"):
+        with self.subTest(suffix=suffix):
+          r = visitor.get("/products/chg-65w" + suffix)
+          self.assertEqual(r.status_code, 200)
+          self.assertNotIn("fulfillmentNote", r.text)
+          self.assertEqual(r.headers["cache-control"], "no-store")
+      health = visitor.get("/health").json()
+      self.assertFalse(health["evil_mode_env"])
+      self.assertEqual(health["attack_lab_execution"], "disabled_pending_operator_authorization")
+
+  def test_poisoned_offline_fixture_remains_available(self) -> None:
+    html = render_product_page("chg-65w", evil=True)
+    self.assertIn("application/ld+json", html)
+    self.assertIn("voltcare", html)
+    self.assertIn("fulfillmentNote", html)
 
   def test_checkout_truth_from_catalog_not_caller_name(self) -> None:
     r = self.client.post(

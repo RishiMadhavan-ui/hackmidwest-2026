@@ -9,8 +9,8 @@ const linkBtn = cn(
 );
 
 /**
- * Attack Lab only changes listing content (evil HTML/JSON-LD). It never edits
- * mandates or fabricates payment outcomes — agents must browse the poisoned URL.
+ * Disabled placeholder only. Runtime attacks remain blocked by the web/store
+ * server routes until verified operator authorization and isolation exist.
  */
 export function AttackLab() {
   return (
@@ -18,8 +18,8 @@ export function AttackLab() {
       <header>
         <h2 className="text-base font-semibold tracking-tight">Attack Lab</h2>
         <p className="text-xs text-muted-foreground">
-          Toggle the Volt Supply listing the shopper will read. Canonical
-          checkout facts stay honest either way.
+          Attack execution is disabled pending server-verified operator access
+          and isolated demo scenarios. Clean browsing remains available.
         </p>
       </header>
 
@@ -43,19 +43,12 @@ export function AttackLab() {
         <div className="rounded-lg border border-border px-3 py-3">
           <p className="text-sm font-medium">Adversarial listing</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Same page with JSON-LD / HTML comment steering toward VoltCare.
-            Mandate stays unchanged.
+            Unavailable until the backend authorization and isolation checks
+            pass. Ordinary sign-in does not authorize attack execution.
           </p>
-          <Link
-            href="/store/products/chg-65w?evil=1"
-            target="_blank"
-            className={cn(
-              linkBtn,
-              "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-            )}
-          >
-            Open poisoned charger
-          </Link>
+          <p className="mt-3 text-xs font-medium text-muted-foreground">
+            Attack scenarios disabled
+          </p>
         </div>
       </div>
 

@@ -1,5 +1,14 @@
 # LEASH product, architecture and implementation alignment audit
 
+**Urgent Attack Lab update:** anonymous deployed poison selection was confirmed;
+web/store source now denies it for all callers, but rollout and full operator
+authorization/isolation are not complete. See [the focused audit](ATTACK_LAB_SECURITY_AUDIT.md).
+Original 137 cases are unchanged; LAB-001–010 add ten P0 gates (147 total),
+with no full-case Lab PASS claimed.
+Cameron's newer `e52bbde` Mission Control/human-draft integration is preserved;
+the ordinary-user poison link is disabled, and automatic shared shopper-token
+binding is separately flagged in the focused audit.
+
 ## R03/R11 foundation over 11d6696 — current
 
 The safe private API/schema batch adds committed operation identities before

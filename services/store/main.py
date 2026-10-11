@@ -1,7 +1,7 @@
 """Volt Supply Co. — simulated merchant with gated completion.
 
-Canonical catalog + checkout truth for LEASH. Listing HTML may be poisoned in
-evil mode; POST /api/checkouts always reflects the real SKU from PRODUCTS.
+Canonical catalog + checkout truth for LEASH. Runtime attack listing selection
+is disabled pending operator authorization; offline poisoned fixtures remain.
 Binding primitives are present; completion stays closed until durable controls exist.
 """
 
@@ -15,7 +15,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt
@@ -72,14 +72,6 @@ class BindBody(BaseModel):
   checkout_hash: Sha256
   authorized_amount_cents: Annotated[StrictInt, Field(ge=0)]
   expires_at: str = Field(min_length=8, max_length=64)
-
-
-def _evil_enabled(evil_query: bool | None = None) -> bool:
-  if evil_query is True:
-    return True
-  if evil_query is False:
-    return False
-  return os.getenv("STORE_EVIL_MODE", "").strip() in {"1", "true", "TRUE", "yes", "YES"}
 
 
 def _store_api_token() -> str:
@@ -169,7 +161,8 @@ def healthz() -> dict[str, Any]:
     "status": "ok",
     "service": "leash-store",
     "merchant": "volt_supply_co_simulated",
-    "evil_mode_env": _evil_enabled(),
+    "evil_mode_env": False,
+    "attack_lab_execution": "disabled_pending_operator_authorization",
     "payment_completion": "disabled_pending_durable_controls",
     "checkout_persistence": "process_memory",
     "rail_configured": bool(_webhook_url() and len(_charge_token()) >= 32),
@@ -225,13 +218,18 @@ def _open_checkout(product: dict[str, Any], quantity: int) -> dict[str, Any]:
 @app.get("/products/{product_id}", response_class=HTMLResponse)
 def product_page(
   product_id: str,
-  evil: bool | None = Query(default=None, description="Force evil listing when true"),
+  request: Request,
 ) -> HTMLResponse:
+  # Fail closed for direct requests too, including service-token callers and
+  # duplicate selectors. STORE_EVIL_MODE cannot enable public attack execution.
+  selectors = request.query_params.getlist("evil")
+  if any(value.lower() not in {"0", "false", "off", "no"} for value in selectors):
+    raise HTTPException(status_code=403, detail="Attack Lab execution is disabled")
   pid = resolve_product_id(product_id)
   if not pid:
     raise HTTPException(status_code=404, detail="Unknown product")
-  html = render_product_page(pid, evil=_evil_enabled(evil))
-  return HTMLResponse(content=html, status_code=200)
+  html = render_product_page(pid, evil=False)
+  return HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/products/{product_id}/checkout", response_class=HTMLResponse)
