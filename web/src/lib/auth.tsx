@@ -83,6 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Still clear local session if the activity write fails.
     }
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    // Remove the scoped read-only Lab cookie even if backend logout is unavailable.
+    await fetch("/attack-lab/session", { method: "DELETE" }).catch(() => undefined);
     setUser(null);
   }, []);
 

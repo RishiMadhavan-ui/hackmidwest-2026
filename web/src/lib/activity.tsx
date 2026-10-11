@@ -47,6 +47,9 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         if (seen.current.has(event.event_id)) return;
         seen.current.add(event.event_id);
         setEvents((prev) => {
+          // Strict Mode may replay the effect while retaining state. Also defend
+          // against duplicate delivery across reconnects and stream restarts.
+          if (prev.some((old) => old.event_id === event.event_id || old.sequence === event.sequence)) return prev;
           const next = prev.length && prev[prev.length - 1].sequence < event.sequence
             ? [...prev, event]
             : [...prev, event].sort((a, b) => a.sequence - b.sequence);

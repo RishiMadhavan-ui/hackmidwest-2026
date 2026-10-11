@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Suspense, useEffect, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { Menu } from "@base-ui/react/menu";
 import { cn } from "cn";
 
@@ -11,6 +11,7 @@ import { Logo } from "@/components/logo";
 import { Dot } from "@/components/ui/badge";
 import { ActivityProvider, useActivity } from "@/lib/activity";
 import { useAuth } from "@/lib/auth";
+import { TOKEN_STORAGE_KEY } from "@/lib/api";
 
 const NAV = [
   { href: "/overview", label: "Overview" },
@@ -25,10 +26,32 @@ const linkClass =
   "flex h-9 shrink-0 items-center rounded-md px-3 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/40";
 
 function NavLinks({ active }: { active: string | null }) {
+  const router = useRouter();
+  const [labError, setLabError] = useState<string | null>(null);
+  async function openLab() {
+    setLabError(null);
+    try {
+      const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+      const response = await fetch("/attack-lab/session", {
+        method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(response.status === 403
+        ? "Attack Lab is restricted to approved operators." : "Operator access unavailable.");
+      router.push("/attack-lab");
+    } catch (cause) {
+      setLabError(cause instanceof Error ? cause.message : "Operator access unavailable.");
+    }
+  }
   return (
     <>
       {NAV.map((item) => {
         const current = active !== null && (active === item.href || active.startsWith(`${item.href}/`));
+        if (item.href === "/attack-lab") return <button key={item.href} type="button"
+          onClick={() => void openLab()} aria-current={current ? "page" : undefined}
+          className={cn(linkClass, current ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground")}>
+          {item.label}
+        </button>;
         return (
           <Link
             key={item.href}
@@ -45,6 +68,7 @@ function NavLinks({ active }: { active: string | null }) {
           </Link>
         );
       })}
+      {labError && <span role="alert" className="px-2 text-xs text-destructive">{labError}</span>}
     </>
   );
 }
@@ -137,7 +161,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <ActivityProvider>
+    <ActivityProvider key={user.id}>
       <KillSwitchProvider>
         <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-sm">
           <div className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 sm:px-6">

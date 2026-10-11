@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { cn } from "cn";
 
 import { EmptyState, Mono, PageHeader, Panel } from "@/components/page";
+import { PurchaseHistory } from "@/components/purchase-history";
 import { Badge } from "@/components/ui/badge";
 import { formatUsdFromCents } from "@/lib/api";
 import { useActivity } from "@/lib/activity";
@@ -39,6 +40,7 @@ function Detail({ row }: { row: PaymentRow }) {
 export default function PaymentsPage() {
   const { events, status } = useActivity();
   const rows = useMemo(() => derivePayments(events), [events]);
+  const revision = events.filter((event) => event.type.startsWith("payment.")).at(-1)?.sequence ?? 0;
   const [open, setOpen] = useState<string | null>(null);
 
   return (
@@ -47,6 +49,8 @@ export default function PaymentsPage() {
         title="Payments"
         description="Every payment request your agent made and every decision from the payment rail. An approved grant is permission, not a payment. An authorization is not settlement."
       />
+
+      <div className="mb-8"><PurchaseHistory revision={revision} /></div>
 
       {rows.length ? (
         <Panel className="overflow-x-auto">

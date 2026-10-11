@@ -237,6 +237,41 @@ class AlignmentStackTests(unittest.TestCase):
           self.assertEqual(signup.status_code, 201, signup.text)
           human = {"Authorization": "Bearer " + signup.json()["access_token"]}
           owner = client.get("/identity", headers=human).json()["user_id"]
+          # Real JWT/API/SQL/production Next boundary, including page and RSC requests.
+          with httpx.Client(base_url="http://127.0.0.1:58130", timeout=10) as web_client:
+            self.assertEqual(web_client.get("/attack-lab").status_code, 401)
+            self.assertEqual(web_client.get("/attack-lab", headers={"RSC": "1"}).status_code, 401)
+            self.assertEqual(web_client.get("/attack-lab", headers={"x-middleware-subrequest": "proxy:proxy:proxy:proxy:proxy"}).status_code, 401)
+            self.assertEqual(web_client.get("/attack-lab", headers=human).status_code, 403)
+            self.assertEqual(web_client.post("/attack-lab/session", headers={"Cookie": "leash_lab_view=" + signup.json()["access_token"]}).status_code, 401)
+            with patch.dict(os.environ, {"ATTACK_LAB_OPERATOR_IDS": owner, "ATTACK_LAB_ENABLED": "0"}):
+              evil_origin = {**human, "Origin": "https://attacker.example"}
+              self.assertEqual(web_client.post("/attack-lab/session", headers=evil_origin).status_code, 403)
+              opened = web_client.post("/attack-lab/session", headers={**human, "Origin": "http://127.0.0.1:58130"})
+              self.assertEqual(opened.status_code, 204, opened.text)
+              cookie = opened.headers["set-cookie"]
+              for marker in ("HttpOnly", "SameSite=strict", "Path=/attack-lab", "Max-Age=300"):
+                self.assertIn(marker, cookie)
+              self.assertEqual(web_client.get("/attack-lab").status_code, 200)
+              self.assertEqual(web_client.get("/attack-lab", headers={"RSC": "1"}).status_code, 200)
+              # The read-only view cookie is never a mutation credential.
+              self.assertEqual(web_client.post("/attack-lab/session").status_code, 401)
+              self.assertEqual(web_client.post("/backend/attack-lab/namespaces", json={}).status_code, 401)
+              self.assertEqual(web_client.post("/backend/attack-lab/namespaces", headers=human, json={}).status_code, 403)
+              self.assertEqual(web_client.get("/attack-lab/operator-view").status_code, 401)
+              self.assertEqual(web_client.get("/attack-lab/operator-view", headers=human).status_code, 200)
+              with patch.dict(os.environ, {"ATTACK_LAB_OPERATOR_IDS": ""}):
+                self.assertEqual(web_client.get("/attack-lab").status_code, 403)
+              self.assertEqual(web_client.delete("/attack-lab/session").status_code, 204)
+              self.assertEqual(web_client.get("/attack-lab").status_code, 401)
+              # Check durable logout against a new session without stopping the
+              # user's independent original session used by the rest of this test.
+              login = client.post("/auth/login", json={"email": signup.json()["user"]["email"], "password": "test-password-valid"})
+              self.assertEqual(login.status_code, 200, login.text)
+              second = {"Authorization": "Bearer " + login.json()["access_token"]}
+              self.assertEqual(web_client.post("/attack-lab/session", headers=second).status_code, 204)
+              self.assertEqual(client.post("/auth/logout", headers=second).status_code, 204)
+              self.assertEqual(web_client.get("/attack-lab").status_code, 401)
           agent_id = "agt_" + uuid4().hex
           with db.get_conn() as conn:
             bind_agent(
