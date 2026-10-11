@@ -75,6 +75,7 @@ def _service_tokens() -> set[str]:
     tokens = {
         os.getenv("AGENTS_SERVICE_TOKEN", "").strip(),
         os.getenv("AGENT_TOKEN_SHOPPER", "").strip(),
+        os.getenv("AGENT_TOKEN_SHOPPER_SCRIPTED", "").strip(),
     }
     return {t for t in tokens if t}
 
