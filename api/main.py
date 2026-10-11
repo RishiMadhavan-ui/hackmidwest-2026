@@ -23,6 +23,7 @@ import purchase_execution  # noqa: F401; registers protected completion on the m
 from merchant_execution import router as merchant_router
 from workflow_events import router as workflow_event_router
 from attack_lab import router as attack_lab_router
+from shopping_routes import router as shopping_router
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -50,6 +51,7 @@ app.include_router(activity_router)
 app.include_router(provenance_router)
 app.include_router(workflow_router)
 app.include_router(attack_lab_router)
+app.include_router(shopping_router)
 app.include_router(activity_internal_router)
 app.include_router(execution_router)
 app.include_router(merchant_router)
