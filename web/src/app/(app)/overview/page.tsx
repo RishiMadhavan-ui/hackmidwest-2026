@@ -146,8 +146,10 @@ export default function OverviewPage() {
               ) : (
                 <div className="p-4">
                   <EmptyState title="No active mandates">
-                    Ask your shopping agent for something. Its draft shows up above for you to
-                    confirm.
+                    <Link href="/mandates/new" className="font-medium text-foreground underline-offset-4 hover:underline">
+                      Create a mandate
+                    </Link>{" "}
+                    or ask your shopping agent to draft one. You confirm it before anything can be bought.
                   </EmptyState>
                 </div>
               )}

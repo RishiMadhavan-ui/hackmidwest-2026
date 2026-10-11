@@ -24,7 +24,7 @@ export function humanize(value: string): string {
   return value.replace(/_/g, " ");
 }
 
-function constraintText(c: ProductConstraint): string {
+export function constraintText(c: ProductConstraint): string {
   const value = typeof c.value === "boolean" ? (c.value ? "yes" : "no") : String(c.value);
   const name = humanize(c.name);
   switch (c.operator) {
