@@ -31,29 +31,30 @@ CREATE TABLE merchant_checkouts (
 );
 CREATE TRIGGER immutable_merchant_checkouts BEFORE UPDATE OR DELETE ON merchant_checkouts
 FOR EACH ROW EXECUTE FUNCTION leash_reject_history_mutation();
-ALTER TABLE payment_operations DROP CONSTRAINT payment_operations_state_check;
+ALTER TABLE payment_operations DROP CONSTRAINT IF EXISTS payment_operations_state_check;
 ALTER TABLE payment_operations ADD CONSTRAINT payment_operations_state_check CHECK
   (state IN ('prepared','blocked','cancelled','reconciling','activating','ready','authorizing','authorized','declined'));
-DROP INDEX payment_operations_unresolved_mandate;
-DROP INDEX payment_operations_unresolved_run;
+DROP INDEX IF EXISTS payment_operations_unresolved_mandate;
+DROP INDEX IF EXISTS payment_operations_unresolved_run;
 CREATE UNIQUE INDEX payment_operations_unresolved_mandate ON payment_operations(user_id,mandate_id)
   WHERE state IN ('prepared','reconciling','activating','ready','authorizing','authorized');
 CREATE UNIQUE INDEX payment_operations_unresolved_run ON payment_operations(run_id)
   WHERE state IN ('prepared','reconciling','activating','ready','authorizing','authorized');
 CREATE OR REPLACE FUNCTION leash_guard_payment_operation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Payment operations cannot be deleted'; END IF;
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Payment operations cannot be deleted' USING ERRCODE='23514'; END IF;
   IF (to_jsonb(OLD)-ARRAY['state','revision','reason','error_status','error_detail','updated_at']) IS DISTINCT FROM
      (to_jsonb(NEW)-ARRAY['state','revision','reason','error_status','error_detail','updated_at']) THEN
-    RAISE EXCEPTION 'Payment operation identity is immutable';
+    RAISE EXCEPTION 'Payment operation identity is immutable' USING ERRCODE='23514';
   END IF;
   IF NEW.revision <> OLD.revision+1 OR NOT (
-    (OLD.state='prepared' AND NEW.state IN ('blocked','cancelled','reconciling','activating')) OR
+    -- 'authorized' straight from 'prepared' is main's local-rail grant path (0011).
+    (OLD.state='prepared' AND NEW.state IN ('blocked','cancelled','reconciling','activating','authorized')) OR
     (OLD.state='activating' AND NEW.state IN ('ready','reconciling','cancelled')) OR
     (OLD.state='ready' AND NEW.state IN ('authorizing','reconciling','cancelled')) OR
     (OLD.state='authorizing' AND NEW.state IN ('authorized','declined','reconciling')) OR
     (OLD.state='reconciling' AND NEW.state IN ('authorized','declined','cancelled','ready'))
-  ) THEN RAISE EXCEPTION 'Invalid payment operation transition'; END IF;
+  ) THEN RAISE EXCEPTION 'Invalid payment operation transition' USING ERRCODE='23514'; END IF;
   RETURN NEW;
 END;
 $$;

@@ -26,6 +26,17 @@ spec:
                 secretKeyRef:
                   name: app-env
                   key: STORE_API_TOKEN
+            - name: STORE_CHARGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: STORE_CHARGE_TOKEN
+            - name: ATTACK_LAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: app-env
+                  key: ATTACK_LAB_TOKEN
+                  optional: true
             - name: STORE_EVIL_MODE
               valueFrom:
                 secretKeyRef:

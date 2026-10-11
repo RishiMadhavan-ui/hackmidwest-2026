@@ -19,6 +19,8 @@ KILLSWITCH_KEY = "leash:killswitch"  # legacy operator/test global stop
 MANDATE_KEY = "leash:mandate:{mandate_id}"
 USER_KILL_KEY = "leash:killswitch:{user_id}"
 USER_GRANTS_KEY = "leash:user-grants:{user_id}"
+RUN_KILL_KEY = "leash:run-stop:{run_id}"
+RUN_GRANTS_KEY = "leash:run-grants:{run_id}"
 EVENT_STREAM = "leash:rail-events"
 EXECUTION_EPOCH = "leash:execution:epoch"
 RUN_KEY = "leash:execution:run:{run_id}"
@@ -36,6 +38,7 @@ def grant_from_dict(data: dict[str, Any]) -> GrantSnapshot:
   fields["authorized_amount_cents"] = int(fields["authorized_amount_cents"])
   fields["execution_generation"] = int(fields.get("execution_generation", 0))
   fields["expires_at"] = datetime.fromisoformat(fields["expires_at"].replace("Z", "+00:00"))
+  fields.setdefault("run_id", "")
   return GrantSnapshot(**fields)
 
 
@@ -73,6 +76,8 @@ class MemoryGrantStore:
     self._mandates = {}
     self._killswitch = False
     self._user_kills = set()
+    self._run_kills = set()
+    self._run_grants: dict[str, set[str]] = {}
     self._purchases = {}
     self.audit_events = []
     self._epoch = uuid4().hex
@@ -93,19 +98,20 @@ class MemoryGrantStore:
       self._runs[run_id] = dict(user_id=user_id, generation=generation,
                                 lease_until=lease_until, stopped=False)
 
-  def stop_run(self, run_id, user_id):
+  def stop_execution_run(self, run_id, user_id):
     with self._lock:
       old = self._runs.get(run_id)
       if old and old['user_id'] != user_id:
         raise ValueError('Run owner mismatch')
       self._runs[run_id] = {**(old or {}), 'user_id': user_id, 'stopped': True}
+      self._run_kills.add(run_id)
       for grant in self._grants.values():
         if grant.get('run_id') == run_id and grant['status'] == 'ISSUED':
           grant['status'] = 'REVOKED'
 
   def _scope_valid(self, grant):
-    if not grant.run_id:
-      return True  # Historical internal fixtures; new execution grants are scoped.
+    if not grant.run_id or not grant.execution_generation:
+      return True  # Local-rail and fixture grants; Graph grants carry a generation.
     scope = self._runs.get(grant.run_id)
     return bool(scope and not scope['stopped'] and scope['user_id'] == grant.user_id
       and scope['generation'] == grant.execution_generation and grant.rail_epoch == self._epoch
@@ -117,6 +123,8 @@ class MemoryGrantStore:
         raise ValueError('Execution scope unavailable')
       if grant.user_id in self._user_kills:
         raise ValueError("User spending is stopped")
+      if grant.run_id and grant.run_id in self._run_kills:
+        raise ValueError("Run spending is stopped")
       old = self._grants.get(grant.grant_id)
       if old is not None or grant.instrument_token in self._instruments:
         if old == grant_to_dict(grant) and old["status"] == "ISSUED":
@@ -124,6 +132,8 @@ class MemoryGrantStore:
         raise ValueError("Grant/instrument already bound")
       self._grants[grant.grant_id] = grant_to_dict(grant)
       self._instruments[grant.instrument_token] = grant.grant_id
+      if grant.run_id:
+        self._run_grants.setdefault(grant.run_id, set()).add(grant.grant_id)
 
   def get_grant(self, grant_id):
     with self._lock:
@@ -162,10 +172,38 @@ class MemoryGrantStore:
       )
       return revoked
 
+  def stop_run(self, user_id: str, run_id: str) -> int:
+    """Revoke unused grants for one run; latch blocks later installs for that run."""
+    with self._lock:
+      self._run_kills.add(run_id)
+      revoked = 0
+      for grant_id in list(self._run_grants.get(run_id, ())):
+        grant = self._grants.get(grant_id)
+        if (
+          grant
+          and grant.get("user_id") == user_id
+          and grant.get("run_id") == run_id
+          and grant["status"] == "ISSUED"
+        ):
+          grant["status"] = "REVOKED"
+          revoked += 1
+      self.audit_events.append(
+        {
+          "type": "run.stop.enforced",
+          "user_id": user_id,
+          "run_id": run_id,
+          "revoked": revoked,
+        }
+      )
+      return revoked
+
   def _state(self, grant):
     authority = self._mandates.get(grant.mandate_id, {}) if grant else {}
+    run_stopped = bool(grant and grant.run_id and grant.run_id in self._run_kills)
     return AuthorityState(
-      killswitch_on=self._killswitch or bool(grant and grant.user_id in self._user_kills),
+      killswitch_on=self._killswitch
+      or bool(grant and grant.user_id in self._user_kills)
+      or run_stopped,
       mandate_status=authority.get("status", "missing"),
       current_mandate_version=authority.get("version", 0),
     )
@@ -258,7 +296,9 @@ if ARGV[3] == '1' then
   local current = redis.call('HGET',KEYS[1],'status')
   local tm = redis.call('TIME')
   local clock = tonumber(tm[1]) + tonumber(tm[2])/1000000
-  if redis.call('GET',KEYS[3]) == '1' or redis.call('GET',KEYS[6]) == '1' then reason='killswitch_on'
+  -- Graph executions carry a generation >= 1; local-rail grants carry 0.
+  local generation = redis.call('HGET',KEYS[1],'execution_generation') or ''
+  if redis.call('GET',KEYS[3]) == '1' or redis.call('GET',KEYS[6]) == '1' or redis.call('GET',KEYS[7]) == '1' then reason='killswitch_on'
   elseif not current then reason='no_grant'
   elseif current == 'REVOKED' then reason='grant_revoked'
   elseif current == 'CONSUMED' then reason='grant_consumed'
@@ -268,12 +308,12 @@ if ARGV[3] == '1' then
   elseif redis.call('HGET',KEYS[4],'status') ~= 'active' then reason='mandate_inactive'
   elseif redis.call('HGET',KEYS[4],'version') ~= redis.call('HGET',KEYS[1],'mandate_version') then reason='mandate_version_mismatch'
   elseif redis.call('HGET',KEYS[1],'binding_fingerprint') ~= ARGV[4] then reason='grant_changed'
-  elseif (redis.call('HGET',KEYS[1],'run_id') or '') ~= '' and (
-    redis.call('GET',KEYS[8]) ~= redis.call('HGET',KEYS[1],'rail_epoch') or
-    redis.call('HGET',KEYS[7],'stopped') ~= '0' or
-    redis.call('HGET',KEYS[7],'generation') ~= redis.call('HGET',KEYS[1],'execution_generation') or
-    redis.call('HGET',KEYS[7],'user_id') ~= ARGV[6] or
-    tonumber(redis.call('HGET',KEYS[7],'lease_until') or '0') <= clock
+  elseif generation ~= '' and generation ~= '0' and (
+    redis.call('GET',KEYS[9]) ~= redis.call('HGET',KEYS[1],'rail_epoch') or
+    redis.call('HGET',KEYS[8],'stopped') ~= '0' or
+    redis.call('HGET',KEYS[8],'generation') ~= generation or
+    redis.call('HGET',KEYS[8],'user_id') ~= ARGV[6] or
+    tonumber(redis.call('HGET',KEYS[8],'lease_until') or '0') <= clock
   ) then reason='execution_scope_revoked_or_expired'
   elseif tonumber(redis.call('HGET',KEYS[4],'used:'..redis.call('HGET',KEYS[1],'mandate_version')) or '0') >= 1 then reason='purchase_scope_exhausted'
   end
@@ -286,17 +326,16 @@ return {'ok',committed}
 """
 
 _PUT_LUA = """
-local run, generation, epoch = '', '', ''
-for i=4,#ARGV,2 do
-  if ARGV[i]=='run_id' then run=ARGV[i+1] end
+local generation, epoch = '', ''
+for i=5,#ARGV,2 do
   if ARGV[i]=='execution_generation' then generation=ARGV[i+1] end
   if ARGV[i]=='rail_epoch' then epoch=ARGV[i+1] end
 end
-if run ~= '' then
+if ARGV[4] ~= '' and generation ~= '' and generation ~= '0' then
   local tm=redis.call('TIME'); local clock=tonumber(tm[1])+tonumber(tm[2])/1000000
-  if redis.call('GET',KEYS[6]) ~= epoch or redis.call('HGET',KEYS[5],'stopped') ~= '0' or
-    redis.call('HGET',KEYS[5],'generation') ~= generation or
-    tonumber(redis.call('HGET',KEYS[5],'lease_until') or '0') <= clock then return 'conflict' end
+  if redis.call('GET',KEYS[8]) ~= epoch or redis.call('HGET',KEYS[7],'stopped') ~= '0' or
+    redis.call('HGET',KEYS[7],'generation') ~= generation or
+    tonumber(redis.call('HGET',KEYS[7],'lease_until') or '0') <= clock then return 'conflict' end
 end
 if redis.call('EXISTS',KEYS[1]) == 1 or redis.call('EXISTS',KEYS[2]) == 1 then
   if redis.call('HGET',KEYS[1],'binding_fingerprint') == ARGV[1] and redis.call('HGET',KEYS[1],'status') == 'ISSUED' then return 'duplicate' end
@@ -304,11 +343,15 @@ if redis.call('EXISTS',KEYS[1]) == 1 or redis.call('EXISTS',KEYS[2]) == 1 then
 end
 local index_type=redis.call('TYPE',KEYS[3]).ok
 if index_type ~= 'none' and index_type ~= 'set' then return 'conflict' end
+local run_index_type=redis.call('TYPE',KEYS[6]).ok
+if run_index_type ~= 'none' and run_index_type ~= 'set' then return 'conflict' end
 if redis.call('GET',KEYS[4]) == '1' then return 'conflict' end
-for i=4,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
+if redis.call('GET',KEYS[5]) == '1' then return 'conflict' end
+for i=5,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
 redis.call('HSET',KEYS[1],'binding_fingerprint',ARGV[1],'expires_epoch',ARGV[2])
 redis.call('SET',KEYS[2],ARGV[3])
 redis.call('SADD',KEYS[3],ARGV[3])
+if ARGV[4] ~= '' then redis.call('SADD',KEYS[6],ARGV[3]) end
 return 'ok'
 """
 
@@ -347,6 +390,7 @@ _RUN_STOP_LUA = """
 local owner=redis.call('HGET',KEYS[1],'user_id')
 if owner and owner ~= ARGV[1] then return 'conflict' end
 redis.call('HSET',KEYS[1],'user_id',ARGV[1],'stopped','1')
+redis.call('SET',KEYS[3],'1')
 for _,id in ipairs(redis.call('SMEMBERS',KEYS[2])) do
   local key='leash:grant:'..id
   if redis.call('HGET',key,'run_id') == ARGV[2] and redis.call('HGET',key,'status') == 'ISSUED' then
@@ -354,6 +398,21 @@ for _,id in ipairs(redis.call('SMEMBERS',KEYS[2])) do
   end
 end
 return 'ok'
+"""
+
+_RUN_KILL_LUA = """
+redis.call('SET',KEYS[1],'1')
+local revoked=0
+for _,id in ipairs(redis.call('SMEMBERS',KEYS[2])) do
+  local key='leash:grant:'..id
+  if redis.call('HGET',key,'status') == 'ISSUED'
+     and redis.call('HGET',key,'user_id') == ARGV[1]
+     and redis.call('HGET',key,'run_id') == ARGV[2] then
+    redis.call('HSET',key,'status','REVOKED'); revoked=revoked+1
+  end
+end
+redis.call('XADD',KEYS[3],'*','type','run.stop.enforced','user_id',ARGV[1],'run_id',ARGV[2],'revoked',tostring(revoked))
+return revoked
 """
 
 
@@ -376,27 +435,31 @@ class RedisGrantStore:
     if result != 'ok':
       raise ValueError('Stale or stopped run')
 
-  def stop_run(self, run_id, user_id):
-    result = self._r.eval(_RUN_STOP_LUA, 2, RUN_KEY.format(run_id=run_id),
-      USER_GRANTS_KEY.format(user_id=user_id), user_id, run_id)
+  def stop_execution_run(self, run_id, user_id):
+    result = self._r.eval(_RUN_STOP_LUA, 3, RUN_KEY.format(run_id=run_id),
+      USER_GRANTS_KEY.format(user_id=user_id), RUN_KILL_KEY.format(run_id=run_id), user_id, run_id)
     if result != 'ok':
       raise ValueError('Run owner mismatch')
 
   def put_grant(self, grant):
     data = grant_to_dict(grant)
     fields = [value for key, item in data.items() for value in (key, str(item))]
+    run_id = grant.run_id or ""
     result = self._r.eval(
       _PUT_LUA,
-      6,
+      8,
       GRANT_KEY.format(grant_id=grant.grant_id),
       INSTRUMENT_KEY.format(token=grant.instrument_token),
       USER_GRANTS_KEY.format(user_id=grant.user_id),
       USER_KILL_KEY.format(user_id=grant.user_id),
-      RUN_KEY.format(run_id=grant.run_id),
+      RUN_KILL_KEY.format(run_id=run_id or "_none"),
+      RUN_GRANTS_KEY.format(run_id=run_id or "_none"),
+      RUN_KEY.format(run_id=run_id or "_none"),
       EXECUTION_EPOCH,
       event_fingerprint(data),
       str(grant.expires_at.timestamp()),
       grant.grant_id,
+      run_id,
       *fields,
     )
     if result == "conflict":
@@ -432,9 +495,24 @@ class RedisGrantStore:
       )
     )
 
+  def stop_run(self, user_id: str, run_id: str) -> int:
+    return int(
+      self._r.eval(
+        _RUN_KILL_LUA,
+        3,
+        RUN_KILL_KEY.format(run_id=run_id),
+        RUN_GRANTS_KEY.format(run_id=run_id),
+        EVENT_STREAM,
+        user_id,
+        run_id,
+      )
+    )
+
   def load_state(self, grant):
     kill = self._r.get(KILLSWITCH_KEY) == "1" or bool(
       grant and self._r.get(USER_KILL_KEY.format(user_id=grant.user_id)) == "1"
+    ) or bool(
+      grant and grant.run_id and self._r.get(RUN_KILL_KEY.format(run_id=grant.run_id)) == "1"
     )
     raw = self._r.hgetall(MANDATE_KEY.format(mandate_id=grant.mandate_id)) if grant else {}
     return AuthorityState(kill, raw.get("status", "missing"), int(raw.get("version", 0)))
@@ -465,7 +543,8 @@ class RedisGrantStore:
           MANDATE_KEY.format(mandate_id=grant.mandate_id if grant else "_none"),
           EVENT_STREAM,
           USER_KILL_KEY.format(user_id=grant.user_id if grant else "_none"),
-          RUN_KEY.format(run_id=grant.run_id if grant else "_none"),
+          RUN_KILL_KEY.format(run_id=grant.run_id if grant and grant.run_id else "_none"),
+          RUN_KEY.format(run_id=grant.run_id if grant and grant.run_id else "_none"),
           EXECUTION_EPOCH,
         ],
         args=[

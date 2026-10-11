@@ -169,6 +169,49 @@ class AtomicStoreTests(unittest.TestCase):
     self.prepare()  # new owner, mandate, instrument and checkout
     self.assertEqual(authorize(self.store, self.attempt).result, "APPROVED")
 
+  def test_run_stop_revokes_only_that_run_and_blocks_reissue(self):
+    run_a = "run_" + uuid4().hex
+    run_b = "run_" + uuid4().hex
+    scoped = replace(self.grant, run_id=run_a)
+    # Replace the unscoped seed from prepare with a run-scoped grant.
+    if isinstance(self.store, MemoryGrantStore):
+      self.store._grants.clear()
+      self.store._instruments.clear()
+      self.store._run_grants.clear()
+    else:
+      self.store._r.flushdb()
+      self.store.set_mandate(scoped.mandate_id, status="active", version=1)
+    self.store.put_grant(scoped)
+    other = replace(
+      scoped,
+      grant_id="grt_other",
+      instrument_token="ins_other",
+      run_id=run_b,
+    )
+    self.store.put_grant(other)
+    self.assertEqual(self.store.stop_run(scoped.user_id, run_a), 1)
+    self.assertEqual(self.store.get_grant(scoped.grant_id).status, "REVOKED")
+    self.assertEqual(self.store.get_grant(other.grant_id).status, "ISSUED")
+    declined = authorize(
+      self.store,
+      replace(self.attempt, instrument_token=scoped.instrument_token, event_id="evt_stopped"),
+    )
+    self.assertEqual(declined.reason, "killswitch_on")
+    with self.assertRaises(ValueError):
+      self.store.put_grant(replace(scoped, grant_id="grt_reissue", instrument_token="ins_reissue"))
+    still_ok = authorize(
+      self.store,
+      replace(
+        self.attempt,
+        instrument_token=other.instrument_token,
+        event_id="evt_other",
+        checkout_id=other.checkout_id,
+        checkout_hash=other.checkout_hash,
+        merchant_binding_id=other.merchant_binding_id,
+      ),
+    )
+    self.assertEqual(still_ok.result, "APPROVED")
+
 
 @unittest.skipUnless(URL, "Set LEASH_TEST_VALKEY_URL to isolated localhost:56379/15")
 class RealRedisAtomicTests(AtomicStoreTests):

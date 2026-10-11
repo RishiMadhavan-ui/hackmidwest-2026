@@ -52,7 +52,7 @@ def lease(body: RunLease, store: Store):
 @router.post("/stop")
 def stop(body: RunStop, store: Store):
   try:
-    store.stop_run(body.run_id, body.user_id)
+    store.stop_execution_run(body.run_id, body.user_id)
   except ValueError:
     raise HTTPException(409, "Run ownership mismatch") from None
   return {"run_id": body.run_id, "user_id": body.user_id, "financial_revocation": "enforced"}

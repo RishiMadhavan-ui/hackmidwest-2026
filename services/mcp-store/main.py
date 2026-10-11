@@ -143,17 +143,24 @@ async def fetch_store_page(target: str) -> tuple[httpx.URL, int, str]:
 
 
 def _store_headers() -> dict[str, str]:
-  # TODO(C02/H05): the scoped caller/session credential agreed with Cameron.
-  # The caller's bearer is never forwarded to the store.
+  # Browse/create use the store API credential. Never forward the caller bearer.
   token = os.environ.get("STORE_API_TOKEN")
   return {**({"Authorization": f"Bearer {token}"} if token else {}), **scope_headers.get()}
+
+
+def _store_charge_headers() -> dict[str, str]:
+  # Complete requires the distinct charge credential (same as the API bind path).
+  token = os.environ.get("STORE_CHARGE_TOKEN")
+  return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def _error(reason: str, **extra: Any) -> dict[str, Any]:
   return {"status": "error", "reason": reason, **extra}
 
 
-async def _store_post(path: str, body: dict[str, Any]) -> dict[str, Any]:
+async def _store_post(
+  path: str, body: dict[str, Any], *, headers: dict[str, str] | None = None
+) -> dict[str, Any]:
   try:
     await authorize_tool("create_checkout" if path == CHECKOUTS_PATH else "complete_checkout")
     store_url = _store_url()
@@ -161,7 +168,9 @@ async def _store_post(path: str, body: dict[str, Any]) -> dict[str, Any]:
     return _error(str(exc))
   try:
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=False) as client:
-      res = await client.post(str(store_url) + path, json=body, headers=_store_headers())
+      res = await client.post(
+        str(store_url) + path, json=body, headers=headers or _store_headers()
+      )
   except httpx.HTTPError as exc:
     return _error(f"store unreachable ({type(exc).__name__})")
   try:
@@ -268,7 +277,11 @@ async def complete_checkout(
   body: dict[str, Any] = {"payment_id": payment_id}
   if card_number:
     body["card"] = {"number": card_number, "exp_month": exp_month, "exp_year": exp_year, "cvv": cvv}
-  return await _store_post(f"{CHECKOUTS_PATH}/{checkout_id}/complete", body)
+  return await _store_post(
+    f"{CHECKOUTS_PATH}/{checkout_id}/complete",
+    body,
+    headers=_store_charge_headers(),
+  )
 
 
 class StoreAuthMiddleware:

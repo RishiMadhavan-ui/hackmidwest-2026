@@ -1,4 +1,4 @@
-"""Agent payment preflight; unfinished financial authority always fails closed."""
+"""Agent payment preflight; verified checkouts receive a local-rail grant once."""
 
 from typing import Annotated, Any
 
@@ -17,11 +17,16 @@ Agent = Annotated[Principal, Depends(require_agent)]
 def create_payment(body: PaymentProposal, principal: Agent, request: Request) -> dict[str, Any]:
   with get_conn() as conn:
     if request.headers.get("x-leash-execution-token"):
+      # Run-scoped Graph execution: launch, lease and scope checks, then the
+      # execution activation path. One payment path per run, never both.
       from purchase_execution import request_verified
-      response = request_verified(conn, body, principal, request.headers)
-    else:
-      response = request_payment(conn, body, principal)  # Historical non-spending preflight only.
-  return response.model_dump(mode="json")
+      return request_verified(conn, body, principal, request.headers).model_dump(mode="json")
+    response, once = request_payment(conn, body, principal)
+  payload = response.model_dump(mode="json")
+  if once:
+    # Shown once on the approving response; GET /payments never re-discloses.
+    payload.update(once)
+  return payload
 
 
 @router.get("/payments/{payment_id}")

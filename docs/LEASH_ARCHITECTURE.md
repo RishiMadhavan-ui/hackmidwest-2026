@@ -2,8 +2,13 @@
 
 **Repo:** [`RishiMadhavan-ui/hackmidwest-2026`](https://github.com/RishiMadhavan-ui/hackmidwest-2026)
 on GitHub. It's private, so you need to be added as a collaborator to read it.
-This page describes `main` at commit `138d636`. Work in progress on other
-branches is labeled.
+
+Two snapshots matter:
+
+- **main** at `713ddb1`: merged. Includes the protected local-rail charge.
+- **Graph branch** `aditya/strands-graph` at `eea65d2`: pushed, **not merged**.
+  Adds the Strands Graph, human launch and run-scoped execution. It conflicts
+  with main in six files.
 
 ## One-paragraph version
 
@@ -14,8 +19,8 @@ is the only service that writes to PostgreSQL. The shopping agent is a Strands
 agent in its own pod. It reaches the outside world only through two MCP servers:
 one for payments (which forwards to the FastAPI backend) and one for shopping
 (which talks to a simulated merchant). A separate payment-rail service makes
-card authorization decisions using only Valkey. Strands and the LLM are never in
-the authorization path; every allow/block decision is plain code.
+authorization decisions using only Valkey. Strands and the LLM are never in the
+authorization path; every allow/block decision is plain code.
 
 ## Diagram
 
@@ -31,7 +36,7 @@ flowchart LR
     MCPS["mcp-store<br/>MCP :8003"]
     Store["store<br/>simulated merchant :8000"]
     Rail["webhook<br/>payment rail :8000"]
-    Valkey[("valkey<br/>grants, idempotency")]
+    Valkey[("valkey<br/>grants, latches")]
   end
 
   PG[("Linode Managed<br/>PostgreSQL 17")]
@@ -45,13 +50,16 @@ flowchart LR
   MCPL -->|forwards bearer| API
   MCPS --> Store
   API --> PG
-  API -->|fetch canonical checkout| Store
-  API -->|kill switch| Rail
-  Store -.->|charge, disabled today| Rail
+  API -->|fetch, own, freeze, bind checkout| Store
+  API -->|grants, kill switch, run stop| Rail
+  Store -->|charge with reserved event| Rail
   Rail --> Valkey
   Rail -->|decision events| API
-  Agents -->|POST /provenance, /agent-runs| API
+  Agents -->|runs, provenance, workflow events| API
 ```
+
+On the Graph branch, both MCP servers also call `POST /execution/authorize` on
+the API to check the run-scoped credential on every tool call.
 
 ## The pods
 
@@ -62,13 +70,13 @@ registry.
 | Pod | Stack | Port | Job |
 |---|---|---|---|
 | `web` | Next.js 16 (App Router), TypeScript | 3000 | UI. Proxies `/backend/*` to the API, streams activity (SSE), serves the clean merchant listing. Only public pod, via a `LoadBalancer` Service (Linode NodeBalancer) on port 80 |
-| `api` | FastAPI, Python 3.12, Pydantic v2 | 8000 | The trusted backend: auth, mandates, runs, payment checks, audit log, Kill Switch. Only writer to PostgreSQL |
+| `api` | FastAPI, Python 3.12, Pydantic v2 | 8000 | The trusted backend: auth, mandates, runs, payment checks and grants, audit log, Kill Switch, operator Attack Lab. Only writer to PostgreSQL |
 | `agents` | FastAPI hosting the Strands shopper and guardian | 8000 | Runs shopping agents; 5 Gi volume for the trace outbox |
 | `mcp-leash` | Official MCP Python SDK, Streamable HTTP | 8002 | 4 payment tools, each forwarding to one API route |
 | `mcp-store` | Official MCP Python SDK, Streamable HTTP | 8003 | 3 shopping tools against the merchant, plus page evidence |
-| `store` | FastAPI | 8000 | Simulated merchant "Volt Supply Co.": catalog, listing pages, checkouts |
-| `webhook` | FastAPI | 8000 | Payment rail: local rail simulator and a Lithic ASA adapter |
-| `valkey` | Valkey 8 with AOF, 5 Gi volume | 6379 | Grants, idempotency cache, stop latch, rail event stream |
+| `store` | FastAPI | 8000 | Simulated merchant "Volt Supply Co.": catalog, listings, owned and frozen checkouts, charge through the rail |
+| `webhook` | FastAPI | 8000 | Payment rail: local rail simulator, plus a Lithic ASA adapter that isn't used for purchases yet |
+| `valkey` | Valkey 8 with AOF, 5 Gi volume | 6379 | Grants, idempotency cache, account and run stop latches, rail event stream |
 
 Outside the cluster: **Linode Managed PostgreSQL 17** (`hackmidwest-db`) and the
 **Akamai inference endpoint** the agents call for model completions.
@@ -77,34 +85,50 @@ Network policies allow only the rail to reach Valkey, and only the API, store
 and web to reach the rail. Public MCP proxies are off by default. The only rail
 path exposed publicly is the HMAC-signed Lithic webhook `/rail/lithic/asa`.
 
+The merchant uses separate credentials: one for browsing and creating checkouts
+(used by the Store MCP) and a different one for owning, freezing, binding and
+completing (backend only, plus the Store MCP's `complete_checkout`).
+
 ## Where Strands sits
 
 Strands lives entirely in the `agents` pod.
 
-- **Shopper (on main):** a single Strands `Agent` named `leash-shopper`
+**On main:**
+
+- A single Strands `Agent` named `leash-shopper`
   (`services/agents/shopper/agent.py`). It's intentionally gullible: the demo is
   that Leash blocks the bad purchase even when the agent falls for the attack.
-- **Model:** `make_model()` in `shared/leash_shared/llm.py` builds a Strands
-  `OpenAIModel` pointed at the Akamai inference endpoint (OpenAI-compatible,
-  model `hackathon-chat`), with explicit token limits.
-- **Tools:** the agent has no direct Python shopping or payment tools. It loads
-  its tools from two Strands `MCPClient`s, one per MCP server, each with its own
-  credential.
-- **Hooks:** `ProvenanceHooks` record every tool call before and after it runs,
-  and every page fetched, and send them to the API as untrusted evidence.
-- **Two run modes:** `live` uses the model. `scripted` is a labeled fixture
-  ("Simulated compromised agent") that makes fixed choices but still makes real
-  MCP tool calls. Each mode has its own agent credential.
-- **Guardian:** `services/agents/guardian` has deterministic checks plus an
-  optional LLM investigator at temperature 0, exposed as
-  `POST /guardian/evaluate`. Its output is advisory, and the API doesn't call it
-  yet.
-- **In progress, not merged:** branch `aditya/strands-graph` builds a Strands
-  `Graph` (authority → shopping → verification → investigation → recovery →
-  payment/terminal) with bounded retries and cooperative stop.
+- Model: `make_model()` in `shared/leash_shared/llm.py` builds a Strands
+  `OpenAIModel` pointed at Akamai inference (OpenAI-compatible, model
+  `hackathon-chat`), with explicit token limits.
+- Tools come only from two Strands `MCPClient`s, one per MCP server, each with
+  its own credential. There are no direct Python shopping or payment tools.
+- `ProvenanceHooks` record every tool call before and after it runs, and every
+  page fetched, and send them to the API as untrusted evidence.
+- Two modes: `live` uses the model. `scripted` is a labeled fixture ("Simulated
+  compromised agent") that makes fixed choices but still makes real MCP calls.
+- Guardian (`services/agents/guardian`): deterministic checks plus an optional
+  LLM investigator at temperature 0. Advisory only.
+- Runs start through `POST /runs` on the agents service with an internal service
+  token. There's no button for it in the web app.
 
-Runs start through `POST /runs` on the agents service, which requires an
-internal service token. There's no button in the web app that starts a run yet.
+**On the Graph branch** (`services/agents/shopper/workflow.py`, `runtime.py`,
+`control.py`):
+
+- A Strands `Graph` with conditional edges:
+  authority → shopping → verification → investigation → recovery → shopping, plus
+  payment and terminal nodes.
+- Each shopping attempt gets a fresh agent context. Recovery passes only the
+  unchanged mandate, reason codes and exclusions (quarantined checkout IDs, SKUs,
+  source URLs), never the poisoned page text or earlier transcripts.
+- Hard limits: 3 candidates, 20 node runs, 45 s per node, 150 s total, 18 model
+  calls, 30 MCP calls. Model retries are off.
+- `control.py` claims the run with a human launch ID, renews a short lease, and
+  checks for cancellation before and after every node, tool and model call.
+- Graph steps are reported to the API's new `POST /workflow-events`, which adds
+  them to the same history and SSE stream the web app reads.
+- `POST /runs` now refuses to start without a human launch's `run_id` and
+  `launch_id`.
 
 ## How the FastAPI backend fits
 
@@ -113,59 +137,64 @@ through it.
 
 **Human path:** browser → `web` → `/backend/*` → `api`
 
-- Sign up and sign in (custom JWT). Signup creates identity only; no card and
-  no spending authority.
+- Sign up and sign in (custom JWT). Signup creates identity only.
 - Draft, review, confirm (Ed25519-signed), replace and revoke mandates.
 - Kill Switch and per-run stop.
 - Activity history and live SSE stream, replayed from PostgreSQL.
+- Attack Lab (main): `GET /attack-lab/status`; allowlisted operators can preview
+  the poisoned listing. Starting a scenario returns 503 until isolated fixtures
+  exist.
+- *Graph branch:* `POST /agent-runs/launch` creates a run for a confirmed mandate
+  and returns a one-time launch ID.
 
-**Agent path:** Strands agent → MCP server → `api`
+**Agent path:** Strands → MCP server → `api`
 
-1. The agent registers its run with the API (`POST /agent-runs`), binding it to
-   a confirmed mandate's exact version and hash.
-2. Tool calls go through `mcp-leash`, which forwards the agent's bearer token to
-   the API unchanged. The API decides what that token may do.
+1. The run is registered with the API, bound to the confirmed mandate's exact
+   version and hash. *Graph branch:* the worker claims it with the launch ID and
+   keeps renewing its lease.
+2. `mcp-leash` forwards the agent's bearer token to the API unchanged. The API
+   decides what that token may do.
 3. Hooks post tool traces and fetched-page evidence to `POST /provenance`.
 
-**Payment path:** `request_payment` → `POST /payments`
+**Payment path on main** (`request_payment` → `POST /payments`):
 
-1. The API records a durable payment operation before contacting anyone.
-2. It fetches the checkout directly from the store with its own credential,
-   never trusting the agent's version.
-3. It runs 15 deterministic checks against the confirmed mandate (see
-   `LEASH_ENFORCEMENT.md`).
-4. It persists the result and an audit event, then streams it to the web.
-5. **Today it stops here with `blocked`.** The next steps, issuing a single-use
-   grant to the rail, binding it to the checkout at the store, and the store
-   charging through the rail, exist in pieces but are disabled until durable
-   reconciliation is finished.
+1. Record a durable payment operation and reserve its IDs before contacting
+   anyone.
+2. Fetch the checkout from the store, then have the store own and freeze it for
+   this run.
+3. Recheck that the account, run and mandate are still current.
+4. Run the 15 checks (see `LEASH_ENFORCEMENT.md`).
+5. If they pass: bind the checkout at the store, install a single-use grant in
+   the rail, and return a once-only instrument token. If not: `blocked`.
+6. The agent calls `complete_checkout`. The store sends the reserved event to the
+   rail's `/local/authorize`. The rail decides and consumes the grant, and the
+   decision flows back to the API's activity log and the web app.
 
-**Rail path (built, not reached yet):** store → `webhook` `/local/authorize` →
-Valkey atomic check-and-consume → decision → relayed to the API's
-`/internal/activity` → shown in the web app.
+The Graph branch has its own version of steps 2 to 6
+(`api/purchase_execution.py`, `api/merchant_execution.py`,
+`services/store/execution_bridge.py`, `services/webhook/execution_routes.py`),
+used when the request carries a run-scoped execution token. Main and the branch
+need to settle on one implementation when they're merged.
 
-## What's real on main and what isn't
+## Database
 
-| Real and tested | Not yet |
-|---|---|
-| All 8 pods' code, manifests and deploy script | Confirmation that the cluster runs `138d636` (a demo deployment exists; its revision is unverified) |
-| Human mandate confirmation and signing | Any approved payment: every request returns `blocked` |
-| 15-check verifier against the merchant's checkout | Grant issuance, merchant binding, charge completion |
-| Strands agent with MCP tools and provenance hooks | Strands Graph recovery (branch only), guardian in the payment path |
-| Rail single-use grants, Kill Switch invalidation, idempotency | Live Lithic sandbox authorizations |
-| Persisted audit log with SSE replay | A UI button to start an agent run |
+PostgreSQL migrations in `db/migrations/`, applied at API startup with
+checksums: users and auth, mandate authority, cards, activity feed, workflow
+control, card controls, payment attempts and operations, then
+`0011_payment_authorization.sql` (main's local-rail grants) and
+`0012_execution.sql` (Graph launches, leases and activation states).
 
 ## Where to look in the repo
 
 | Area | Path |
 |---|---|
-| FastAPI backend | `api/` (`main.py`, `mandate_service.py`, `payment_service.py`, `checkout_verifier.py`, `workflow_control.py`) |
+| FastAPI backend | `api/` (`main.py`, `mandate_service.py`, `payment_service.py`, `checkout_verifier.py`, `workflow_control.py`, `attack_lab.py`) |
+| Graph-branch execution API | `api/execution.py`, `purchase_execution.py`, `merchant_execution.py`, `workflow_events.py` |
 | Shared models and events | `shared/leash_shared/models.py`, `events.py`, `llm.py` |
-| Strands agent | `services/agents/shopper/`, `provenance/`, `guardian/` |
+| Strands agent | `services/agents/shopper/`, `provenance/`, `guardian/`; Graph notes in `services/agents/graph-handoff.md` |
 | MCP servers | `services/mcp-leash/main.py`, `services/mcp-store/main.py` |
 | Merchant | `services/store/` |
 | Payment rail | `services/webhook/` (`decide.py` is the pure policy) |
 | Web app | `web/src/` |
 | Kubernetes and deploy | `k8s/`, `scripts/deploy_lke.sh`, `scripts/lib.sh` |
-| Database schema | `db/migrations/` (0001–0010) |
-| Rules and status | `AGENTS.md`, `docs/LEASH_SPEC.md`, `docs/LEASH_ALIGNMENT_AUDIT.md` |
+| Rules and status | `AGENTS.md`, `api/r03-r11-handoff.md`, `docs/LEASH_SPEC.md` |
