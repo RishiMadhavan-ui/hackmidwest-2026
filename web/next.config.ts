@@ -29,11 +29,15 @@ const nextConfig: NextConfig = {
       // before the broad backend adapter.
       fallback: [{ source: "/backend/:path*", destination: `${apiOrigin}/:path*` }],
       afterFiles: [
-      ...(process.env.ENABLE_PUBLIC_MCP_PROXY === "1" ? [{
+      // Build-time flags (Next bakes rewrites into the standalone server).
+      // LEASH-only: safe external connector path; does not expose Store MCP.
+      // Both: legacy ENABLE_PUBLIC_MCP_PROXY=1 still opens leash + store.
+      ...((process.env.ENABLE_PUBLIC_MCP_LEASH_PROXY === "1"
+        || process.env.ENABLE_PUBLIC_MCP_PROXY === "1") ? [{
         source: "/mcp-leash/:path*",
         destination: `${mcpLeashOrigin}/:path*`,
-      },
-      {
+      }] : []),
+      ...(process.env.ENABLE_PUBLIC_MCP_PROXY === "1" ? [{
         source: "/mcp-store/:path*",
         destination: `${mcpStoreOrigin}/:path*`,
       }] : []),
