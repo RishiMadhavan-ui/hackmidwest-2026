@@ -100,6 +100,12 @@ function AccountMenu() {
         <Menu.Positioner sideOffset={6} align="end" className="outline-none">
           <Menu.Popup className="z-50 min-w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none">
             <div className="px-2.5 py-2 text-xs text-muted-foreground">{user?.email}</div>
+            <Menu.Item
+              className={menuItemClass}
+              onClick={() => router.push("/mission-control")}
+            >
+              Mission Control
+            </Menu.Item>
             <Menu.Item className={menuItemClass} onClick={() => router.push("/profile")}>
               Account
             </Menu.Item>

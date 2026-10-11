@@ -119,20 +119,11 @@ def propose(conn, proposal: MandateProposal, principal: Principal, *, now: datet
 def draft_agent_for_user(conn, user_id: str) -> str:
   """Pick an owned shopper agent for a human-authored draft.
 
-  Prefers an existing live binding. If the account has no agent yet, provisions a
-  live agent using AGENT_TOKEN_SHOPPER when configured (local/demo), otherwise a
-  random credential so Mission Control can still create drafts before MCP is wired.
+  Prefers the live agent bound to AGENT_TOKEN_SHOPPER when that credential is
+  configured and owned by this human (required for agents-pod claim). Falls back
+  to any owned live agent, then provisions a new binding. Refuses a silent
+  random UI agent when the cluster shopper token belongs to someone else.
   """
-  row = conn.execute(
-    """SELECT id FROM leash_agents
-       WHERE user_id = %s AND enabled
-       ORDER BY CASE WHEN allowed_modes @> %s::jsonb THEN 0 ELSE 1 END, id
-       LIMIT 1""",
-    (user_id, Jsonb(["live"])),
-  ).fetchone()
-  if row:
-    return str(row["id"])
-
   env_token = os.getenv("AGENT_TOKEN_SHOPPER", "").strip()
   if len(env_token) >= 32:
     owned = conn.execute(
@@ -146,6 +137,18 @@ def draft_agent_for_user(conn, user_id: str) -> str:
           "Configured AGENT_TOKEN_SHOPPER is bound to another human",
         )
       return str(owned["id"])
+
+  row = conn.execute(
+    """SELECT id FROM leash_agents
+       WHERE user_id = %s AND enabled
+       ORDER BY CASE WHEN allowed_modes @> %s::jsonb THEN 0 ELSE 1 END, id
+       LIMIT 1""",
+    (user_id, Jsonb(["live"])),
+  ).fetchone()
+  if row:
+    return str(row["id"])
+
+  if len(env_token) >= 32:
     agent_id = "agt_ui_" + user_id.removeprefix("usr_")[:20]
     bind_agent(
       conn, user_id=user_id, agent_id=agent_id, token=env_token, modes=("live",),

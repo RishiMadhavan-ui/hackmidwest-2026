@@ -150,8 +150,9 @@ def _store_headers() -> dict[str, str]:
 
 def _store_charge_headers() -> dict[str, str]:
   # Complete requires the distinct charge credential (same as the API bind path).
+  # Forward run-scoped fencing headers so store→API /begin can authorize the lease.
   token = os.environ.get("STORE_CHARGE_TOKEN")
-  return {"Authorization": f"Bearer {token}"} if token else {}
+  return {**({"Authorization": f"Bearer {token}"} if token else {}), **scope_headers.get()}
 
 
 def _error(reason: str, **extra: Any) -> dict[str, Any]:
