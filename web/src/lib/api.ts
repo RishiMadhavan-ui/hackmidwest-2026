@@ -163,9 +163,15 @@ export async function fetchActivity(
   return apiFetch<ActivityHistory>(`/activity?${params}`, {}, token);
 }
 
+const ACTIVITY_POLL_MS = 1500;
+
 /**
- * Stream activity via SSE using fetch (Bearer header; EventSource cannot set it).
- * Calls onEvent for each activity row; onStatus for connection state.
+ * Live activity for the profile feed.
+ *
+ * Uses short-interval GET /activity polling. On LKE the browser calls
+ * `/backend/...` through the Next rewrite; that path reliably returns JSON but
+ * often buffers long-lived SSE, so polling is the production delivery mode.
+ * (Direct local API SSE remains available at GET /activity/stream for other clients.)
  */
 export function streamActivity(handlers: {
   onEvent: (event: ActivityEvent) => void;
@@ -175,8 +181,6 @@ export function streamActivity(handlers: {
   token?: string | null;
   signal?: AbortSignal;
 }): () => void {
-  const auth = handlers.token === undefined ? getStoredToken() : handlers.token;
-  const after = handlers.after ?? 0;
   const controller = new AbortController();
   if (handlers.signal) {
     if (handlers.signal.aborted) controller.abort();
@@ -187,59 +191,35 @@ export function streamActivity(handlers: {
     }
   }
 
+  let cursor = handlers.after ?? 0;
+  let timer: ReturnType<typeof setInterval> | null = null;
   handlers.onStatus?.("connecting");
 
-  (async () => {
+  const tick = async () => {
     try {
-      const response = await fetch(
-        `${API_URL}/activity/stream?after=${after}`,
-        {
-          headers: auth ? { Authorization: `Bearer ${auth}` } : {},
-          signal: controller.signal,
-        },
-      );
-      if (!response.ok || !response.body) {
-        throw new ApiError(response.status, `Activity stream failed (${response.status})`);
-      }
+      const history = await fetchActivity(cursor, 100, handlers.token);
+      if (controller.signal.aborted) return;
       handlers.onStatus?.("live");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
-        for (const chunk of chunks) {
-          let eventName = "message";
-          let dataLine = "";
-          for (const line of chunk.split("\n")) {
-            if (line.startsWith("event:")) {
-              eventName = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-              dataLine += line.slice(5).trim();
-            }
-          }
-          if (eventName === "activity" && dataLine) {
-            try {
-              handlers.onEvent(JSON.parse(dataLine) as ActivityEvent);
-            } catch {
-              // ignore malformed frames
-            }
-          }
-        }
+      for (const event of history.events) {
+        handlers.onEvent(event);
+        cursor = Math.max(cursor, event.sequence);
       }
     } catch (err) {
       if (controller.signal.aborted) return;
       handlers.onStatus?.("error");
       handlers.onError?.(
-        err instanceof Error ? err : new Error("Activity stream disconnected"),
+        err instanceof Error ? err : new Error("Activity feed unavailable"),
       );
     }
-  })();
+  };
 
-  return () => controller.abort();
+  void tick();
+  timer = setInterval(() => void tick(), ACTIVITY_POLL_MS);
+
+  return () => {
+    controller.abort();
+    if (timer) clearInterval(timer);
+  };
 }
 
 /** Display-only conversion; money stays integer cents on the wire. */
