@@ -21,7 +21,7 @@ uv run uvicorn main:app --port 8003
 
 | Variable | Used for |
 |---|---|
-| `STORE_URL` | The store's address (required; `http://store:8000` on LKE) |
+| `STORE_URL` | The store's address (required; demo: `https://evil-store-six.vercel.app`) |
 | `STORE_PUBLIC_URLS` | Optional comma-separated public store addresses that map onto `STORE_URL` |
 | `STORE_MCP_TOKEN` | Required bearer for callers |
 | `STORE_API_TOKEN` | Optional credential sent to the store, pending the scheme agreed with Cameron |

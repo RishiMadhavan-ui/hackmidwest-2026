@@ -1,0 +1,59 @@
+# Simulated Volt Supply Co. merchant. ClusterIP Service `store`; public via
+# web rewrite /store/* (STORE_ORIGIN). In-cluster callers use http://store:8000.
+# Lithic sandbox only — no real funds.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store
+  namespace: hackmidwest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: store
+  template:
+    metadata:
+      labels:
+        app: store
+    spec:
+      containers:
+        - name: store
+          image: ${STORE_IMAGE}
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: app-env
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: store
+  namespace: hackmidwest
+spec:
+  type: ClusterIP
+  selector:
+    app: store
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

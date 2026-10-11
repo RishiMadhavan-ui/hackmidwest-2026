@@ -1,5 +1,5 @@
 # mcp-store MCP server. ClusterIP only: agents call it inside the cluster.
-# Tools are not registered yet; this deployment serves /health and the MCP endpoint.
+# STORE_URL points at the in-cluster simulated merchant (services/store).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,6 +24,8 @@ spec:
                 name: app-env
           env:
             - name: STORE_URL
+              value: http://store:8000
+            - name: STORE_PUBLIC_URLS
               value: http://store:8000
           ports:
             - containerPort: 8003

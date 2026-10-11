@@ -1,6 +1,6 @@
 # Next.js frontend. Public traffic lands here; path prefixes are rewritten to
 # in-cluster Services: /backend/* → api, /mcp-leash/* → mcp-leash,
-# /mcp-store/* → mcp-store, /rail/* → webhook (Lithic ASA + local rail).
+# /mcp-store/* → mcp-store, /rail/* → webhook, /store/* → store (merchant).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,6 +29,8 @@ spec:
               value: http://mcp-store:8003
             - name: RAIL_ORIGIN
               value: http://webhook:8000
+            - name: STORE_ORIGIN
+              value: http://store:8000
           ports:
             - containerPort: 3000
           readinessProbe:
