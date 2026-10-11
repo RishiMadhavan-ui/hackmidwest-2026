@@ -294,6 +294,30 @@ def signup(body: SignupRequest) -> TokenResponse:
                 user_id,
             ),
         )
+        # Lazy import avoids auth ↔ activity ↔ principals cycle at module load.
+        from activity import ACCOUNT_CREATED, emit_for_auth_user
+        from leash_shared.events import EventType
+
+        auth_id = str(user_id)
+        emit_for_auth_user(
+            conn,
+            auth_user_id=auth_id,
+            event_type=ACCOUNT_CREATED,
+            data={"email": email, "provider": "lithic_sandbox"},
+        )
+        emit_for_auth_user(
+            conn,
+            auth_user_id=auth_id,
+            event_type=EventType.CARD_ISSUED.value,
+            data={
+                "last_four": card.get("last_four") or None,
+                "spend_limit_cents": int(card["spend_limit_cents"]),
+                "spend_limit_duration": "FOREVER",
+                "card_type": "VIRTUAL",
+                "source": "signup",
+                "provider": "lithic_sandbox",
+            },
+        )
         conn.commit()
 
     row = get_user_by_id(str(user_id))
@@ -310,7 +334,32 @@ def login(body: AuthCredentials) -> TokenResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    from activity import ACCOUNT_LOGIN, emit_for_auth_user
+
+    with get_conn() as conn:
+        emit_for_auth_user(
+            conn,
+            auth_user_id=str(row["id"]),
+            event_type=ACCOUNT_LOGIN,
+            data={"email": email},
+        )
+        conn.commit()
     return _token_for_row(row)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(user: Annotated[UserOut, Depends(get_current_user)]) -> None:
+    """Record logout for the activity feed. JWTs remain client-discarded (stateless)."""
+    from activity import ACCOUNT_LOGOUT, emit_for_auth_user
+
+    with get_conn() as conn:
+        emit_for_auth_user(
+            conn,
+            auth_user_id=user.id,
+            event_type=ACCOUNT_LOGOUT,
+            data={"email": user.email},
+        )
+        conn.commit()
 
 
 @router.get("/me", response_model=UserOut)
