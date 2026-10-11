@@ -2,6 +2,11 @@ import type { ActivityEvent } from "@/lib/api";
 
 export type ActivityScope = "run" | "today" | "all";
 
+/** Backend-mirrored demo evidence has a separate owner; this is display routing only. */
+export function isIsolatedLabEvent(event: ActivityEvent): boolean {
+  return typeof event.data.lab_namespace_id === "string" && event.data.lab_namespace_id.length > 0;
+}
+
 export function newestRunId(events: ActivityEvent[], mandateId?: string): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];

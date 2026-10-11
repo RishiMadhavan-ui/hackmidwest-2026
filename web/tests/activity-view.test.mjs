@@ -1,8 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activityView, newestPaymentSignal, newestRunId } from '../src/lib/activity-view.ts';
+import { activityView, isIsolatedLabEvent, newestPaymentSignal, newestRunId } from '../src/lib/activity-view.ts';
 
 const event = (sequence, type, data, at = '2026-10-11T12:00:00Z') => ({ sequence, type, data, at });
+test('mirrored Lab evidence must not route to another human\'s ordinary mandate', () => {
+  assert.equal(isIsolatedLabEvent(event(1, 'payment.denied', { mandate_id: 'mnd_demo', lab_namespace_id: 'lab_1' })), true);
+  assert.equal(isIsolatedLabEvent(event(2, 'payment.denied', { mandate_id: 'mnd_owned' })), false);
+  for (const lab_namespace_id of ['', null, false, {}]) {
+    assert.equal(isIsolatedLabEvent(event(3, 'payment.denied', { lab_namespace_id })), false);
+  }
+});
 test('a new run cannot inherit another run or mandate approval', () => {
   const old = event(1, 'authorization.decided', { run_id: 'run_old', mandate_id: 'mnd_old', result: 'APPROVED' });
   const mismatched = event(2, 'authorization.decided', { run_id: 'run_new', mandate_id: 'mnd_other', result: 'APPROVED' });

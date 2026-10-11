@@ -1,6 +1,26 @@
 # Full-app implementation verification — October 11, 2026
 
+## No-redeploy mandate lifecycle checks — October 11, 09:49–09:54 Central
+
+Actual signed-in UI tests on the existing HTTP deployment, authorized by Rishi. One ordinary test mandate was created, confirmed, replaced, reconfirmed and revoked. No shopper was launched, no checkout/payment attempt occurred, and the account-wide Kill Switch was not engaged. Existing purchase and isolated Lab evidence remains intact.
+
+| Check | Actual observed result | Scope / limitation |
+|---|---|---|
+| Strict natural budget | PASS: “Buy one USB-C laptop charger for under $35. No subscriptions.” generated 3499 cents, USB-C, one item/purchase and no subscriptions/recurrence | Supported instruction parser, not an arbitrary-language or live-model test |
+| Draft persistence | PASS: saved `mnd_d56faf511fe34320bc6e63362a5d7127` remained proposed after reload; confirmation initially disabled until checkbox review | No automatic run or purchase |
+| Confirmation | PASS: v1 became active with server-demo Ed25519 confirmation at 09:50:45 | No device-passkey/AP2 claim |
+| Replacement | PASS: edit to under $30 / 2999 cents produced unconfirmed v2 at 09:51:06; v1 appeared as Replaced with its original hash prefix `0ba8edcf43`; v2 hash `04ff716ee4e2` | Reload retained v2 proposed / not confirmed. Browser verifies displayed history, not every database invariant |
+| Fresh confirmation and revocation | PASS: v2 explicitly confirmed at 09:51:54, revoked at 09:52:25; reload retained Revoked, history and no runs/payment attempts | No unused grant existed; this does not prove revocation of an already installed grant or every race |
+| Missing/inclusive budget | PASS: missing budget returned “Include one explicit USD total budget”; “at most $40” generated 4000 cents. Unsaved inclusive interpretation canceled | No silent budget invention or additional saved mandate |
+| Launch eligibility | PASS: list showed 0 active / 0 awaiting confirmation, with six ended mandates; Mission Control Start shopping disabled | Existing expired statuses inspected; no timed expiry/rail race performed |
+
+Source fix: Incidents recognizes backend-mirrored `lab_namespace_id`, displays the separate demo mandate ID without linking to ordinary ownership routes, and directs review to the isolated Attack Lab view. Actual block reasons and traces remain visible. Backend authorization, operator enablement and namespace checks are unchanged; event metadata is a display hint, never permission. The existing deployed “Mandate not found” behavior remains until a later web rebuild.
+
+Actual local verification for this batch: frontend **12 tests passed**, ESLint exit **0**, Next.js production/TypeScript build exit **0**. API **11 authority/signature tests + 4 interpretation tests passed**, using FastAPI/unit fixtures and no database or live provider. Initial restricted attempts hit local transport 503/EPERM, a missing shared import path, and a stalled test process; reruns with appropriate local test permissions and shared PYTHONPATH passed. The stalled local process was stopped. No fresh full Graph/SQL/Valkey acceptance rerun is claimed; its previously documented unavailable-local-PostgreSQL blocker remains. No schema, migration, frozen-contract, credential, payment-policy or deployment change.
+
 ## Signed-in deployed rehearsal — October 11, 08:03–08:12 Central
+
+**No-redeploy follow-up:** Rishi deferred rollout after `4dfe123`. Current Payments labels the stored Lab block as **Blocked before payment**, followed by the real local authorization; expanded details expose matching payment/checkout/mandate/verification IDs. Incidents' Lab **Compare with your mandate** instead returns **Mandate not found**, because ordinary owner access cannot read the separate demo user's mandate. This is a UI routing gap, not justification to weaken ownership checks. Its scoped tool trace remains available. The separate account-wide Kill Switch confirmation/no-reversal screen was inspected and canceled; enforcement was not exercised. Current-version click order and truthful narration adjustments are in [the no-redeploy checklist](DEPLOYED_DEMO_CHECKLIST.md#current-instruction-no-redeploy-record-the-existing-deployment). No source rollout, inference fix, permission expansion or financial mutation occurred during these read-only checks.
 
 Actual browser UI execution on `http://173.255.199.245/`, with Rishi's authorized human session and isolated operator workspace. No provider secrets, cluster credentials or real-money operations were used. The runtime/Secret revision was not directly inspected. These scoped observations supersede older claims below that no interactive browser checks were possible; earlier test counts remain historical outputs.
 

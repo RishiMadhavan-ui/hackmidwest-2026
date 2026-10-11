@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getMandate, type ActivityEvent, type Mandate } from "@/lib/api";
 import { useActivity } from "@/lib/activity";
+import { isIsolatedLabEvent } from "@/lib/activity-view";
 import {
   deriveIncidents,
   formatWhen,
@@ -68,7 +69,9 @@ function Evidence({ trace }: { trace: ActivityEvent[] }) {
 }
 
 function IncidentCard({ incident, trace }: { incident: Incident; trace: ActivityEvent[] }) {
+  const isolatedLab = isIsolatedLabEvent(incident.sourceEvent);
   const comparable =
+    !isolatedLab &&
     incident.reasons.length > 0 &&
     (incident.sourceEvent.type === "payment.denied" || incident.sourceEvent.type.startsWith("checkout."));
   return (
@@ -98,14 +101,25 @@ function IncidentCard({ incident, trace }: { incident: Incident; trace: Activity
 
       {comparable ? <Comparison incident={incident} /> : null}
 
+      {isolatedLab ? (
+        <p className="text-sm text-muted-foreground">
+          Isolated demo evidence uses a separate demo mandate. Review its run in{" "}
+          <Link href="/mission-control#attack-lab" className="underline underline-offset-2">Attack Lab</Link>.
+        </p>
+      ) : null}
+
       <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
         {incident.mandateId ? (
           <div>
             <dt className="inline">Mandate </dt>
             <dd className="inline">
-              <Link href={`/mandates/${encodeURIComponent(incident.mandateId)}`} className="underline-offset-2 hover:text-foreground hover:underline">
+              {isolatedLab ? (
                 <Mono className="text-xs">{shortId(incident.mandateId, 10)}</Mono>
-              </Link>
+              ) : (
+                <Link href={`/mandates/${encodeURIComponent(incident.mandateId)}`} className="underline-offset-2 hover:text-foreground hover:underline">
+                  <Mono className="text-xs">{shortId(incident.mandateId, 10)}</Mono>
+                </Link>
+              )}
             </dd>
           </div>
         ) : null}
