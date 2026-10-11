@@ -34,7 +34,7 @@ October 10 review: integration baseline `9edadab` contains R01, Cameron's LKE/bu
 - **`services/agents/`:** FastAPI agents service (shopper/guardian/provenance present in-tree; wire against real api/store as those land).
 - **`services/mcp-leash/`:** Streamable HTTP MCP thin adapter with four tools forwarding to api (`propose_mandate`, `list_mandates`, `request_payment`, `check_status`). In-cluster `:8002`; public via web rewrite `/mcp-leash/*`.
 - **`services/mcp-store/`:** Store MCP with `browse`, `create_checkout`, `complete_checkout`; its own `STORE_MCP_TOKEN` auth and a separate store credential; store-only browsing with server-side page inspection and redacted snapshots. In-cluster `:8003`; public via web rewrite `/mcp-store/*`.
-- **`services/webhook/`:** Labeled local payment rail (`POST /local/authorize`) with pure `decide.py` and Valkey-backed grant consume/idempotency. Lithic ASA adapter still pending.
+- **`services/webhook/`:** Labeled local rail (`POST /local/authorize`) and Lithic ASA adapter (`POST /lithic/asa`) over shared `decide()` + Valkey. Public via web rewrite `/rail/*`. Post-decision activity notifies `POST /internal/activity`.
 - **Deploy:** root `k8s/` (api, web, agents, mcp-leash, mcp-store, valkey, webhook, service), `scripts/deploy_lke.sh` + `scripts/lib.sh`, `.env.example` with `DATABASE_URL` / `JWT_SECRET` / `VALKEY_URL` / `WEBHOOK_INTERNAL_TOKEN` / MCP URLs / agent tokens / image registry. Managed Postgres `hackmidwest-db` + in-cluster Valkey exist. Compose and controlled store HTTP remain planned; R02 domain migrations are implemented. Shared `models.py` / `events.py` / `llm.py` exist (see tree); installable shared packaging still pending.
 
 Preserve the selected stack and planned service responsibilities:

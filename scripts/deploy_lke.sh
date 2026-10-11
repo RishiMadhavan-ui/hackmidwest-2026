@@ -101,7 +101,7 @@ if [[ ${SKIP_BUILD:-0} != 1 ]]; then
   docker push "$MCP_LEASH_IMAGE"
   "$BUILDX" build --platform "$PLATFORM" -t "$MCP_STORE_IMAGE" --load "$REPO/services/mcp-store"
   docker push "$MCP_STORE_IMAGE"
-  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/webhook/Dockerfile" -t "$WEBHOOK_IMAGE" --load "$REPO/services/webhook"
+  "$BUILDX" build --platform "$PLATFORM" -f "$REPO/services/webhook/Dockerfile" -t "$WEBHOOK_IMAGE" --load "$REPO"
   docker push "$WEBHOOK_IMAGE"
   echo "$(elapsed): images pushed ($PLATFORM)."
 else

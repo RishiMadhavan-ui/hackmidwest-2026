@@ -42,6 +42,9 @@ def grant_to_dict(grant: GrantSnapshot) -> dict[str, Any]:
 
 
 def grant_from_dict(data: dict[str, Any]) -> GrantSnapshot:
+  user_id = data.get("user_id") or None
+  if user_id == "":
+    user_id = None
   return GrantSnapshot(
     grant_id=str(data["grant_id"]),
     status=str(data["status"]),
@@ -53,6 +56,7 @@ def grant_from_dict(data: dict[str, Any]) -> GrantSnapshot:
     authorized_amount_cents=int(data["authorized_amount_cents"]),
     currency=str(data["currency"]),
     expires_at=_parse_dt(str(data["expires_at"])),
+    user_id=str(user_id) if user_id else None,
   )
 
 
@@ -262,6 +266,7 @@ class RedisGrantStore:
         "authorized_amount_cents": str(grant.authorized_amount_cents),
         "currency": grant.currency,
         "expires_at": _iso(grant.expires_at),
+        "user_id": grant.user_id or "",
       },
     )
     pipe.expire(key, GRANT_TTL_SECONDS)

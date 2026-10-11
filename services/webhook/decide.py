@@ -55,6 +55,8 @@ class GrantSnapshot:
   authorized_amount_cents: int
   currency: str
   expires_at: datetime
+  # Optional LEASH usr_… for post-decision activity attribution (not used by decide()).
+  user_id: str | None = None
 
 
 @dataclass(frozen=True)
