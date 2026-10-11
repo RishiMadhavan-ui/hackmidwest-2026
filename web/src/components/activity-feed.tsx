@@ -92,6 +92,18 @@ function summarize(event: ActivityEvent): string | null {
   if (typeof d.status === "string") {
     parts.push(String(d.status));
   }
+  if (typeof d.result === "string") {
+    parts.push(String(d.result));
+  }
+  if (typeof d.reason === "string" && d.reason !== "approved") {
+    parts.push(String(d.reason));
+  }
+  if (typeof d.rail === "string") {
+    parts.push(String(d.rail));
+  }
+  if (typeof d.amount_cents === "number") {
+    parts.push(formatUsdFromCents(d.amount_cents));
+  }
   if (typeof d.provider === "string" && event.type.startsWith("account.")) {
     parts.push(d.provider);
   }

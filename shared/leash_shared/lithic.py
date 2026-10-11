@@ -325,6 +325,103 @@ def get_spend_limit_balance(
     }
 
 
+def update_card_state(card_token: str, state: str) -> dict[str, Any]:
+    """Set card state (OPEN / PAUSED / CLOSED / PENDING_FULFILLMENT / PENDING_ACTIVATION)."""
+    desired = state.strip().upper()
+    allowed = {"OPEN", "PAUSED", "CLOSED", "PENDING_FULFILLMENT", "PENDING_ACTIVATION"}
+    if desired not in allowed:
+        raise LithicError(f"card state must be one of {sorted(allowed)}")
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
+            res = client.patch(
+                f"/v1/cards/{card_token}",
+                headers=_headers(),
+                json={"state": desired},
+            )
+    except httpx.HTTPError as exc:
+        raise LithicError("Lithic sandbox unreachable") from exc
+    data = _json_or_empty(res)
+    if res.status_code >= 400:
+        raise LithicError(
+            _error_message(data, f"Lithic update card failed ({res.status_code})"),
+            status_code=res.status_code,
+        )
+    if not isinstance(data, dict):
+        raise LithicError("Lithic update card returned unexpected body")
+    return data
+
+
+def enroll_asa_responder(url: str) -> dict[str, Any]:
+    """Enroll a publicly reachable ASA responder URL (sandbox self-serve)."""
+    body = {"type": "ASA_RESPONDER", "url": url}
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
+            res = client.post("/v1/responder_endpoints", headers=_headers(), json=body)
+    except httpx.HTTPError as exc:
+        raise LithicError("Lithic sandbox unreachable") from exc
+    data = _json_or_empty(res)
+    if res.status_code >= 400:
+        raise LithicError(
+            _error_message(data, f"Lithic ASA enroll failed ({res.status_code})"),
+            status_code=res.status_code,
+        )
+    return data if isinstance(data, dict) else {"raw": data}
+
+
+def get_asa_hmac_secret() -> str:
+    """Retrieve the program ASA HMAC secret (enables webhook-* headers on ASA)."""
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
+            res = client.get("/v1/auth_stream/secret", headers=_headers())
+    except httpx.HTTPError as exc:
+        raise LithicError("Lithic sandbox unreachable") from exc
+    data = _json_or_empty(res)
+    if res.status_code >= 400:
+        raise LithicError(
+            _error_message(data, f"Lithic ASA secret retrieve failed ({res.status_code})"),
+            status_code=res.status_code,
+        )
+    if not isinstance(data, dict):
+        raise LithicError("Lithic ASA secret response unexpected")
+    secret = data.get("secret") or data.get("key") or data.get("asa_client_secret")
+    if not secret:
+        raise LithicError("Lithic ASA secret response missing secret")
+    return str(secret)
+
+
+def simulate_authorization(
+    *,
+    card_token: str,
+    amount_cents: int,
+    descriptor: str,
+    mcc: str,
+    merchant_acceptor_id: str | None = None,
+) -> dict[str, Any]:
+    """Sandbox: simulate an authorization that Lithic routes to the enrolled ASA endpoint."""
+    if amount_cents < 0:
+        raise LithicError("amount_cents must be >= 0")
+    body: dict[str, Any] = {
+        "card_token": card_token,
+        "amount": amount_cents,
+        "descriptor": descriptor,
+        "mcc": mcc,
+    }
+    if merchant_acceptor_id:
+        body["merchant_acceptor_id"] = merchant_acceptor_id
+    try:
+        with httpx.Client(base_url=_base_url(), timeout=30.0) as client:
+            res = client.post("/v1/simulate/authorize", headers=_headers(), json=body)
+    except httpx.HTTPError as exc:
+        raise LithicError("Lithic sandbox unreachable") from exc
+    data = _json_or_empty(res)
+    if res.status_code >= 400:
+        raise LithicError(
+            _error_message(data, f"Lithic simulate authorize failed ({res.status_code})"),
+            status_code=res.status_code,
+        )
+    return data if isinstance(data, dict) else {"raw": data}
+
+
 def _as_list(data: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
     if isinstance(data, list):
         return [row for row in data if isinstance(row, dict)]
