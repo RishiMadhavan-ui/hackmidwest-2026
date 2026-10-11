@@ -246,6 +246,34 @@ def render_product_page(product_id: str, *, evil: bool) -> str:
       line-height: 1.45;
     }}
     .buy strong {{ color: #fff; }}
+    .buy form {{ margin: 0.85rem 0 0; }}
+    .buy-btn {{
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      font-family: Syne, sans-serif;
+      font-weight: 700;
+      font-size: 0.95rem;
+      letter-spacing: -0.01em;
+      color: #0b1220;
+      background: linear-gradient(180deg, #d6f85a 0%, var(--volt) 100%);
+      padding: 0.85rem 1.25rem;
+      border-radius: 12px;
+      box-shadow: 0 10px 28px rgba(200, 241, 53, 0.22);
+      transition: transform 0.15s ease, filter 0.15s ease;
+    }}
+    .buy-btn:hover {{ filter: brightness(1.05); transform: translateY(-1px); }}
+    .buy-btn:active {{ transform: translateY(0); }}
+    .buy-hint {{
+      margin: 0.65rem 0 0;
+      font-size: 0.82rem;
+      color: var(--mute);
+    }}
+    .mono {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--volt);
+      word-break: break-all;
+    }}
 
     .side-img {{
       border-radius: 18px;
@@ -411,7 +439,14 @@ def _charger_body(price: str, recurring: str, injection: str) -> str:
         <li>Compact GaN body with folding wall prongs</li>
         <li>Ships in 2 business days from Volt Supply</li>
       </ul>
-      <p class="buy">To buy, start a checkout for product <strong>chg-65w</strong>, quantity 1.</p>
+      <div class="buy">
+        <strong>Ready to check out</strong>
+        <p style="margin:0.35rem 0 0">Opens a catalog-backed checkout for product <strong>chg-65w</strong>, quantity 1.</p>
+        <form method="post" action="./chg-65w/checkout">
+          <button class="buy-btn" type="submit">Start checkout</button>
+        </form>
+        <p class="buy-hint">Payment still goes through LEASH verify → bind → local rail. This only creates the merchant checkout.</p>
+      </div>
     </section>
     <aside class="side-img">
       <img src="{_IMG_CHARGER_DETAIL}" alt="Close-up of a USB-C charger brick" width="900" height="675">
@@ -441,6 +476,112 @@ def _charger_body(price: str, recurring: str, injection: str) -> str:
 """
 
 
+def render_checkout_started(product: dict, record: dict) -> str:
+  """Confirmation page after a human storefront checkout create."""
+  price = f"${record['total_cents'] // 100}.{record['total_cents'] % 100:02d}"
+  recurring = " /mo" if record["recurring"] else ""
+  # Served under /products/{id}/checkout → sibling product page.
+  back = f"../{product['id']}"
+  return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout started · {MERCHANT_NAME}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --ink: #0b1220;
+      --fog: #d7e0ea;
+      --mute: #8a9bb0;
+      --volt: #c8f135;
+      --line: rgba(215, 224, 234, 0.14);
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      color: var(--fog);
+      font-family: Figtree, system-ui, sans-serif;
+      background:
+        radial-gradient(900px 500px at 80% -10%, rgba(200, 241, 53, 0.12), transparent 55%),
+        linear-gradient(165deg, #070b14 0%, var(--ink) 45%, #101a2b 100%);
+      display: grid;
+      place-items: center;
+      padding: 2rem 1.25rem;
+    }}
+    .card {{
+      width: min(32rem, 100%);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1.6rem 1.5rem;
+      background: linear-gradient(160deg, rgba(20, 30, 46, 0.92), rgba(11, 18, 32, 0.88));
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      animation: rise 0.6s ease both;
+    }}
+    .brand {{
+      font-family: Syne, sans-serif;
+      font-weight: 800;
+      font-size: 1.15rem;
+      color: #fff;
+      margin-bottom: 1rem;
+    }}
+    .brand span {{ color: var(--volt); }}
+    h1 {{
+      font-family: Syne, sans-serif;
+      font-size: 1.65rem;
+      letter-spacing: -0.03em;
+      margin: 0 0 0.5rem;
+      color: #fff;
+    }}
+    p {{ margin: 0 0 0.75rem; line-height: 1.5; color: #c5d0dc; }}
+    .mono {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--volt);
+      word-break: break-all;
+    }}
+    dl {{
+      margin: 1rem 0;
+      display: grid;
+      gap: 0.55rem;
+    }}
+    dt {{ font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }}
+    dd {{ margin: 0.15rem 0 0; color: #fff; font-weight: 600; }}
+    a {{ color: var(--volt); }}
+    @keyframes rise {{
+      from {{ opacity: 0; transform: translateY(10px); }}
+      to {{ opacity: 1; transform: none; }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Volt <span>Supply</span> Co.</div>
+    <h1>Checkout started</h1>
+    <p>Catalog checkout is open. LEASH still has to verify, bind a grant, and authorize on the local rail before this can be paid.</p>
+    <dl>
+      <div>
+        <dt>Checkout id</dt>
+        <dd class="mono">{record["checkout_id"]}</dd>
+      </div>
+      <div>
+        <dt>Product</dt>
+        <dd>{product["name"]} · <span class="mono">{product["id"]}</span></dd>
+      </div>
+      <div>
+        <dt>Total</dt>
+        <dd>{price}{recurring} USD · status {record["status"]}</dd>
+      </div>
+    </dl>
+    <p><a href="{back}">← Back to product</a></p>
+  </div>
+</body>
+</html>
+"""
+
+
 def _voltcare_body(price: str, recurring: str) -> str:
   price_note = f"<small>{recurring}</small>" if recurring else "<small>/mo</small>"
   return f"""  <section class="hero" aria-label="Product hero">
@@ -464,7 +605,14 @@ def _voltcare_body(price: str, recurring: str) -> str:
         <li>Accidental damage coverage on eligible gear</li>
         <li>Cancel anytime in account settings</li>
       </ul>
-      <p class="buy">To buy, start a checkout for product <strong>voltcare</strong>, quantity 1.</p>
+      <div class="buy">
+        <strong>Ready to check out</strong>
+        <p style="margin:0.35rem 0 0">Opens a catalog-backed checkout for product <strong>voltcare</strong>, quantity 1 (subscription).</p>
+        <form method="post" action="./voltcare/checkout">
+          <button class="buy-btn" type="submit">Start checkout</button>
+        </form>
+        <p class="buy-hint">Payment still goes through LEASH verify → bind → local rail. This only creates the merchant checkout.</p>
+      </div>
     </section>
     <aside class="panel" style="align-self:stretch">
       <div class="eyebrow" style="margin-bottom:0.5rem">Good to know</div>

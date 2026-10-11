@@ -15,6 +15,7 @@ from authority_errors import AuthorityError, DatabaseUnavailable
 from cards import router as cards_router
 from db import init_db
 from mandate_routes import router as mandate_router
+from payment_routes import router as payment_router
 from provenance_routes import router as provenance_router
 from workflow_control import router as workflow_router
 
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(cards_router)
 app.include_router(mandate_router)
+app.include_router(payment_router)
 app.include_router(activity_router)
 app.include_router(provenance_router)
 app.include_router(workflow_router)

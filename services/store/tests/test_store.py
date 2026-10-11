@@ -34,8 +34,18 @@ class StoreTests(unittest.TestCase):
     body = r.text
     self.assertIn("65W USB-C GaN Laptop Charger", body)
     self.assertIn("Simulated merchant", body)
+    self.assertIn("Start checkout", body)
+    self.assertIn('action="./chg-65w/checkout"', body)
     self.assertNotIn("fulfillmentNote", body)
     self.assertNotIn("application/ld+json", body)
+
+  def test_storefront_start_checkout_without_bearer(self) -> None:
+    r = self.client.post("/products/chg-65w/checkout")
+    self.assertEqual(r.status_code, 200)
+    self.assertIn("text/html", r.headers["content-type"])
+    self.assertIn("Checkout started", r.text)
+    self.assertRegex(r.text, r"ckt_[0-9a-f]{16}")
+    self.assertIn("chg-65w", r.text)
 
   def test_charger_page_evil_query_injects_json_ld(self) -> None:
     with patch.dict("os.environ", {"STORE_EVIL_MODE": "0"}, clear=False):
@@ -76,21 +86,152 @@ class StoreTests(unittest.TestCase):
     self.assertEqual(r.json()["checkout_id"], created["checkout_id"])
     self.assertEqual(r.json()["total_cents"], 2999)
 
-  def test_complete_requires_card_token(self) -> None:
+  def test_complete_without_bind_fails_closed(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
     r = self.client.post(
       f"/api/checkouts/{created['checkout_id']}/complete",
       json={
         "payment_id": "pay_1",
+        "card_token": "ins_local_demo",
         "card": {"number": "4111111111111111", "exp_month": 12, "exp_year": 2030, "cvv": "123"},
       },
     )
-    self.assertEqual(r.status_code, 503)
-    self.assertIn("verified checkout binding", r.json()["detail"])
+    self.assertEqual(r.status_code, 403)
+    self.assertIn("not bound", r.json()["detail"])
 
-  def test_complete_cannot_call_lithic_or_mark_a_checkout_paid(self) -> None:
+  def _bind(
+    self,
+    cid: str,
+    *,
+    payment_id: str = "pay_" + "1" * 32,
+    instrument: str = "ins_local_demo",
+    amount: int = 2999,
+    checkout_hash: str | None = None,
+  ) -> dict:
+    from datetime import datetime, timedelta, timezone
+
+    body = {
+      "payment_id": payment_id,
+      "grant_id": "grt_" + "a" * 32,
+      "instrument_token": instrument,
+      "merchant_binding_id": f"bind_{cid}",
+      "checkout_hash": checkout_hash or ("c" * 64),
+      "authorized_amount_cents": amount,
+      "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
+      .isoformat()
+      .replace("+00:00", "Z"),
+    }
+    r = self.client.post(f"/api/checkouts/{cid}/bind", json=body)
+    self.assertEqual(r.status_code, 200, r.text)
+    return body
+
+  def test_bind_rejects_amount_mismatch(self) -> None:
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    from datetime import datetime, timedelta, timezone
+
+    r = self.client.post(
+      f"/api/checkouts/{created['checkout_id']}/bind",
+      json={
+        "payment_id": "pay_" + "1" * 32,
+        "grant_id": "grt_" + "a" * 32,
+        "instrument_token": "ins_local_demo",
+        "merchant_binding_id": "bind_x",
+        "checkout_hash": "d" * 64,
+        "authorized_amount_cents": 1,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
+        .isoformat()
+        .replace("+00:00", "Z"),
+      },
+    )
+    self.assertEqual(r.status_code, 409)
+
+  def test_bind_and_complete_approve_via_local_rail(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
     cid = created["checkout_id"]
+    binding = self._bind(cid)
+    charge = "charge-token-" + "z" * 32
+
+    class _Resp:
+      status_code = 200
+      content = b'{"result":"APPROVED","rail":"local_payment_rail_simulator"}'
+
+      def json(self):
+        return {"result": "APPROVED", "rail": "local_payment_rail_simulator"}
+
+    with patch.dict(
+      "os.environ",
+      {"WEBHOOK_URL": "http://rail.test", "WEBHOOK_CHARGE_TOKEN": charge},
+      clear=False,
+    ):
+      with patch("main.httpx.Client") as client_cls:
+        post = client_cls.return_value.__enter__.return_value.post
+        post.return_value = _Resp()
+        r = self.client.post(
+          f"/api/checkouts/{cid}/complete",
+          json={"payment_id": binding["payment_id"], "instrument_token": binding["instrument_token"]},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        data = r.json()
+        self.assertEqual(data["status"], "completed")
+        self.assertEqual(data["authorization"]["result"], "APPROVED")
+        self.assertEqual(data["rail"], "local_payment_rail_simulator")
+        post.assert_called_once()
+        args, kwargs = post.call_args
+        self.assertEqual(args[0], "http://rail.test/local/authorize")
+        self.assertEqual(kwargs["headers"]["Authorization"], f"Bearer {charge}")
+        self.assertEqual(kwargs["json"]["checkout_hash"], binding["checkout_hash"])
+        self.assertEqual(kwargs["json"]["merchant_binding_id"], binding["merchant_binding_id"])
+
+  def test_complete_wrong_instrument_declines_without_rail(self) -> None:
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    cid = created["checkout_id"]
+    binding = self._bind(cid)
+    with patch.dict(
+      "os.environ",
+      {"WEBHOOK_URL": "http://rail.test", "WEBHOOK_CHARGE_TOKEN": "c" * 32},
+      clear=False,
+    ):
+      with patch("main.httpx.Client") as client_cls:
+        post = client_cls.return_value.__enter__.return_value.post
+        r = self.client.post(
+          f"/api/checkouts/{cid}/complete",
+          json={"payment_id": binding["payment_id"], "instrument_token": "ins_wrong"},
+        )
+        self.assertEqual(r.status_code, 409)
+        post.assert_not_called()
+    self.assertEqual(self.client.get(f"/api/checkouts/{cid}").json()["status"], "open")
+
+  def test_complete_rail_decline_keeps_checkout_open(self) -> None:
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    cid = created["checkout_id"]
+    binding = self._bind(cid)
+
+    class _Resp:
+      status_code = 200
+      content = b'{"result":"DECLINED","reason":"grant_mismatch"}'
+
+      def json(self):
+        return {"result": "DECLINED", "reason": "grant_mismatch"}
+
+    with patch.dict(
+      "os.environ",
+      {"WEBHOOK_URL": "http://rail.test", "WEBHOOK_CHARGE_TOKEN": "c" * 32},
+      clear=False,
+    ):
+      with patch("main.httpx.Client") as client_cls:
+        client_cls.return_value.__enter__.return_value.post.return_value = _Resp()
+        r = self.client.post(
+          f"/api/checkouts/{cid}/complete",
+          json={"payment_id": binding["payment_id"], "card_token": binding["instrument_token"]},
+        )
+    self.assertEqual(r.status_code, 402, r.text)
+    self.assertEqual(r.json()["status"], "open")
+    self.assertEqual(self.client.get(f"/api/checkouts/{cid}").json()["status"], "open")
+
+  def test_complete_never_logs_pan(self) -> None:
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    cid = created["checkout_id"]
+    binding = self._bind(cid)
 
     class _LogCapture(logging.Handler):
       def __init__(self) -> None:
@@ -100,32 +241,41 @@ class StoreTests(unittest.TestCase):
       def emit(self, record: logging.LogRecord) -> None:
         self.messages.append(self.format(record))
 
+    class _Resp:
+      status_code = 200
+      content = b'{"result":"APPROVED"}'
+
+      def json(self):
+        return {"result": "APPROVED"}
+
     capture = _LogCapture()
     logger = logging.getLogger("leash.store")
     logger.addHandler(capture)
     try:
-      with patch("leash_shared.lithic.simulate_authorization") as sim:
-        sim.return_value = {"token": "txn_demo", "debugging_assertion": "ok"}
-        r = self.client.post(
-          f"/api/checkouts/{cid}/complete",
-          json={
-            "payment_id": "pay_1",
-            "card_token": "card_tok_demo",
-            "card": {
-              "number": "4111111111111111",
-              "exp_month": 12,
-              "exp_year": 2030,
-              "cvv": "042",
+      with patch.dict(
+        "os.environ",
+        {"WEBHOOK_URL": "http://rail.test", "WEBHOOK_CHARGE_TOKEN": "c" * 32},
+        clear=False,
+      ):
+        with patch("main.httpx.Client") as client_cls:
+          client_cls.return_value.__enter__.return_value.post.return_value = _Resp()
+          r = self.client.post(
+            f"/api/checkouts/{cid}/complete",
+            json={
+              "payment_id": binding["payment_id"],
+              "instrument_token": binding["instrument_token"],
+              "card": {
+                "number": "4111111111111111",
+                "exp_month": 12,
+                "exp_year": 2030,
+                "cvv": "042",
+              },
             },
-          },
-        )
-      self.assertEqual(r.status_code, 503, r.text)
-      sim.assert_not_called()
-      self.assertEqual(self.client.get(f"/api/checkouts/{cid}").json()["status"], "open")
+          )
+      self.assertEqual(r.status_code, 200, r.text)
       joined = "\n".join(capture.messages)
       self.assertNotIn("4111111111111111", joined)
       self.assertNotIn("042", joined)
-      self.assertNotIn("card_tok_demo", joined)
     finally:
       logger.removeHandler(capture)
 
@@ -150,10 +300,10 @@ class StoreTests(unittest.TestCase):
 
   def test_checkout_read_and_completion_require_auth(self) -> None:
     cid = self.client.post("/api/checkouts", json={"sku": "CHG-65W"}).json()["checkout_id"]
-    with patch("leash_shared.lithic.simulate_authorization") as simulate:
+    with patch("main.httpx.Client") as client_cls:
       self.assertEqual(self.client.get(f"/api/checkouts/{cid}", headers={"Authorization": "Bearer invalid"}).status_code, 401)
       self.assertEqual(self.client.post(f"/api/checkouts/{cid}/complete", json={"payment_id": "claimed"}, headers={"Authorization": ""}).status_code, 401)
-      simulate.assert_not_called()
+      client_cls.return_value.__enter__.return_value.post.assert_not_called()
 
   def test_same_merchant_price_currency_keeps_actual_sku_constraints(self) -> None:
     charger = self.client.post("/api/checkouts", json={"sku": "CHG-65W"}).json()
