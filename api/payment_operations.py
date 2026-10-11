@@ -101,13 +101,35 @@ def mark_reconciling(conn, payment_id, user_id, *, expected_revision):
 
 
 def persist_observation(conn, operation, checkout, source_facts):
-  assessment = {
-    "status": "observed_unverified", "transport": "configured_authenticated_merchant",
-    "merchant_ownership": "unverified", "merchant_revision": "unverified",
-    "merchant_expiry": "unverified", "checkout_freeze": "unverified",
-    "normalization": "user_id/session_id/revision/expiry are API observation context, not merchant proof",
-    "financial_authority": False,
-  }
+  merchant_proof = (
+    source_facts.get("ownership_authenticated") is True
+    and source_facts.get("frozen") is True
+    and source_facts.get("user_id") == operation["user_id"]
+    and isinstance(source_facts.get("session_id"), str)
+    and isinstance(source_facts.get("revision"), int)
+    and isinstance(source_facts.get("expires_at"), str)
+  )
+  if merchant_proof:
+    assessment = {
+      "status": "merchant_owned_frozen",
+      "transport": "configured_authenticated_merchant",
+      "merchant_ownership": "verified",
+      "merchant_revision": "verified",
+      "merchant_expiry": "verified",
+      "checkout_freeze": "verified",
+      "normalization": "user_id/session_id/revision/expiry/freeze supplied by merchant charge protocol",
+      "financial_authority": False,
+    }
+    evidence_status = "merchant_owned_frozen"
+  else:
+    assessment = {
+      "status": "observed_unverified", "transport": "configured_authenticated_merchant",
+      "merchant_ownership": "unverified", "merchant_revision": "unverified",
+      "merchant_expiry": "unverified", "checkout_freeze": "unverified",
+      "normalization": "user_id/session_id/revision/expiry are API observation context, not merchant proof",
+      "financial_authority": False,
+    }
+    evidence_status = "observed_unverified"
   conn.execute(
     """INSERT INTO checkout_observations
        (payment_id,user_id,run_id,mandate_id,mandate_version,mandate_hash,source_hash,
@@ -119,4 +141,4 @@ def persist_observation(conn, operation, checkout, source_facts):
      Jsonb(assessment), checkout.source.retrieved_at),
   )
   event(conn, operation, "checkout_observed", source_hash=source_facts["facts_hash"],
-        checkout_hash=checkout.checkout_hash, evidence_status="observed_unverified")
+        checkout_hash=checkout.checkout_hash, evidence_status=evidence_status)

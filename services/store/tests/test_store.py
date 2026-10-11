@@ -16,11 +16,17 @@ class StoreTests(unittest.TestCase):
   def setUp(self) -> None:
     reset_checkouts()
     self.token = "isolated-store-credential-" + "a" * 32
-    self.auth = patch.dict("os.environ", {"STORE_API_TOKEN": self.token})
+    self.charge = "isolated-store-charge-token-" + "b" * 32
+    self.auth = patch.dict(
+      "os.environ",
+      {"STORE_API_TOKEN": self.token, "STORE_CHARGE_TOKEN": self.charge},
+    )
     self.auth.start()
     self.addCleanup(self.auth.stop)
     self.client = TestClient(app, headers={"Authorization": "Bearer " + self.token})
+    self.charge_client = TestClient(app, headers={"Authorization": "Bearer " + self.charge})
     self.addCleanup(self.client.close)
+    self.addCleanup(self.charge_client.close)
 
   def test_healthz(self) -> None:
     r = self.client.get("/healthz")
@@ -59,6 +65,21 @@ class StoreTests(unittest.TestCase):
   def test_lab_002_store_service_credential_is_not_operator_authority(self) -> None:
     r = self.client.get("/products/chg-65w?evil=1")
     self.assertEqual(r.status_code, 403)
+
+  def test_attack_lab_internal_preview_requires_distinct_token(self) -> None:
+    lab = "isolated-attack-lab-token-" + "c" * 32
+    with patch.dict("os.environ", {"ATTACK_LAB_TOKEN": lab}, clear=False):
+      denied = self.client.get("/internal/attack-lab/products/chg-65w?evil=1")
+      self.assertEqual(denied.status_code, 401)
+      ok = self.client.get(
+        "/internal/attack-lab/products/chg-65w?evil=1",
+        headers={"Authorization": "Bearer " + lab},
+      )
+      self.assertEqual(ok.status_code, 200)
+      self.assertIn("fulfillmentNote", ok.text)
+      self.assertEqual(ok.headers.get("x-leash-attack-lab"), "1")
+      # Public path remains denied.
+      self.assertEqual(self.client.get("/products/chg-65w?evil=1").status_code, 403)
 
   def test_lab_004_environment_flags_cannot_enable_runtime_attack(self) -> None:
     with patch.dict("os.environ", {
@@ -114,7 +135,7 @@ class StoreTests(unittest.TestCase):
 
   def test_complete_without_bind_fails_closed(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
-    r = self.client.post(
+    r = self.charge_client.post(
       f"/api/checkouts/{created['checkout_id']}/complete",
       json={
         "payment_id": "pay_1",
@@ -124,6 +145,20 @@ class StoreTests(unittest.TestCase):
     )
     self.assertEqual(r.status_code, 403)
     self.assertIn("not bound", r.json()["detail"])
+
+  def _own_and_freeze(self, cid: str, *, user_id: str = "usr_" + "a" * 32) -> dict:
+    owned = self.charge_client.post(
+      f"/api/checkouts/{cid}/own",
+      json={"user_id": user_id, "session_id": f"ses_run_{cid[-8:]}"},
+    )
+    self.assertEqual(owned.status_code, 200, owned.text)
+    frozen = self.charge_client.post(
+      f"/api/checkouts/{cid}/freeze",
+      json={"expected_facts_hash": owned.json()["facts_hash"]},
+    )
+    self.assertEqual(frozen.status_code, 200, frozen.text)
+    self.assertTrue(frozen.json()["ownership_authenticated"])
+    return frozen.json()
 
   def _bind(
     self,
@@ -136,33 +171,99 @@ class StoreTests(unittest.TestCase):
   ) -> dict:
     from datetime import datetime, timedelta, timezone
 
+    trusted = self._own_and_freeze(cid)
     body = {
       "payment_id": payment_id,
       "grant_id": "grt_" + "a" * 32,
       "instrument_token": instrument,
       "merchant_binding_id": f"bind_{cid}",
-      "checkout_hash": checkout_hash or ("c" * 64),
+      "checkout_hash": checkout_hash or trusted["facts_hash"],
       "authorized_amount_cents": amount,
       "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
       .isoformat()
       .replace("+00:00", "Z"),
     }
-    r = self.client.post(f"/api/checkouts/{cid}/bind", json=body)
+    r = self.charge_client.post(f"/api/checkouts/{cid}/bind", json=body)
     self.assertEqual(r.status_code, 200, r.text)
     return body
 
-  def test_bind_rejects_amount_mismatch(self) -> None:
+  def test_create_is_unowned_until_charge_credential_owns(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    self.assertIsNone(created["user_id"])
+    self.assertFalse(created["frozen"])
+    self.assertFalse(created["ownership_authenticated"])
+    self.assertEqual(created["revision"], 1)
+    self.assertIn("expires_at", created)
+
+  def test_own_freeze_and_reject_foreign_owner(self) -> None:
+    cid = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()["checkout_id"]
+    first = self.charge_client.post(
+      f"/api/checkouts/{cid}/own",
+      json={"user_id": "usr_" + "a" * 32, "session_id": "ses_1"},
+    )
+    self.assertEqual(first.status_code, 200)
+    conflict = self.charge_client.post(
+      f"/api/checkouts/{cid}/own",
+      json={"user_id": "usr_" + "b" * 32, "session_id": "ses_2"},
+    )
+    self.assertEqual(conflict.status_code, 409)
+    # Browse credential cannot own/freeze/bind.
+    denied = self.client.post(
+      f"/api/checkouts/{cid}/freeze",
+      json={"expected_facts_hash": first.json()["facts_hash"]},
+    )
+    self.assertEqual(denied.status_code, 401)
+
+  def test_freeze_rejects_facts_tamper_and_bind_requires_matching_hash(self) -> None:
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    cid = created["checkout_id"]
+    self.charge_client.post(
+      f"/api/checkouts/{cid}/own",
+      json={"user_id": "usr_" + "a" * 32, "session_id": "ses_x"},
+    )
+    bad_freeze = self.charge_client.post(
+      f"/api/checkouts/{cid}/freeze",
+      json={"expected_facts_hash": "0" * 64},
+    )
+    self.assertEqual(bad_freeze.status_code, 409)
+    frozen = self.charge_client.post(
+      f"/api/checkouts/{cid}/freeze",
+      json={"expected_facts_hash": created["facts_hash"]},
+    )
+    self.assertEqual(frozen.status_code, 200, frozen.text)
     from datetime import datetime, timedelta, timezone
 
-    r = self.client.post(
-      f"/api/checkouts/{created['checkout_id']}/bind",
+    bad_bind = self.charge_client.post(
+      f"/api/checkouts/{cid}/bind",
       json={
         "payment_id": "pay_" + "1" * 32,
         "grant_id": "grt_" + "a" * 32,
         "instrument_token": "ins_local_demo",
         "merchant_binding_id": "bind_x",
         "checkout_hash": "d" * 64,
+        "authorized_amount_cents": 2999,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
+        .isoformat()
+        .replace("+00:00", "Z"),
+      },
+    )
+    self.assertEqual(bad_bind.status_code, 409)
+    self.assertEqual(frozen.json()["facts_hash"], created["facts_hash"])
+
+  def test_bind_rejects_amount_mismatch(self) -> None:
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    cid = created["checkout_id"]
+    trusted = self._own_and_freeze(cid)
+    from datetime import datetime, timedelta, timezone
+
+    r = self.charge_client.post(
+      f"/api/checkouts/{cid}/bind",
+      json={
+        "payment_id": "pay_" + "1" * 32,
+        "grant_id": "grt_" + "a" * 32,
+        "instrument_token": "ins_local_demo",
+        "merchant_binding_id": "bind_x",
+        "checkout_hash": trusted["facts_hash"],
         "authorized_amount_cents": 1,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10))
         .isoformat()
@@ -171,13 +272,29 @@ class StoreTests(unittest.TestCase):
     )
     self.assertEqual(r.status_code, 409)
 
+  def test_expired_checkout_cannot_freeze_or_bind(self) -> None:
+    from datetime import datetime, timedelta, timezone
+    from main import _CHECKOUTS
+
+    created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
+    cid = created["checkout_id"]
+    _CHECKOUTS[cid]["expires_at"] = (
+      (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+    )
+    own = self.charge_client.post(
+      f"/api/checkouts/{cid}/own",
+      json={"user_id": "usr_" + "a" * 32, "session_id": "ses_exp"},
+    )
+    self.assertEqual(own.status_code, 409)
+    self.assertTrue(self.client.get(f"/api/checkouts/{cid}").json()["expired"])
+
   def test_bound_checkout_cannot_charge_without_durable_controls(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
     cid = created["checkout_id"]
     binding = self._bind(cid)
     with patch.dict("os.environ", {"WEBHOOK_URL": "http://rail.test", "WEBHOOK_CHARGE_TOKEN": "c" * 32}):
       with patch("httpx.Client") as client_cls:
-        result = self.client.post(
+        result = self.charge_client.post(
           f"/api/checkouts/{cid}/complete",
           json={"payment_id": binding["payment_id"], "instrument_token": binding["instrument_token"]},
         )
@@ -187,6 +304,7 @@ class StoreTests(unittest.TestCase):
     observed = self.client.get(f"/api/checkouts/{cid}").json()
     self.assertEqual(observed["status"], "open")
     self.assertIsNone(observed["rail"])
+    self.assertTrue(observed["ownership_authenticated"])
 
   def test_complete_wrong_instrument_declines_without_rail(self) -> None:
     created = self.client.post("/api/checkouts", json={"product_id": "chg-65w"}).json()
@@ -199,7 +317,7 @@ class StoreTests(unittest.TestCase):
     ):
       with patch("httpx.Client") as client_cls:
         post = client_cls.return_value.__enter__.return_value.post
-        r = self.client.post(
+        r = self.charge_client.post(
           f"/api/checkouts/{cid}/complete",
           json={"payment_id": binding["payment_id"], "instrument_token": "ins_wrong"},
         )
@@ -238,7 +356,7 @@ class StoreTests(unittest.TestCase):
       ):
         with patch("httpx.Client") as client_cls:
           client_cls.return_value.__enter__.return_value.post.return_value = _Resp()
-          r = self.client.post(
+          r = self.charge_client.post(
             f"/api/checkouts/{cid}/complete",
             json={
               "payment_id": binding["payment_id"],
@@ -272,16 +390,28 @@ class StoreTests(unittest.TestCase):
 
   def test_missing_or_short_configuration_fails_closed_and_not_ready(self) -> None:
     for value in ("", "short"):
-      with patch.dict("os.environ", {"STORE_API_TOKEN": value}):
+      with patch.dict("os.environ", {"STORE_API_TOKEN": value, "STORE_CHARGE_TOKEN": self.charge}):
         self.assertEqual(self.client.post("/api/checkouts", json={"sku": "CHG-65W"}).status_code, 503)
         self.assertEqual(self.client.get("/readyz").status_code, 503)
         self.assertEqual(self.client.get("/healthz").status_code, 200)
+    with patch.dict("os.environ", {"STORE_API_TOKEN": self.token, "STORE_CHARGE_TOKEN": self.token}):
+      self.assertEqual(self.client.get("/readyz").status_code, 503)
+    with patch.dict("os.environ", {"STORE_API_TOKEN": self.token, "STORE_CHARGE_TOKEN": ""}):
+      self.assertEqual(self.client.get("/readyz").status_code, 503)
 
   def test_checkout_read_and_completion_require_auth(self) -> None:
     cid = self.client.post("/api/checkouts", json={"sku": "CHG-65W"}).json()["checkout_id"]
     with patch("httpx.Client") as client_cls:
       self.assertEqual(self.client.get(f"/api/checkouts/{cid}", headers={"Authorization": "Bearer invalid"}).status_code, 401)
-      self.assertEqual(self.client.post(f"/api/checkouts/{cid}/complete", json={"payment_id": "claimed"}, headers={"Authorization": ""}).status_code, 401)
+      self.assertEqual(
+        self.charge_client.post(f"/api/checkouts/{cid}/complete", json={"payment_id": "claimed"}, headers={"Authorization": ""}).status_code,
+        401,
+      )
+      # Browse token is not charge authority.
+      self.assertEqual(
+        self.client.post(f"/api/checkouts/{cid}/complete", json={"payment_id": "claimed"}).status_code,
+        401,
+      )
       client_cls.return_value.__enter__.return_value.post.assert_not_called()
 
   def test_same_merchant_price_currency_keeps_actual_sku_constraints(self) -> None:
@@ -306,7 +436,10 @@ class StoreTests(unittest.TestCase):
 
   def test_validation_error_does_not_echo_sensitive_card_input(self) -> None:
     cid = self.client.post("/api/checkouts", json={"sku": "CHG-65W"}).json()["checkout_id"]
-    response = self.client.post(f"/api/checkouts/{cid}/complete", json={"payment_id": "claimed", "card": {"exp_month": "4111111111111111", "cvv": "987"}})
+    response = self.charge_client.post(
+      f"/api/checkouts/{cid}/complete",
+      json={"payment_id": "claimed", "card": {"exp_month": "4111111111111111", "cvv": "987"}},
+    )
     self.assertEqual(response.status_code, 422)
     self.assertEqual(response.json(), {"detail": "Invalid store request"})
 

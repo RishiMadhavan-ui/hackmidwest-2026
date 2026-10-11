@@ -5,11 +5,11 @@ HTML. CHG-65W (`chg-65w`) is a USB-C 65W laptop charger; SUB-CARE-MO (`voltcare`
 is a monthly subscription. Both use VOLT SUPPLY CO, MCC 5732, 2999 cents and USD.
 The evil toggle changes listing text only, including JSON-LD and an HTML comment.
 
-**Payment completion is disabled and returns 503.** A caller's payment/card ID
-cannot establish spending authority. No Lithic call or completed/paid projection
-is produced. The former direct simulation call was removed during the authorized
-alignment fixes because checkout/grant correlation and durable payment operations
-do not exist yet. No provider credential belongs in this pod.
+**Payment completion is disabled and returns 503** until durable payment
+reconciliation exists. Create/read use `STORE_API_TOKEN`. Own/freeze/bind/complete
+require a distinct `STORE_CHARGE_TOKEN` (backend only — never MCP). Checkouts carry
+owner/session, revision, 30-minute expiry and freeze so LEASH can prove the verified
+SKU is what bind/charge will use. No provider credential belongs in this pod.
 
 ## Runtime and routes
 
@@ -20,14 +20,16 @@ no public browser proxy. Relative product links work through either origin.
 | Method | Route | Current behavior |
 |---|---|---|
 | GET | `/health[z]` | Liveness; reports process-memory checkout persistence and unavailable completion |
-| GET | `/readyz` | 503 without a store credential of at least 32 characters |
-| GET | `/products/{id}` | Public HTML listing; `?evil=1` or `STORE_EVIL_MODE=1` selects poison |
-| POST | `/api/checkouts` | Authenticated catalog-backed checkout from `{sku, quantity}` or `{product_id, quantity}` |
-| GET | `/api/checkouts/{id}` | Authenticated canonical record read |
-| POST | `/api/checkouts/{id}/complete` | Authenticated 503; no payment side effect |
+| GET | `/readyz` | 503 unless distinct `STORE_API_TOKEN` and `STORE_CHARGE_TOKEN` (≥32 chars each) |
+| GET | `/products/{id}` | Public HTML listing; attack selectors return 403 (execution disabled) |
+| POST | `/api/checkouts` | `STORE_API_TOKEN`; catalog-backed create (unowned until `/own`) |
+| GET | `/api/checkouts/{id}` | `STORE_API_TOKEN`; canonical record including trust fields |
+| POST | `/api/checkouts/{id}/own` | `STORE_CHARGE_TOKEN`; bind user/session once |
+| POST | `/api/checkouts/{id}/freeze` | `STORE_CHARGE_TOKEN`; lock facts_hash after verify |
+| POST | `/api/checkouts/{id}/bind` | `STORE_CHARGE_TOKEN`; requires owned+frozen; hash must match |
+| POST | `/api/checkouts/{id}/complete` | `STORE_CHARGE_TOKEN`; 503 until durable reconciliation |
 
-All `/api/*` calls require `Authorization: Bearer $STORE_API_TOKEN`. Missing or
-short server configuration fails closed; invalid/missing bearer returns 401.
+Missing/short/identical credentials fail closed; wrong bearer returns 401.
 Conflicting SKU/product aliases and invalid quantities return 422. Validation
 errors use a plain `detail` string without echoing card input.
 
